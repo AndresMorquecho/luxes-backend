@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: luxes-backend-dev
+    volumes:
+      - ./src:/app/src
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      JWT_SECRET: ${JWT_SECRET:-luxes-dev-secret-change-me}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      CORS_ORIGIN: http://localhost:5173
+
+  frontend:
+    build:
+      context: ../luxes-frontend
+      dockerfile: Dockerfile.dev
+    container_name: luxes-frontend-dev
+    volumes:
+      - ../luxes-frontend/src:/app/src
+      - ../luxes-frontend/public:/app/public
+      - ../luxes-frontend/index.html:/app/index.html
+      - ../luxes-frontend/vite.config.js:/app/vite.config.js
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:3000
+    depends_on:
+      - backend
