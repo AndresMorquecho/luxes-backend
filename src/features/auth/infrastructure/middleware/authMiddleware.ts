@@ -6,6 +6,7 @@ export interface AuthPayload {
   sub: string;
   rol: string;
   email: string;
+  permissions?: string[];
 }
 
 /**
@@ -33,6 +34,7 @@ export function authMiddleware(req: any, res: Response, next: NextFunction) {
       id: decoded.sub,
       rol: decoded.rol,
       email: decoded.email,
+      permissions: decoded.permissions || [],
     };
 
     return next();

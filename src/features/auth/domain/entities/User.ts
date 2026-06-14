@@ -12,6 +12,7 @@ export class User {
   passwordHash: string;
   fechaCreacion: string;
   ultimoAcceso: string | null;
+  permissions?: string[];
 
   constructor({
     id,
@@ -24,6 +25,7 @@ export class User {
     passwordHash,
     fechaCreacion,
     ultimoAcceso = null,
+    permissions = [],
   }: {
     id: string;
     nombre: string;
@@ -35,6 +37,7 @@ export class User {
     passwordHash: string;
     fechaCreacion: string;
     ultimoAcceso?: string | null;
+    permissions?: string[];
   }) {
     this.id = id;
     this.nombre = nombre;
@@ -46,6 +49,7 @@ export class User {
     this.passwordHash = passwordHash;
     this.fechaCreacion = fechaCreacion;
     this.ultimoAcceso = ultimoAcceso;
+    this.permissions = permissions;
   }
 
   isActive(): boolean {
@@ -63,6 +67,7 @@ export class User {
       estado: this.estado,
       fechaCreacion: this.fechaCreacion,
       ultimoAcceso: this.ultimoAcceso,
+      permissions: this.permissions || [],
     };
   }
 }
