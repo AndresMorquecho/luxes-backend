@@ -11,14 +11,23 @@ services:
       POSTGRES_DB: ${DB_NAME:-luxes_dev}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-luxes} -d ${DB_NAME:-luxes_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   backend:
     build:
       context: .
       dockerfile: Dockerfile.dev
     container_name: luxes-backend-dev
+    restart: unless-stopped
     volumes:
       - ./src:/app/src
+      - ./prisma:/app/prisma
+      - landing_uploads:/app/uploads
     ports:
       - "3000:3000"
     environment:
@@ -29,13 +38,15 @@ services:
       CORS_ORIGIN: http://localhost:5173
       DATABASE_URL: postgresql://${DB_USER:-luxes}:${DB_PASSWORD:-luxes123}@db:5432/${DB_NAME:-luxes_dev}?schema=public
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   frontend:
     build:
       context: ../luxes-frontend
       dockerfile: Dockerfile.dev
     container_name: luxes-frontend-dev
+    restart: unless-stopped
     volumes:
       - ../luxes-frontend/src:/app/src
       - ../luxes-frontend/public:/app/public
@@ -50,4 +61,5 @@ services:
 
 volumes:
   postgres_data:
+  landing_uploads:
 

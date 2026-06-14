@@ -66,3 +66,112 @@ model AuditLog {
 
   @@map("audit_logs")
 }
+
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("site_settings")
+}
+
+model Empleado {
+  id              String           @id
+  nombre          String
+  cedula          String           @unique
+  cargo           String           @default("")
+  departamento    String           @default("")
+  telefono        String           @default("")
+  correo          String           @default("")
+  cuentaBanco     String           @default("") @map("cuenta_banco")
+  banco           String           @default("")
+  tipoContrato    String           @default("Fijo") @map("tipo_contrato")
+  sueldoDiario    Decimal          @default(0) @map("sueldo_diario") @db.Decimal(10, 2)
+  direccion       String           @default("")
+  foto            String?          @db.Text
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  asistencias     Asistencia[]
+  vacaciones      Vacacion[]
+  horasExtras     HoraExtra[]
+  nominaRegistros NominaRegistro[]
+  documentos      EmpleadoDocumento[]
+
+  @@map("empleados")
+}
+
+model EmpleadoDocumento {
+  id         String   @id @default(uuid())
+  empleadoId String   @map("empleado_id")
+  empleado   Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  tipo       String
+  nombre     String
+  archivoUrl String   @map("archivo_url")
+  mimeType   String   @default("") @map("mime_type")
+  tamano     Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([empleadoId, tipo])
+  @@map("empleado_documentos")
+}
+
+model Asistencia {
+  id           String   @id @default(uuid())
+  empleadoId   String   @map("empleado_id")
+  empleado     Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  tipo         String
+  label        String
+  fechaHora    DateTime @map("fecha_hora")
+  ubicacionLat Float?   @map("ubicacion_lat")
+  ubicacionLng Float?   @map("ubicacion_lng")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([empleadoId, fechaHora])
+  @@map("asistencias")
+}
+
+model Vacacion {
+  id          String   @id @default(uuid())
+  empleadoId  String   @map("empleado_id")
+  empleado    Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  anio        Int
+  diasTomados Json     @default("[]") @map("dias_tomados")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([empleadoId, anio])
+  @@map("vacaciones")
+}
+
+model HoraExtra {
+  id             String   @id @default(uuid())
+  fecha          DateTime @db.Date
+  colaboradorId  String   @map("colaborador_id")
+  empleado       Empleado @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+  horas          Decimal  @db.Decimal(8, 2)
+  detalleHorario String   @default("") @map("detalle_horario")
+  descripcion    String   @default("")
+  valorPorHora   Decimal  @default(2.5) @map("valor_por_hora") @db.Decimal(10, 2)
+  total          Decimal  @db.Decimal(10, 2)
+
+  @@index([colaboradorId, fecha])
+  @@map("horas_extras")
+}
+
+model NominaRegistro {
+  id             String   @id @default(uuid())
+  empleadoId     String   @map("empleado_id")
+  empleado       Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  fechaInicio    DateTime @map("fecha_inicio") @db.Date
+  fechaFin       DateTime @map("fecha_fin") @db.Date
+  diasLaborables Int      @default(30) @map("dias_laborables")
+  diasLaborados  Int      @default(30) @map("dias_laborados")
+  permisoHoras   Decimal  @default(0) @map("permiso_horas") @db.Decimal(8, 2)
+  ingresos       Json     @default("{}")
+  egresos        Json     @default("{}")
+  abonos         Json     @default("[]")
+  estado         String   @default("PENDIENTE")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([empleadoId, fechaInicio, fechaFin])
+  @@map("nomina_registros")
+}
