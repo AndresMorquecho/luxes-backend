@@ -21,6 +21,7 @@ export function authMiddleware(req, res, next) {
             id: decoded.sub,
             rol: decoded.rol,
             email: decoded.email,
+            permissions: decoded.permissions || [],
         };
         return next();
     }

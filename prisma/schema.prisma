@@ -8,18 +8,24 @@ generator client {
 }
 
 model User {
-  id            String     @id @default(uuid())
-  nombre        String
-  email         String     @unique
-  username      String     @unique
-  rol           String     @default("visor")
-  roleId        String?    @map("role_id")
-  role          Role?      @relation(fields: [roleId], references: [id], onDelete: SetNull)
-  estado        String     @default("activo")
-  passwordHash  String     @map("password_hash")
-  fechaCreacion DateTime   @default(now()) @map("fecha_creacion")
-  ultimoAcceso  DateTime?  @map("ultimo_acceso")
-  auditLogs     AuditLog[]
+  id                  String        @id @default(uuid())
+  nombre              String
+  email               String        @unique
+  username            String        @unique
+  rol                 String        @default("visor")
+  roleId              String?       @map("role_id")
+  role                Role?         @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  estado              String        @default("activo")
+  passwordHash        String        @map("password_hash")
+  fechaCreacion       DateTime      @default(now()) @map("fecha_creacion")
+  ultimoAcceso        DateTime?     @map("ultimo_acceso")
+  auditLogs           AuditLog[]
+  prestamos           Prestamo[]
+  ordenesCompra       OrdenCompra[]
+  ordenesAprobadas    OrdenCompra[] @relation("OrdenAprobada")
+  pushSubscriptions   PushSubscription[]
+  tareasCreadas       Tarea[]           @relation("TareasCreadas")
+  tareasAsignadas     TareaAsignacion[] @relation("TareasAsignadas")
 
   @@map("users")
 }
@@ -67,111 +73,213 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-model SiteSetting {
-  key       String   @id
-  value     Json
-  updatedAt DateTime @updatedAt @map("updated_at")
+model Material {
+  id            String                 @id @default(uuid())
+  nombre        String
+  tipo          String                 // "consumible" o "herramienta"
+  unidadMedidaId String?               @map("unidad_medida_id")
+  unidadMedida  UnidadMedida?          @relation(fields: [unidadMedidaId], references: [id], onDelete: SetNull)
+  stockActual   Float                  @default(0) @map("stock_actual")
+  stockMinimo   Float                  @default(0) @map("stock_minimo")
+  precioCosto   Float                  @default(0) @map("precio_costo")
+  fechaCreacion DateTime               @default(now()) @map("fecha_creacion")
+  codigo        String?
+  marca         String?
+  modelo        String?
+  serie         String?
+  categoria     String?                @default("Taller") // "Taller" o "Oficina"
+  estadoUso     String?                @default("BODEGA") @map("estado_uso") // "BODEGA", "EN USO", "NO SIRVE", "EN REPARACION"
+  aCargo        String?                @map("a_cargo")
+  movimientos   MovimientoInventario[]
+  prestamos     Prestamo[]
+  detallesCompra DetalleCompra[]
 
-  @@map("site_settings")
+  @@map("materiales")
 }
 
-model Empleado {
-  id              String           @id
-  nombre          String
-  cedula          String           @unique
-  cargo           String           @default("")
-  departamento    String           @default("")
-  telefono        String           @default("")
-  correo          String           @default("")
-  cuentaBanco     String           @default("") @map("cuenta_banco")
-  banco           String           @default("")
-  tipoContrato    String           @default("Fijo") @map("tipo_contrato")
-  sueldoDiario    Decimal          @default(0) @map("sueldo_diario") @db.Decimal(10, 2)
-  direccion       String           @default("")
-  foto            String?          @db.Text
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
-  asistencias     Asistencia[]
-  vacaciones      Vacacion[]
-  horasExtras     HoraExtra[]
-  nominaRegistros NominaRegistro[]
-  documentos      EmpleadoDocumento[]
+model UnidadMedida {
+  id          String     @id @default(uuid())
+  nombre      String     @unique
+  abreviacion String?
+  materiales  Material[]
 
-  @@map("empleados")
+  @@map("unidades_medida")
 }
 
-model EmpleadoDocumento {
+model MovimientoInventario {
   id         String   @id @default(uuid())
-  empleadoId String   @map("empleado_id")
-  empleado   Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
-  tipo       String
-  nombre     String
-  archivoUrl String   @map("archivo_url")
-  mimeType   String   @default("") @map("mime_type")
-  tamano     Int      @default(0)
-  createdAt  DateTime @default(now()) @map("created_at")
+  materialId String   @map("material_id")
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  tipo       String   // "entrada" o "salida"
+  cantidad   Float
+  motivo     String
+  fecha      DateTime @default(now())
+  userId     String?  @map("user_id")
 
-  @@index([empleadoId, tipo])
-  @@map("empleado_documentos")
+  @@map("movimientos_inventario")
 }
 
-model Asistencia {
-  id           String   @id @default(uuid())
-  empleadoId   String   @map("empleado_id")
-  empleado     Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
-  tipo         String
-  label        String
-  fechaHora    DateTime @map("fecha_hora")
-  ubicacionLat Float?   @map("ubicacion_lat")
-  ubicacionLng Float?   @map("ubicacion_lng")
-  createdAt    DateTime @default(now()) @map("created_at")
+model Prestamo {
+  id            String    @id @default(uuid())
+  materialId    String    @map("material_id")
+  material      Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  responsableId String    @map("responsable_id")
+  responsable   User      @relation(fields: [responsableId], references: [id], onDelete: Cascade)
+  cantidad      Float     @default(1)
+  fechaSalida   DateTime  @default(now()) @map("fecha_salida")
+  fechaRetorno  DateTime? @map("fecha_retorno")
+  comentarios   String?
+  estado        String    @default("prestado") // "prestado" o "devuelto"
 
-  @@index([empleadoId, fechaHora])
-  @@map("asistencias")
+  @@map("prestamos")
 }
 
-model Vacacion {
-  id          String   @id @default(uuid())
-  empleadoId  String   @map("empleado_id")
-  empleado    Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
-  anio        Int
-  diasTomados Json     @default("[]") @map("dias_tomados")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+// ── Módulo de Compras ─────────────────────────────────────────────────────────
 
-  @@unique([empleadoId, anio])
-  @@map("vacaciones")
+model Proveedor {
+  id            String        @id @default(uuid())
+  nombre        String
+  ruc           String?       @unique
+  tipo          String        @default("Empresa") // "Persona" | "Empresa"
+  direccion     String?
+  telefono      String?
+  email         String?
+  contacto      String?
+  notas         String?
+  estado        String        @default("activo")
+  fechaCreacion DateTime      @default(now()) @map("fecha_creacion")
+  ordenes       OrdenCompra[]
+
+  @@map("proveedores")
 }
 
-model HoraExtra {
-  id             String   @id @default(uuid())
-  fecha          DateTime @db.Date
-  colaboradorId  String   @map("colaborador_id")
-  empleado       Empleado @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
-  horas          Decimal  @db.Decimal(8, 2)
-  detalleHorario String   @default("") @map("detalle_horario")
-  descripcion    String   @default("")
-  valorPorHora   Decimal  @default(2.5) @map("valor_por_hora") @db.Decimal(10, 2)
-  total          Decimal  @db.Decimal(10, 2)
+model MetodoPago {
+  id          String        @id @default(uuid())
+  nombre      String        @unique
+  descripcion String?
+  activo      Boolean       @default(true)
+  abonos      AbonoCompra[]
 
-  @@index([colaboradorId, fecha])
-  @@map("horas_extras")
+  @@map("metodos_pago")
 }
 
-model NominaRegistro {
-  id             String   @id @default(uuid())
-  empleadoId     String   @map("empleado_id")
-  empleado       Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
-  fechaInicio    DateTime @map("fecha_inicio") @db.Date
-  fechaFin       DateTime @map("fecha_fin") @db.Date
-  diasLaborables Int      @default(30) @map("dias_laborables")
-  diasLaborados  Int      @default(30) @map("dias_laborados")
-  permisoHoras   Decimal  @default(0) @map("permiso_horas") @db.Decimal(8, 2)
-  ingresos       Json     @default("{}")
-  egresos        Json     @default("{}")
-  abonos         Json     @default("[]")
-  estado         String   @default("PENDIENTE")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+model OrdenCompra {
+  id                String          @id @default(uuid())
+  numero            String          @unique
+  proveedorId       String          @map("proveedor_id")
+  proveedor         Proveedor       @relation(fields: [proveedorId], references: [id])
+  usuarioId         String          @map("usuario_id")
+  usuario           User            @relation(fields: [usuarioId], references: [id])
+  fecha             DateTime        @default(now())
+  subtotal          Float           @default(0)
+  impuesto          Float           @default(0)
+  total             Float           @default(0)
+  estado            String          @default("pendiente_aprobacion")
+  estadoPago        String          @default("sin_pagar") @map("estado_pago")
+  concepto          String?
+  notas             String?
+  fechaCreacion     DateTime        @default(now()) @map("fecha_creacion")
+  fechaAprobacion   DateTime?       @map("fecha_aprobacion")
+  aprobadoPorId     String?         @map("aprobado_por_id")
+  aprobadoPor       User?           @relation("OrdenAprobada", fields: [aprobadoPorId], references: [id], onDelete: SetNull)
+  detalles          DetalleCompra[]
+  abonos            AbonoCompra[]
+  cuentaPorPagar    CuentaPorPagar?
 
-  @@unique([empleadoId, fechaInicio, fechaFin])
-  @@map("nomina_registros")
+  @@map("ordenes_compra")
+}
+
+model DetalleCompra {
+  id              String       @id @default(uuid())
+  ordenCompraId   String       @map("orden_compra_id")
+  ordenCompra     OrdenCompra  @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+  materialId      String?      @map("material_id")
+  material        Material?    @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  descripcion     String
+  cantidad        Float
+  precioUnitario  Float        @map("precio_unitario")
+  subtotal        Float        @default(0)
+
+  @@map("detalles_compra")
+}
+
+model AbonoCompra {
+  id              String       @id @default(uuid())
+  ordenCompraId   String       @map("orden_compra_id")
+  ordenCompra     OrdenCompra  @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+  metodoPagoId    String       @map("metodo_pago_id")
+  metodoPago      MetodoPago   @relation(fields: [metodoPagoId], references: [id])
+  monto           Float
+  fecha           DateTime     @default(now())
+  referencia      String?
+
+  @@map("abonos_compra")
+}
+
+model CuentaPorPagar {
+  id                String       @id @default(uuid())
+  ordenCompraId     String       @unique @map("orden_compra_id")
+  ordenCompra       OrdenCompra  @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+  montoTotal        Float        @map("monto_total")
+  montoPagado       Float        @default(0) @map("monto_pagado")
+  saldo             Float        @default(0)
+  fechaVencimiento  DateTime?    @map("fecha_vencimiento")
+  estado            String       @default("pendiente")
+
+  @@map("cuentas_por_pagar")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  title     String
+  message   String
+  isRead    Boolean  @default(false) @map("is_read")
+  rol       String?
+  permission String?
+  userId    String?  @map("user_id")
+  createdBy String?  @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("fecha_creacion")
+
+  @@map("push_subscriptions")
+}
+
+// ── Módulo de Tareas ──────────────────────────────────────────────────────────
+
+model Tarea {
+  id                 String            @id @default(uuid())
+  titulo             String
+  descripcion        String?
+  prioridad          String            @default("media") // "alta", "media", "baja"
+  estado             String            @default("pendiente") // "pendiente", "en_progreso", "completada", "cancelada"
+  fechaLimite        DateTime?         @map("fecha_limite")
+  creadoPorId        String            @map("creado_por_id")
+  creadoPor          User              @relation("TareasCreadas", fields: [creadoPorId], references: [id])
+  fechaCreacion      DateTime          @default(now()) @map("fecha_creacion")
+  fechaActualizacion DateTime?         @map("fecha_actualizacion")
+  asignaciones       TareaAsignacion[]
+
+  @@map("tareas")
+}
+
+model TareaAsignacion {
+  id      String @id @default(uuid())
+  tareaId String @map("tarea_id")
+  tarea   Tarea  @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  userId  String @map("user_id")
+  user    User   @relation("TareasAsignadas", fields: [userId], references: [id])
+
+  @@unique([tareaId, userId])
+  @@map("tareas_asignaciones")
 }

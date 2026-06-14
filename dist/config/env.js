@@ -11,4 +11,7 @@ export const env = {
     jwtSecret: process.env.JWT_SECRET || 'luxes-dev-secret-change-me',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
     corsOrigin: parseCorsOrigins(process.env.CORS_ORIGIN),
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
+    vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
+    vapidEmail: process.env.VAPID_EMAIL || 'mailto:admin@luxes.com',
 };

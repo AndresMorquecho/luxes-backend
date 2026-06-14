@@ -24,6 +24,7 @@ export async function loginUser({ username, password }, { userRepository, passwo
         sub: user.id,
         rol: user.rol,
         email: user.email,
+        permissions: user.permissions || [],
     });
     return {
         token,

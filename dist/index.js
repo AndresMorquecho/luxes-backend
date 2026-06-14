@@ -2,6 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import { env } from './config/env.js';
 import { createAuthModule } from './features/auth/infrastructure/composition/authContainer.js';
+import { createInventarioModule } from './features/inventario/infrastructure/composition/inventarioContainer.js';
+import { createComprasModule } from './features/compras/infrastructure/composition/comprasContainer.js';
+import { createNotificationsModule } from './features/notifications/infrastructure/composition/notificationsContainer.js';
+import { createTareasModule } from './features/tareas/infrastructure/composition/tareasContainer.js';
 async function bootstrap() {
     const app = express();
     app.use(cors({ origin: env.corsOrigin }));
@@ -19,6 +23,14 @@ async function bootstrap() {
     });
     const { authRoutes } = await createAuthModule();
     app.use('/api/auth', authRoutes);
+    const { inventarioRoutes } = await createInventarioModule();
+    app.use('/api/inventario', inventarioRoutes);
+    const { comprasRoutes } = await createComprasModule();
+    app.use('/api/compras', comprasRoutes);
+    const { notificationsRoutes } = await createNotificationsModule();
+    app.use('/api/notifications', notificationsRoutes);
+    const { tareasRoutes } = await createTareasModule();
+    app.use('/api/tareas', tareasRoutes);
     app.use((_req, res) => {
         res.status(404).json({
             success: false,

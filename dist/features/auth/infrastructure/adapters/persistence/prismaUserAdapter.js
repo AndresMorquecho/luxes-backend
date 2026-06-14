@@ -6,6 +6,17 @@ import { prisma } from '../../../../../config/prismaClient.js';
  * Implementa el puerto UserRepositoryPort.
  */
 export class PrismaUserAdapter extends UserRepositoryPort {
+    userInclude = {
+        role: {
+            include: {
+                permissions: {
+                    include: {
+                        permission: true,
+                    },
+                },
+            },
+        },
+    };
     async findByUsernameOrEmail(identifier) {
         const normalized = identifier.toLowerCase();
         const dbUser = await prisma.user.findFirst({
@@ -15,9 +26,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                     { username: { equals: normalized, mode: 'insensitive' } },
                 ],
             },
-            include: {
-                role: true,
-            },
+            include: this.userInclude,
         });
         if (!dbUser)
             return null;
@@ -32,6 +41,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             passwordHash: dbUser.passwordHash,
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
+            permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
         });
     }
     async findByUsername(username) {
@@ -40,9 +50,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             where: {
                 username: { equals: normalized, mode: 'insensitive' },
             },
-            include: {
-                role: true,
-            },
+            include: this.userInclude,
         });
         if (!dbUser)
             return null;
@@ -57,14 +65,13 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             passwordHash: dbUser.passwordHash,
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
+            permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
         });
     }
     async findById(id) {
         const dbUser = await prisma.user.findUnique({
             where: { id },
-            include: {
-                role: true,
-            },
+            include: this.userInclude,
         });
         if (!dbUser)
             return null;
@@ -79,6 +86,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             passwordHash: dbUser.passwordHash,
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
+            permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
         });
     }
     async create(user) {
@@ -93,9 +101,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 estado: user.estado,
                 passwordHash: user.passwordHash,
             },
-            include: {
-                role: true,
-            },
+            include: this.userInclude,
         });
         return new User({
             id: dbUser.id,
@@ -108,13 +114,12 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             passwordHash: dbUser.passwordHash,
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
+            permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
         });
     }
     async findAll() {
         const dbUsers = await prisma.user.findMany({
-            include: {
-                role: true,
-            },
+            include: this.userInclude,
             orderBy: {
                 fechaCreacion: 'desc',
             },
@@ -131,6 +136,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 passwordHash: dbUser.passwordHash,
                 fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
                 ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
+                permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
             });
         });
     }
@@ -147,9 +153,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 passwordHash: user.passwordHash,
                 ultimoAcceso: user.ultimoAcceso ? new Date(user.ultimoAcceso) : null,
             },
-            include: {
-                role: true,
-            },
+            include: this.userInclude,
         });
         return new User({
             id: dbUser.id,
@@ -162,6 +166,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             passwordHash: dbUser.passwordHash,
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
+            permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
         });
     }
     async delete(id) {

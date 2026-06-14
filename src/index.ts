@@ -1,17 +1,17 @@
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
 import { env } from './config/env.js';
 import { createAuthModule } from './features/auth/infrastructure/composition/authContainer.js';
-import { createLandingRoutes } from './features/landing/infrastructure/routes/landingRoutes.js';
-import { createEmpleadosModule } from './features/empleados/infrastructure/composition/empleadosContainer.js';
-import { createNominaModule } from './features/nomina/infrastructure/composition/nominaContainer.js';
+import { createInventarioModule } from './features/inventario/infrastructure/composition/inventarioContainer.js';
+import { createComprasModule } from './features/compras/infrastructure/composition/comprasContainer.js';
+import { createNotificationsModule } from './features/notifications/infrastructure/composition/notificationsContainer.js';
+import { createTareasModule } from './features/tareas/infrastructure/composition/tareasContainer.js';
 
 async function bootstrap() {
   const app = express();
 
   app.use(cors({ origin: env.corsOrigin }));
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json());
 
   // Middleware para registrar las peticiones HTTP (ocultando contraseñas)
   app.use((req, _res, next) => {
@@ -27,27 +27,18 @@ async function bootstrap() {
 
   const { authRoutes } = await createAuthModule();
   app.use('/api/auth', authRoutes);
-  app.use('/api/landing', createLandingRoutes());
 
-  const { empleadosRoutes } = await createEmpleadosModule();
-  app.use('/api/empleados', empleadosRoutes);
+  const { inventarioRoutes } = await createInventarioModule();
+  app.use('/api/inventario', inventarioRoutes);
 
-  const { nominaRoutes } = await createNominaModule();
-  app.use('/api/nomina', nominaRoutes);
-  app.use('/uploads', express.static(path.resolve('uploads')));
+  const { comprasRoutes } = await createComprasModule();
+  app.use('/api/compras', comprasRoutes);
 
-  app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if (err && typeof err === 'object' && 'type' in err && err.type === 'entity.too.large') {
-      return res.status(413).json({
-        success: false,
-        error: {
-          code: 'PAYLOAD_TOO_LARGE',
-          message: 'Los datos enviados son demasiado grandes (máx. 10 MB)',
-        },
-      });
-    }
-    next(err);
-  });
+  const { notificationsRoutes } = await createNotificationsModule();
+  app.use('/api/notifications', notificationsRoutes);
+
+  const { tareasRoutes } = await createTareasModule();
+  app.use('/api/tareas', tareasRoutes);
 
   app.use((_req, res) => {
     res.status(404).json({
