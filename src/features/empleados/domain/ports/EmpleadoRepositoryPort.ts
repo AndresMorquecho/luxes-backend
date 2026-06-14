@@ -7,6 +7,8 @@ export type EmpleadoInput = {
   departamento?: string;
   telefono?: string;
   correo?: string;
+  contraseña?: string;
+  passwordHash?: string;
   cuentaBanco?: string;
   banco?: string;
   tipoContrato?: string;

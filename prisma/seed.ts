@@ -390,6 +390,322 @@ async function main() {
     await prisma.metodoPago.create({ data: mp });
   }
 
+  // 8. Sembrar Colaboradores y Asistencias
+  console.log('Sembrando colaboradores y asistencias...');
+  const empleadoPasswordHash = await bcrypt.hash('123456', 10);
+
+  const empleadosData = [
+    {
+      id: 'EMP-001',
+      nombre: 'Test User',
+      cedula: '0912345678',
+      cargo: 'Operador',
+      departamento: 'Operaciones',
+      telefono: '0991111111',
+      correo: 'test.user@luxes.com',
+      cuentaBanco: '2200123456',
+      banco: 'Banco Pichincha',
+      tipoContrato: 'Fijo',
+      sueldoDiario: 25,
+      direccion: 'Guayaquil, Ecuador',
+    },
+    {
+      id: 'EMP-002',
+      nombre: 'Jhonatan Abrigo',
+      cedula: '0923456789',
+      cargo: 'Diseñador',
+      departamento: 'Diseño',
+      telefono: '0992222222',
+      correo: 'jhonatan.abrigo@luxes.com',
+      cuentaBanco: '2200654321',
+      banco: 'Banco Guayaquil',
+      tipoContrato: 'Fijo',
+      sueldoDiario: 28,
+      direccion: 'Guayaquil, Ecuador',
+    },
+  ];
+
+  for (const emp of empleadosData) {
+    await prisma.empleado.upsert({
+      where: { id: emp.id },
+      update: {
+        nombre: emp.nombre,
+        cargo: emp.cargo,
+        departamento: emp.departamento,
+        telefono: emp.telefono,
+        correo: emp.correo,
+        cuentaBanco: emp.cuentaBanco,
+        banco: emp.banco,
+        tipoContrato: emp.tipoContrato,
+        sueldoDiario: emp.sueldoDiario,
+        direccion: emp.direccion,
+        passwordHash: empleadoPasswordHash,
+      },
+      create: { ...emp, passwordHash: empleadoPasswordHash },
+    });
+  }
+
+  const hoy = new Date();
+  const inicioHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0, 0);
+  const finHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59, 999);
+
+  await prisma.asistencia.deleteMany({
+    where: {
+      empleadoId: { in: empleadosData.map((e) => e.id) },
+      fechaHora: { gte: inicioHoy, lte: finHoy },
+    },
+  });
+
+  const marcacionesDemo = [
+    {
+      empleadoId: 'EMP-002',
+      tipo: 'ENTRADA',
+      label: 'Entrada',
+      fechaHora: new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 8, 5, 0, 0),
+      ubicacionLat: -2.19616,
+      ubicacionLng: -79.88621,
+    },
+    {
+      empleadoId: 'EMP-002',
+      tipo: 'INICIO_ALMUERZO',
+      label: 'Inicio Almuerzo',
+      fechaHora: new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 12, 30, 0, 0),
+      ubicacionLat: -2.19616,
+      ubicacionLng: -79.88621,
+    },
+  ];
+
+  for (const marc of marcacionesDemo) {
+    await prisma.asistencia.create({ data: marc });
+  }
+
+  // 9. Sembrar Vacaciones
+  console.log('Sembrando vacaciones...');
+  const anioActual = hoy.getFullYear();
+  const anioAnterior = anioActual - 1;
+
+  const vacacionesSeed = [
+    {
+      empleadoId: 'EMP-001',
+      anio: anioAnterior,
+      diasTomados: [`${anioAnterior}-12-10`, `${anioAnterior}-12-11`, `${anioAnterior}-12-12`],
+    },
+    {
+      empleadoId: 'EMP-002',
+      anio: anioAnterior,
+      diasTomados: [`${anioAnterior}-11-03`, `${anioAnterior}-11-04`],
+    },
+    {
+      empleadoId: 'EMP-001',
+      anio: anioActual,
+      diasTomados: [`${anioActual}-01-15`, `${anioActual}-01-16`],
+    },
+    {
+      empleadoId: 'EMP-002',
+      anio: anioActual,
+      diasTomados: [`${anioActual}-03-20`],
+    },
+  ];
+
+  for (const vac of vacacionesSeed) {
+    await prisma.vacacion.upsert({
+      where: {
+        empleadoId_anio: {
+          empleadoId: vac.empleadoId,
+          anio: vac.anio,
+        },
+      },
+      create: {
+        empleadoId: vac.empleadoId,
+        anio: vac.anio,
+        diasTomados: vac.diasTomados,
+      },
+      update: {
+        diasTomados: vac.diasTomados,
+      },
+    });
+  }
+
+  // 10. Sembrar Nómina del mes (quincenas actuales)
+  console.log('Sembrando nómina del mes...');
+  const mes = hoy.getMonth() + 1;
+  const mesStr = String(mes).padStart(2, '0');
+  const anioStr = String(anioActual);
+  const ultimoDiaMes = new Date(anioActual, mes, 0).getDate();
+
+  const periodosNomina = [
+    { fechaInicio: `${anioStr}-${mesStr}-01`, fechaFin: `${anioStr}-${mesStr}-15`, dias: 15 },
+    { fechaInicio: `${anioStr}-${mesStr}-16`, fechaFin: `${anioStr}-${mesStr}-${String(ultimoDiaMes).padStart(2, '0')}`, dias: ultimoDiaMes - 15 },
+  ];
+
+  const defaultIngresosNomina = {
+    decimoCuarto: 40.17,
+    decimoTercero: 0,
+    horasExtras: 0,
+    trabajosEnEmpresa: 0,
+    fondosReserva: 0,
+  };
+
+  const defaultEgresosNomina = {
+    iess: 0,
+    extensionConyuge: 0,
+    prestamoQuirografario: 0,
+    anticipos: 0,
+    dctoHorasNoLaboradas: 0,
+    multas: 0,
+    dctoFiesta: 0,
+    dctoHerramientas: 0,
+    dctoGenerico: 0,
+  };
+
+  for (const periodo of periodosNomina) {
+    for (const emp of empleadosData) {
+      const esPrimeraQuincena = periodo.fechaFin.endsWith('-15');
+      const esEmp002 = emp.id === 'EMP-002';
+      const abonos =
+        esPrimeraQuincena && esEmp002
+          ? [{ monto: 300, fecha: `${anioStr}-${mesStr}-15` }]
+          : [];
+      const estado = esPrimeraQuincena && esEmp002 ? 'ABONO_PARCIAL' : 'PENDIENTE';
+
+      await prisma.nominaRegistro.upsert({
+        where: {
+          empleadoId_fechaInicio_fechaFin: {
+            empleadoId: emp.id,
+            fechaInicio: new Date(`${periodo.fechaInicio}T00:00:00.000Z`),
+            fechaFin: new Date(`${periodo.fechaFin}T00:00:00.000Z`),
+          },
+        },
+        create: {
+          empleadoId: emp.id,
+          fechaInicio: new Date(`${periodo.fechaInicio}T00:00:00.000Z`),
+          fechaFin: new Date(`${periodo.fechaFin}T00:00:00.000Z`),
+          diasLaborables: periodo.dias,
+          diasLaborados: periodo.dias,
+          ingresos: defaultIngresosNomina,
+          egresos: defaultEgresosNomina,
+          abonos,
+          estado,
+        },
+        update: {
+          diasLaborables: periodo.dias,
+          diasLaborados: periodo.dias,
+          abonos,
+          estado,
+        },
+      });
+    }
+  }
+
+  console.log('Sembrando clientes y proformas...');
+  const clientesSeed = [
+    {
+      id: 'CLI-001',
+      nombre: 'Corporación Lojana S.A.',
+      cedulaRuc: '1790012345001',
+      telefono: '0991234567',
+      email: 'info@corporacionlojana.com',
+      direccion: 'Av. Amazonas N32-456, Quito',
+      tipo: 'Empresa',
+      notas: 'Cliente corporativo, pago a 30 días',
+    },
+    {
+      id: 'CLI-002',
+      nombre: 'María Fernanda Torres',
+      cedulaRuc: '0912345678',
+      telefono: '0987654321',
+      email: 'maria.torres@gmail.com',
+      direccion: 'Cdla. Kennedy Norte, Guayaquil',
+      tipo: 'Persona',
+      notas: '',
+    },
+    {
+      id: 'CLI-003',
+      nombre: 'Distribuidora del Pacífico',
+      cedulaRuc: '1790023456001',
+      telefono: '042345678',
+      email: 'ventas@distpacifico.com',
+      direccion: 'Av. 9 de Octubre 1204, Guayaquil',
+      tipo: 'Empresa',
+      notas: '',
+    },
+  ];
+
+  for (const cliente of clientesSeed) {
+    await prisma.cliente.upsert({
+      where: { id: cliente.id },
+      update: cliente,
+      create: cliente,
+    });
+  }
+
+  const proformasSeed = [
+    {
+      id: 'PRO-001',
+      clienteId: 'CLI-003',
+      clienteNombre: 'Distribuidora XYZ',
+      telefono: '0991234567',
+      email: 'info@distxyz.com',
+      fecha: new Date('2026-06-01T12:00:00.000Z'),
+      vencimiento: new Date('2026-07-01T12:00:00.000Z'),
+      iva: 0.12,
+      notas: 'Entrega a acordar',
+      estado: 'Pendiente',
+      items: [
+        { descripcion: 'Camisetas personalizadas', cantidad: 50, precioUnitario: 12.5, orden: 0 },
+        { descripcion: 'Gorras bordadas', cantidad: 30, precioUnitario: 8, orden: 1 },
+      ],
+    },
+    {
+      id: 'PRO-002',
+      clienteId: 'CLI-001',
+      clienteNombre: 'Corporación ABC',
+      telefono: '0987654321',
+      email: 'ventas@corpabc.com',
+      fecha: new Date('2026-06-03T12:00:00.000Z'),
+      vencimiento: new Date('2026-07-03T12:00:00.000Z'),
+      iva: 0.12,
+      notas: '',
+      estado: 'Aprobada',
+      items: [{ descripcion: 'Servicio de diseño gráfico', cantidad: 1, precioUnitario: 450, orden: 0 }],
+    },
+    {
+      id: 'PRO-003',
+      clienteId: 'CLI-002',
+      clienteNombre: 'Comercial López',
+      telefono: '0976543210',
+      email: 'comercial.lopez@gmail.com',
+      fecha: new Date('2026-06-05T12:00:00.000Z'),
+      vencimiento: new Date('2026-07-05T12:00:00.000Z'),
+      iva: 0.12,
+      notas: 'Descuento por volumen aplicado del 5%',
+      estado: 'Rechazada',
+      items: [
+        { descripcion: 'Lotes de esferos publicitarios', cantidad: 100, precioUnitario: 1.5, orden: 0 },
+        { descripcion: 'Cuadernos institucionales', cantidad: 200, precioUnitario: 3.25, orden: 1 },
+        { descripcion: 'Stickers personalizados', cantidad: 500, precioUnitario: 0.45, orden: 2 },
+      ],
+    },
+  ];
+
+  for (const proforma of proformasSeed) {
+    const { items, ...data } = proforma;
+    await prisma.proforma.upsert({
+      where: { id: proforma.id },
+      update: {
+        ...data,
+        items: {
+          deleteMany: {},
+          create: items,
+        },
+      },
+      create: {
+        ...data,
+        items: { create: items },
+      },
+    });
+  }
+
   console.log('Sembrado finalizado exitosamente.');
 }
 

@@ -195,10 +195,12 @@ export function createNominaController(nominaService: NominaService): NominaCont
         const data = await nominaService.saveNomina(body);
         return res.status(200).json({ success: true, data });
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error al guardar nómina';
+        const status = message.includes('no encontrado') ? 400 : 500;
         console.error('[nominas/save]', error);
-        return res.status(500).json({
+        return res.status(status).json({
           success: false,
-          error: { code: 'INTERNAL_ERROR', message: 'Error al guardar nómina' },
+          error: { code: status === 400 ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR', message },
         });
       }
     },

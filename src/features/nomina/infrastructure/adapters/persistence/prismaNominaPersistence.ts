@@ -130,15 +130,37 @@ export class PrismaNominaPersistence {
   }
 
   async listVacaciones(anio: number) {
+    const anios = [anio, anio - 1];
+    const empleados = await prisma.empleado.findMany({ orderBy: { id: 'asc' } });
+
+    for (const year of anios) {
+      for (const empleado of empleados) {
+        await prisma.vacacion.upsert({
+          where: {
+            empleadoId_anio: {
+              empleadoId: empleado.id,
+              anio: year,
+            },
+          },
+          create: {
+            empleadoId: empleado.id,
+            anio: year,
+            diasTomados: [],
+          },
+          update: {},
+        });
+      }
+    }
+
     const records = await prisma.vacacion.findMany({
-      where: { anio },
-      orderBy: { empleadoId: 'asc' },
+      where: { anio: { in: anios } },
+      orderBy: [{ anio: 'asc' }, { empleadoId: 'asc' }],
     });
 
     return records.map((record: (typeof records)[number]) => ({
       empleadoId: record.empleadoId,
       anio: record.anio,
-      diasTomados: Array.isArray(record.diasTomados) ? record.diasTomados : [],
+      diasTomados: Array.isArray(record.diasTomados) ? (record.diasTomados as string[]) : [],
     }));
   }
 
@@ -271,37 +293,38 @@ export class PrismaNominaPersistence {
   async listNominas(fechaInicio: string, fechaFin: string) {
     const inicio = toDateOnly(fechaInicio);
     const fin = toDateOnly(fechaFin);
+    const diffDias = Math.floor((fin.getTime() - inicio.getTime()) / 86400000) + 1;
 
-    let records = await prisma.nominaRegistro.findMany({
-      where: { fechaInicio: inicio, fechaFin: fin },
-      orderBy: { empleadoId: 'asc' },
-    });
+    const empleados = await prisma.empleado.findMany({ orderBy: { id: 'asc' } });
 
-    if (records.length === 0) {
-      const empleados = await prisma.empleado.findMany({ orderBy: { id: 'asc' } });
-      const diffDias = Math.floor((fin.getTime() - inicio.getTime()) / 86400000) + 1;
-
-      for (const empleado of empleados) {
-        await prisma.nominaRegistro.create({
-          data: {
+    for (const empleado of empleados) {
+      await prisma.nominaRegistro.upsert({
+        where: {
+          empleadoId_fechaInicio_fechaFin: {
             empleadoId: empleado.id,
             fechaInicio: inicio,
             fechaFin: fin,
-            diasLaborables: diffDias,
-            diasLaborados: diffDias,
-            ingresos: defaultIngresos(),
-            egresos: defaultEgresos(),
-            abonos: [],
-            estado: 'PENDIENTE',
           },
-        });
-      }
-
-      records = await prisma.nominaRegistro.findMany({
-        where: { fechaInicio: inicio, fechaFin: fin },
-        orderBy: { empleadoId: 'asc' },
+        },
+        create: {
+          empleadoId: empleado.id,
+          fechaInicio: inicio,
+          fechaFin: fin,
+          diasLaborables: diffDias,
+          diasLaborados: diffDias,
+          ingresos: defaultIngresos(),
+          egresos: defaultEgresos(),
+          abonos: [],
+          estado: 'PENDIENTE',
+        },
+        update: {},
       });
     }
+
+    const records = await prisma.nominaRegistro.findMany({
+      where: { fechaInicio: inicio, fechaFin: fin },
+      orderBy: { empleadoId: 'asc' },
+    });
 
     return records.map((record: (typeof records)[number]) => this.mapNomina(record));
   }
@@ -318,6 +341,11 @@ export class PrismaNominaPersistence {
     abonos?: Array<{ monto: number; fecha: string }>;
     estado?: string;
   }) {
+    const empleado = await prisma.empleado.findUnique({ where: { id: input.empleadoId } });
+    if (!empleado) {
+      throw new Error('Empleado no encontrado');
+    }
+
     const inicio = toDateOnly(input.fechaInicio);
     const fin = toDateOnly(input.fechaFin);
 

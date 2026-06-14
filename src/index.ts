@@ -6,6 +6,10 @@ import { createInventarioModule } from './features/inventario/infrastructure/com
 import { createComprasModule } from './features/compras/infrastructure/composition/comprasContainer.js';
 import { createNotificationsModule } from './features/notifications/infrastructure/composition/notificationsContainer.js';
 import { createTareasModule } from './features/tareas/infrastructure/composition/tareasContainer.js';
+import { createEmpleadosModule } from './features/empleados/infrastructure/composition/empleadosContainer.js';
+import { createNominaModule } from './features/nomina/infrastructure/composition/nominaContainer.js';
+import { createProformasModule } from './features/proformas/infrastructure/composition/proformasContainer.js';
+import { createClientesModule } from './features/clientes/infrastructure/composition/clientesContainer.js';
 
 async function bootstrap() {
   const app = express();
@@ -39,6 +43,18 @@ async function bootstrap() {
 
   const { tareasRoutes } = await createTareasModule();
   app.use('/api/tareas', tareasRoutes);
+
+  const { empleadosRoutes } = await createEmpleadosModule();
+  app.use('/api/empleados', empleadosRoutes);
+
+  const { nominaRoutes } = await createNominaModule();
+  app.use('/api/nomina', nominaRoutes); // vacaciones, nominas, horas-extras
+
+  const { proformasRoutes } = await createProformasModule();
+  app.use('/api', proformasRoutes); // proformas
+
+  const { clientesRoutes } = await createClientesModule();
+  app.use('/api/clientes', clientesRoutes);
 
   app.use((_req, res) => {
     res.status(404).json({

@@ -3,11 +3,15 @@ import { Empleado } from '../../domain/entities/Empleado.js';
 import { EmpleadoDocumento } from '../../domain/entities/EmpleadoDocumento.js';
 import { PrismaEmpleadoDocumentoAdapter } from '../../infrastructure/adapters/persistence/prismaEmpleadoDocumentoAdapter.js';
 import { EmpleadoDocumentoTipo } from '../../domain/entities/EmpleadoDocumento.js';
+import { BcryptPasswordAdapter } from '../../../auth/infrastructure/adapters/security/bcryptPasswordAdapter.js';
+
+const DEFAULT_PASSWORD = '123456';
 
 export class EmpleadoService {
   constructor(
     private readonly empleadoRepository: EmpleadoRepositoryPort,
-    private readonly documentoRepository = new PrismaEmpleadoDocumentoAdapter()
+    private readonly documentoRepository = new PrismaEmpleadoDocumentoAdapter(),
+    private readonly passwordHasher = new BcryptPasswordAdapter(),
   ) {}
 
   listEmpleados(): Promise<Empleado[]> {
@@ -27,7 +31,8 @@ export class EmpleadoService {
     }
 
     const id = await this.empleadoRepository.generateNextId();
-    return this.empleadoRepository.create(id, data);
+    const passwordHash = await this.passwordHasher.hash(data.contraseña?.trim() || DEFAULT_PASSWORD);
+    return this.empleadoRepository.create(id, { ...data, passwordHash });
   }
 
   async updateEmpleado(id: string, data: EmpleadoInput): Promise<Empleado> {
@@ -43,7 +48,12 @@ export class EmpleadoService {
       throw new Error('Ya existe otro empleado con esa cédula');
     }
 
-    return this.empleadoRepository.update(id, data);
+    const updateData: EmpleadoInput = { ...data };
+    if (data.contraseña?.trim()) {
+      updateData.passwordHash = await this.passwordHasher.hash(data.contraseña.trim());
+    }
+
+    return this.empleadoRepository.update(id, updateData);
   }
 
   async deleteEmpleado(id: string): Promise<void> {

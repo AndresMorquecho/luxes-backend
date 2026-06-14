@@ -283,3 +283,157 @@ model TareaAsignacion {
   @@unique([tareaId, userId])
   @@map("tareas_asignaciones")
 }
+
+// ── Módulo de Empleados / Nómina ─────────────────────────────────────────────
+
+model Empleado {
+  id           String             @id
+  nombre       String
+  cedula       String             @unique
+  cargo        String             @default("")
+  departamento String             @default("")
+  telefono     String             @default("")
+  correo       String             @default("")
+  cuentaBanco  String             @default("") @map("cuenta_banco")
+  banco        String             @default("")
+  tipoContrato String             @default("Fijo") @map("tipo_contrato")
+  sueldoDiario Decimal            @default(0) @map("sueldo_diario") @db.Decimal(10, 2)
+  direccion    String             @default("")
+  foto         String?
+  passwordHash String             @default("") @map("password_hash")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  documentos   EmpleadoDocumento[]
+  asistencias  Asistencia[]
+  vacaciones   Vacacion[]
+  horasExtras  HoraExtra[]
+  nominas      NominaRegistro[]
+
+  @@map("empleados")
+}
+
+model EmpleadoDocumento {
+  id         String   @id @default(uuid())
+  empleadoId String   @map("empleado_id")
+  empleado   Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  tipo       String
+  nombre     String
+  archivoUrl String   @map("archivo_url")
+  mimeType   String   @default("") @map("mime_type")
+  tamano     Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([empleadoId, tipo])
+  @@map("empleado_documentos")
+}
+
+model Asistencia {
+  id            String   @id @default(uuid())
+  empleadoId    String   @map("empleado_id")
+  empleado      Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  tipo          String
+  label         String
+  fechaHora     DateTime @map("fecha_hora")
+  ubicacionLat  Float?   @map("ubicacion_lat")
+  ubicacionLng  Float?   @map("ubicacion_lng")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([empleadoId, fechaHora])
+  @@map("asistencias")
+}
+
+model Vacacion {
+  id          String   @id @default(uuid())
+  empleadoId  String   @map("empleado_id")
+  empleado    Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  anio        Int
+  diasTomados Json     @default("[]") @map("dias_tomados")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([empleadoId, anio])
+  @@map("vacaciones")
+}
+
+model HoraExtra {
+  id              String   @id @default(uuid())
+  fecha           DateTime @db.Date
+  colaboradorId   String   @map("colaborador_id")
+  colaborador     Empleado @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+  horas           Decimal  @db.Decimal(8, 2)
+  detalleHorario  String   @default("") @map("detalle_horario")
+  descripcion     String   @default("")
+  valorPorHora    Decimal  @default(2.5) @map("valor_por_hora") @db.Decimal(10, 2)
+  total           Decimal  @db.Decimal(10, 2)
+
+  @@index([colaboradorId, fecha])
+  @@map("horas_extras")
+}
+
+model NominaRegistro {
+  id             String   @id @default(uuid())
+  empleadoId     String   @map("empleado_id")
+  empleado       Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  fechaInicio    DateTime @map("fecha_inicio") @db.Date
+  fechaFin       DateTime @map("fecha_fin") @db.Date
+  diasLaborables Int      @default(30) @map("dias_laborables")
+  diasLaborados  Int      @default(30) @map("dias_laborados")
+  permisoHoras   Decimal  @default(0) @map("permiso_horas") @db.Decimal(8, 2)
+  ingresos       Json     @default("{}")
+  egresos        Json     @default("{}")
+  abonos         Json     @default("[]")
+  estado         String   @default("PENDIENTE")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([empleadoId, fechaInicio, fechaFin])
+  @@map("nomina_registros")
+}
+
+// ── Módulo de Clientes y Proformas ───────────────────────────────────────────
+
+model Cliente {
+  id        String     @id
+  nombre    String
+  cedulaRuc String     @default("") @map("cedula_ruc")
+  telefono  String     @default("")
+  email     String     @default("")
+  direccion String     @default("")
+  tipo      String     @default("Persona")
+  notas     String     @default("")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  proformas Proforma[]
+
+  @@map("clientes")
+}
+
+model Proforma {
+  id            String         @id
+  clienteId     String?        @map("cliente_id")
+  cliente       Cliente?       @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  clienteNombre String         @map("cliente_nombre")
+  telefono      String         @default("")
+  email         String         @default("")
+  fecha         DateTime       @db.Date
+  vencimiento   DateTime?      @db.Date
+  iva           Decimal        @default(0.12) @db.Decimal(6, 4)
+  notas         String         @default("")
+  estado        String         @default("Pendiente")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  items         ProformaItem[]
+
+  @@map("proformas")
+}
+
+model ProformaItem {
+  id             String   @id @default(uuid())
+  proformaId     String   @map("proforma_id")
+  proforma       Proforma @relation(fields: [proformaId], references: [id], onDelete: Cascade)
+  descripcion    String
+  cantidad       Decimal  @db.Decimal(12, 2)
+  precioUnitario Decimal  @map("precio_unitario") @db.Decimal(12, 2)
+  orden          Int      @default(0)
+
+  @@index([proformaId])
+  @@map("proforma_items")
+}

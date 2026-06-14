@@ -34,20 +34,28 @@ const mapRecord = (record: {
     foto: record.foto,
   });
 
-const toDbData = (data: EmpleadoInput) => ({
-  nombre: data.nombre,
-  cedula: data.cedula,
-  cargo: data.cargo ?? '',
-  departamento: data.departamento ?? '',
-  telefono: data.telefono ?? '',
-  correo: data.correo ?? '',
-  cuentaBanco: data.cuentaBanco ?? '',
-  banco: data.banco ?? '',
-  tipoContrato: data.tipoContrato ?? 'Fijo',
-  sueldoDiario: data.sueldoDiario ?? 0,
-  direccion: data.direccion ?? '',
-  foto: data.foto || null,
-});
+const toDbData = (data: EmpleadoInput) => {
+  const record: Record<string, unknown> = {
+    nombre: data.nombre,
+    cedula: data.cedula,
+    cargo: data.cargo ?? '',
+    departamento: data.departamento ?? '',
+    telefono: data.telefono ?? '',
+    correo: data.correo ?? '',
+    cuentaBanco: data.cuentaBanco ?? '',
+    banco: data.banco ?? '',
+    tipoContrato: data.tipoContrato ?? 'Fijo',
+    sueldoDiario: data.sueldoDiario ?? 0,
+    direccion: data.direccion ?? '',
+    foto: data.foto || null,
+  };
+
+  if (data.passwordHash) {
+    record.passwordHash = data.passwordHash;
+  }
+
+  return record;
+};
 
 export class PrismaEmpleadoAdapter extends EmpleadoRepositoryPort {
   async findAll(): Promise<Empleado[]> {

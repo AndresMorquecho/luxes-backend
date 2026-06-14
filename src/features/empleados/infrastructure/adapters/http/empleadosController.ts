@@ -22,6 +22,7 @@ const parseBody = (body: Record<string, unknown>): EmpleadoInput => ({
   departamento: String(body.departamento ?? ''),
   telefono: String(body.telefono ?? ''),
   correo: String(body.correo ?? ''),
+  contraseña: body.contraseña ? String(body.contraseña) : undefined,
   cuentaBanco: String(body.cuentaBanco ?? ''),
   banco: String(body.banco ?? ''),
   tipoContrato: String(body.tipoContrato ?? 'Fijo'),
