@@ -437,3 +437,57 @@ model ProformaItem {
   @@index([proformaId])
   @@map("proforma_items")
 }
+
+// ── Módulo de Gastos ───────────────────────────────────────────────────────────
+
+model Gasto {
+  id        String   @id
+  concepto  String
+  categoria String   @default("oficina")
+  fecha     DateTime @db.Date
+  monto     Decimal  @db.Decimal(12, 2)
+  proveedor String   @default("")
+  notas     String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("gastos")
+}
+
+model Vehiculo {
+  id             String                  @id
+  placa          String                  @unique
+  marca          String                  @default("")
+  modelo         String                  @default("")
+  anio           Int?
+  color          String                  @default("")
+  kilometraje    Int                     @default(0)
+  responsable    String                  @default("")
+  notas          String                  @default("")
+  estado         String                  @default("activo")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  mantenimientos VehiculoMantenimiento[]
+
+  @@map("vehiculos")
+}
+
+model VehiculoMantenimiento {
+  id             String    @id @default(uuid())
+  vehiculoId     String    @map("vehiculo_id")
+  vehiculo       Vehiculo  @relation(fields: [vehiculoId], references: [id], onDelete: Cascade)
+  tipo           String
+  descripcion    String    @default("")
+  fechaRealizado DateTime  @map("fecha_realizado") @db.Date
+  fechaProxima   DateTime? @map("fecha_proxima") @db.Date
+  kilometraje    Int?
+  kmProximo      Int?      @map("km_proximo")
+  monto          Decimal   @default(0) @db.Decimal(12, 2)
+  proveedor      String    @default("")
+  notas          String    @default("")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([vehiculoId, fechaRealizado])
+  @@map("vehiculo_mantenimientos")
+}

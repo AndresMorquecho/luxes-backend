@@ -10,6 +10,7 @@ import { createEmpleadosModule } from './features/empleados/infrastructure/compo
 import { createNominaModule } from './features/nomina/infrastructure/composition/nominaContainer.js';
 import { createProformasModule } from './features/proformas/infrastructure/composition/proformasContainer.js';
 import { createClientesModule } from './features/clientes/infrastructure/composition/clientesContainer.js';
+import { createGastosModule } from './features/gastos/infrastructure/composition/gastosContainer.js';
 
 async function bootstrap() {
   const app = express();
@@ -55,6 +56,9 @@ async function bootstrap() {
 
   const { clientesRoutes } = await createClientesModule();
   app.use('/api/clientes', clientesRoutes);
+
+  const { gastosRoutes } = await createGastosModule();
+  app.use('/api/gastos', gastosRoutes);
 
   app.use((_req, res) => {
     res.status(404).json({

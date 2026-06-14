@@ -706,6 +706,42 @@ async function main() {
     });
   }
 
+  console.log('Sembrando gastos y vehículos...');
+  const gastosSeed = [
+    { id: 'GTO-001', concepto: 'Papelería y útiles de oficina', categoria: 'oficina', fecha: new Date('2026-05-03T12:00:00.000Z'), monto: 125.5, proveedor: 'Importadora del Sur S.A.', notas: '' },
+    { id: 'GTO-002', concepto: 'Mantenimiento de equipos', categoria: 'mantenimiento', fecha: new Date('2026-05-08T12:00:00.000Z'), monto: 340, proveedor: 'Tecnología Andina Cía. Ltda.', notas: 'Impresoras y scanner' },
+    { id: 'GTO-003', concepto: 'Servicio de internet', categoria: 'servicios', fecha: new Date('2026-05-15T12:00:00.000Z'), monto: 89.9, proveedor: 'NetPlus', notas: 'Plan corporativo mayo' },
+    { id: 'GTO-004', concepto: 'Transporte de materiales', categoria: 'logistica', fecha: new Date('2026-05-20T12:00:00.000Z'), monto: 210, proveedor: 'Carlos Mendoza', notas: '' },
+  ];
+  for (const g of gastosSeed) {
+    await prisma.gasto.upsert({ where: { id: g.id }, update: g, create: g });
+  }
+
+  const vehiculosSeed = [
+    { id: 'VEH-001', placa: 'PBX-1234', marca: 'Chevrolet', modelo: 'D-Max', anio: 2022, color: 'Blanco', kilometraje: 45200, responsable: 'Carlos Mendoza', notas: 'Camioneta de reparto', estado: 'activo' },
+    { id: 'VEH-002', placa: 'GYE-5678', marca: 'Kia', modelo: 'Sportage', anio: 2021, color: 'Gris', kilometraje: 31800, responsable: 'Ana Torres', notas: 'Vehículo administrativo', estado: 'activo' },
+  ];
+  for (const v of vehiculosSeed) {
+    await prisma.vehiculo.upsert({ where: { id: v.id }, update: v, create: v });
+  }
+
+  const mantSeed = [
+    { vehiculoId: 'VEH-001', tipo: 'cambio_aceite', descripcion: 'Cambio aceite 5W-30 sintético', fechaRealizado: new Date('2026-03-10T12:00:00.000Z'), fechaProxima: new Date('2026-09-10T12:00:00.000Z'), kilometraje: 42000, kmProximo: 52000, monto: 85, proveedor: 'Lubricentro Express', notas: 'Incluye filtro de aceite' },
+    { vehiculoId: 'VEH-001', tipo: 'filtro_aire', descripcion: 'Filtro de aire motor', fechaRealizado: new Date('2026-03-10T12:00:00.000Z'), fechaProxima: new Date('2027-03-10T12:00:00.000Z'), kilometraje: 42000, kmProximo: 62000, monto: 25, proveedor: 'Lubricentro Express', notas: '' },
+    { vehiculoId: 'VEH-001', tipo: 'soat', descripcion: 'SOAT anual', fechaRealizado: new Date('2026-01-15T12:00:00.000Z'), fechaProxima: new Date('2027-01-15T12:00:00.000Z'), kilometraje: 38000, kmProximo: null, monto: 45, proveedor: 'Seguros Equinoccial', notas: '' },
+    { vehiculoId: 'VEH-002', tipo: 'cambio_aceite', descripcion: 'Cambio aceite y revisión', fechaRealizado: new Date('2026-04-20T12:00:00.000Z'), fechaProxima: new Date('2026-10-20T12:00:00.000Z'), kilometraje: 30000, kmProximo: 40000, monto: 72, proveedor: 'Kia Service Center', notas: '' },
+    { vehiculoId: 'VEH-002', tipo: 'llantas', descripcion: 'Rotación de llantas', fechaRealizado: new Date('2026-02-01T12:00:00.000Z'), fechaProxima: new Date('2026-08-01T12:00:00.000Z'), kilometraje: 28500, kmProximo: 38500, monto: 30, proveedor: 'Neumáticos del Pacífico', notas: '' },
+    { vehiculoId: 'VEH-002', tipo: 'revision_tecnica', descripcion: 'Revisión técnica vehicular', fechaRealizado: new Date('2025-11-05T12:00:00.000Z'), fechaProxima: new Date('2026-11-05T12:00:00.000Z'), kilometraje: 25000, kmProximo: null, monto: 18, proveedor: 'CNT', notas: 'Vence pronto' },
+  ];
+  for (const m of mantSeed) {
+    const existing = await prisma.vehiculoMantenimiento.findFirst({
+      where: { vehiculoId: m.vehiculoId, tipo: m.tipo, fechaRealizado: m.fechaRealizado },
+    });
+    if (!existing) {
+      await prisma.vehiculoMantenimiento.create({ data: m });
+    }
+  }
+
   console.log('Sembrado finalizado exitosamente.');
 }
 
