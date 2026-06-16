@@ -1,15 +1,18 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { env } from './config/env.js';
 import { createAuthModule } from './features/auth/infrastructure/composition/authContainer.js';
 import { createInventarioModule } from './features/inventario/infrastructure/composition/inventarioContainer.js';
 import { createComprasModule } from './features/compras/infrastructure/composition/comprasContainer.js';
 import { createNotificationsModule } from './features/notifications/infrastructure/composition/notificationsContainer.js';
 import { createTareasModule } from './features/tareas/infrastructure/composition/tareasContainer.js';
+import { createEmpleadosModule } from './features/empleados/infrastructure/composition/empleadosContainer.js';
 async function bootstrap() {
     const app = express();
     app.use(cors({ origin: env.corsOrigin }));
-    app.use(express.json());
+    app.use(express.json({ limit: '10mb' }));
+    app.use('/uploads', express.static(path.resolve('uploads')));
     // Middleware para registrar las peticiones HTTP (ocultando contraseñas)
     app.use((req, _res, next) => {
         const cleanBody = req.body ? { ...req.body } : {};
@@ -31,6 +34,8 @@ async function bootstrap() {
     app.use('/api/notifications', notificationsRoutes);
     const { tareasRoutes } = await createTareasModule();
     app.use('/api/tareas', tareasRoutes);
+    const { empleadosRoutes } = await createEmpleadosModule();
+    app.use('/api/empleados', empleadosRoutes);
     app.use((_req, res) => {
         res.status(404).json({
             success: false,

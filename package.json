@@ -5,9 +5,13 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "postinstall": "prisma generate",
+    "dev": "tsx watch src/index.ts",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:setup": "prisma migrate deploy && tsx prisma/seed.ts"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +23,7 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.1",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
@@ -26,6 +31,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.1.0",
     "@types/node": "^25.9.3",
     "@types/web-push": "^3.6.4",
     "prisma": "^6.19.3",
