@@ -16,7 +16,11 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     const { unidadMedida, ...rest } = row;
     return {
       ...rest,
-      unidadMedida: row.unidadMedida?.nombre || 'unidades',
+      unidadMedida: row.unidadMedida ? {
+        id: row.unidadMedida.id,
+        nombre: row.unidadMedida.nombre,
+        abreviacion: row.unidadMedida.abreviacion
+      } : { nombre: 'unidades', abreviacion: 'unid' },
     } as unknown as MaterialData;
   }
 
@@ -83,11 +87,12 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     const { unidadMedida, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
-    if (!unidadMedidaId && unidadMedida) {
+    const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
+    if (!unidadMedidaId && unitName) {
       const unit = await this.prisma.unidadMedida.upsert({
-        where: { nombre: unidadMedida },
+        where: { nombre: unitName },
         update: {},
-        create: { nombre: unidadMedida }
+        create: { nombre: unitName }
       });
       unidadMedidaId = unit.id;
     }
@@ -106,11 +111,12 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     const { unidadMedida, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
-    if (!unidadMedidaId && unidadMedida) {
+    const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
+    if (!unidadMedidaId && unitName) {
       const unit = await this.prisma.unidadMedida.upsert({
-        where: { nombre: unidadMedida },
+        where: { nombre: unitName },
         update: {},
-        create: { nombre: unidadMedida }
+        create: { nombre: unitName }
       });
       unidadMedidaId = unit.id;
     }

@@ -35,6 +35,7 @@ export class PrismaComprasAdapter {
         detalles: true,
         abonos: { include: { metodoPago: true }, orderBy: { fecha: 'desc' } },
         cuentaPorPagar: true,
+        proyecto: { select: { id: true, nombre: true } },
     };
     async findAllOrdenes(options) {
         const { page = 1, limit = 10, search, estado, estadoPago } = options || {};
@@ -93,47 +94,60 @@ export class PrismaComprasAdapter {
     }
     async createOrden(data) {
         const numero = await this.getNextOrdenNumero();
-        // Calculate totals
-        const detallesData = data.detalles.map(d => ({
+        // Mapear detalles - PRECIOS OPCIONALES
+        const detallesData = (data.detalles || []).map(d => ({
             descripcion: d.descripcion,
             cantidad: d.cantidad,
-            precioUnitario: d.precioUnitario,
-            subtotal: d.cantidad * d.precioUnitario,
+            precioUnitario: d.precioUnitario ?? 0, // Default 0 si no se proporciona
+            subtotal: d.cantidad * (d.precioUnitario ?? 0),
             materialId: d.materialId || null,
         }));
         const subtotal = detallesData.reduce((sum, d) => sum + d.subtotal, 0);
         const impuesto = data.impuesto || 0;
         const total = subtotal + impuesto;
-        const row = await this.prisma.ordenCompra.create({
-            data: {
-                numero,
-                proveedor: { connect: { id: data.proveedorId } },
-                usuario: { connect: { id: data.usuarioId } },
-                fecha: data.fecha ? new Date(data.fecha) : new Date(),
-                subtotal,
-                impuesto,
-                total,
-                concepto: data.concepto,
-                notas: data.notas,
-                detalles: {
-                    create: detallesData.map(d => ({
-                        descripcion: d.descripcion,
-                        cantidad: d.cantidad,
-                        precioUnitario: d.precioUnitario,
-                        subtotal: d.subtotal,
-                        materialId: d.materialId,
-                    })),
-                },
-                cuentaPorPagar: {
-                    create: {
-                        montoTotal: total,
-                        montoPagado: 0,
-                        saldo: total,
-                        estado: 'pendiente',
-                        fechaVencimiento: data.fechaVencimiento ? new Date(data.fechaVencimiento) : null,
-                    },
-                },
+        // Construir data object - PROVEEDOR OPCIONAL
+        const createData = {
+            numero,
+            usuario: { connect: { id: data.usuarioId } },
+            fecha: data.fecha ? new Date(data.fecha) : new Date(),
+            subtotal,
+            impuesto,
+            total,
+            concepto: data.concepto || '',
+            notas: data.notas || '',
+            estado: 'pendiente_aprobacion', // Estado inicial
+            detalles: {
+                create: detallesData.map(d => ({
+                    descripcion: d.descripcion,
+                    cantidad: d.cantidad,
+                    precioUnitario: d.precioUnitario,
+                    subtotal: d.subtotal,
+                    materialId: d.materialId,
+                })),
             },
+        };
+        // Solo agregar proyecto si se proporciona
+        if (data.proyectoId) {
+            createData.proyecto = { connect: { id: data.proyectoId } };
+        }
+        // Solo agregar proveedor si se proporciona Y no es vacío
+        if (data.proveedorId && data.proveedorId.trim() !== '') {
+            createData.proveedor = { connect: { id: data.proveedorId } };
+        }
+        // Solo crear cuenta por pagar si hay valores
+        if (total > 0) {
+            createData.cuentaPorPagar = {
+                create: {
+                    montoTotal: total,
+                    montoPagado: 0,
+                    saldo: total,
+                    estado: 'pendiente',
+                    fechaVencimiento: data.fechaVencimiento ? new Date(data.fechaVencimiento) : null,
+                },
+            };
+        }
+        const row = await this.prisma.ordenCompra.create({
+            data: createData,
             include: this.ordenInclude,
         });
         // Generate notification for administrators
@@ -210,8 +224,10 @@ export class PrismaComprasAdapter {
     }
     async updateOrden(id, data) {
         const updateData = {};
-        if (data.proveedorId)
+        // Solo actualizar proveedor si se proporciona Y no es vacío
+        if (data.proveedorId && data.proveedorId.trim() !== '') {
             updateData.proveedor = { connect: { id: data.proveedorId } };
+        }
         if (data.fecha)
             updateData.fecha = new Date(data.fecha);
         if (data.estado) {
@@ -221,11 +237,23 @@ export class PrismaComprasAdapter {
                 updateData.fechaAprobacion = new Date();
                 updateData.aprobadoPor = { connect: { id: data.aprobadoPorId } };
             }
+            // Si se está rechazando también poner fecha
+            if (data.estado === 'rechazada') {
+                updateData.fechaAprobacion = new Date();
+            }
         }
         if (data.concepto !== undefined)
             updateData.concepto = data.concepto;
         if (data.notas !== undefined)
             updateData.notas = data.notas;
+        if (data.proyectoId !== undefined) {
+            if (data.proyectoId) {
+                updateData.proyecto = { connect: { id: data.proyectoId } };
+            }
+            else {
+                updateData.proyecto = { disconnect: true };
+            }
+        }
         if (data.detalles) {
             // Recalculate totals
             const detallesData = data.detalles.map(d => ({
@@ -252,19 +280,32 @@ export class PrismaComprasAdapter {
                     ...(d.materialId ? { materialId: d.materialId } : {}),
                 })),
             };
-            // Update CxP total
+            // Update or create CxP
             const cxp = await this.prisma.cuentaPorPagar.findUnique({
                 where: { ordenCompraId: id },
             });
-            if (cxp) {
-                await this.prisma.cuentaPorPagar.update({
-                    where: { id: cxp.id },
-                    data: {
-                        montoTotal: total,
-                        saldo: total - cxp.montoPagado,
-                        estado: cxp.montoPagado >= total ? 'pagado' : cxp.montoPagado > 0 ? 'parcial' : 'pendiente',
-                    },
-                });
+            if (total > 0) {
+                if (cxp) {
+                    await this.prisma.cuentaPorPagar.update({
+                        where: { id: cxp.id },
+                        data: {
+                            montoTotal: total,
+                            saldo: total - cxp.montoPagado,
+                            estado: cxp.montoPagado >= total ? 'pagado' : cxp.montoPagado > 0 ? 'parcial' : 'pendiente',
+                        },
+                    });
+                }
+                else {
+                    // Crear cuenta por pagar si no existe
+                    updateData.cuentaPorPagar = {
+                        create: {
+                            montoTotal: total,
+                            montoPagado: 0,
+                            saldo: total,
+                            estado: 'pendiente',
+                        },
+                    };
+                }
             }
         }
         else if (data.impuesto !== undefined) {
@@ -282,6 +323,79 @@ export class PrismaComprasAdapter {
             data: updateData,
             include: this.ordenInclude,
         });
+        // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto
+        if (data.estado === 'aprobada' && row.proyectoId) {
+            try {
+                const provName = row.proveedor?.nombre || 'Proveedor';
+                await this.prisma.gasto.create({
+                    data: {
+                        id: `G-OC-${row.id.slice(-8)}-${Date.now()}`,
+                        concepto: `Materiales de Orden de Compra - ${row.numero}`,
+                        categoria: 'proyecto',
+                        fecha: new Date(),
+                        monto: row.total,
+                        proveedor: provName,
+                        proyectoId: row.proyectoId,
+                        notas: row.id, // Guardar el ID de la OC para recuperarla desde el frontend
+                    }
+                });
+                console.log(`[Gasto Automático] Creado gasto de $${row.total} para proyecto ${row.proyectoId} desde OC ${row.numero}`);
+            }
+            catch (err) {
+                console.error('[Gasto Automático Error] No se pudo crear el gasto para el proyecto:', err);
+            }
+            // Enviar notificación de aprobación al taller
+            try {
+                const notif = await this.prisma.notification.create({
+                    data: {
+                        title: 'Orden de Compra Aprobada',
+                        message: `La orden de compra ${row.numero} ha sido aprobada.`,
+                        rol: 'taller',
+                        createdBy: 'Administración',
+                    }
+                });
+                // Obtener usuarios del taller
+                const tallerUsers = await this.prisma.user.findMany({
+                    where: {
+                        OR: [
+                            { rol: { in: ['taller'] } },
+                            { id: row.usuarioId } // También al emisor original
+                        ]
+                    },
+                    include: {
+                        pushSubscriptions: true
+                    }
+                });
+                const pushPayload = JSON.stringify({
+                    title: notif.title,
+                    body: notif.message,
+                    url: `/inventario/recepcion/${row.id}`
+                });
+                for (const user of tallerUsers) {
+                    for (const sub of user.pushSubscriptions) {
+                        try {
+                            const subscriptionParams = {
+                                endpoint: sub.endpoint,
+                                keys: {
+                                    p256dh: sub.p256dh,
+                                    auth: sub.auth
+                                }
+                            };
+                            await webpush.sendNotification(subscriptionParams, pushPayload);
+                        }
+                        catch (pushErr) {
+                            console.error(`[Web Push Error] Failed to send to endpoint ${sub.endpoint}:`, pushErr.message);
+                            if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+                                await this.prisma.pushSubscription.delete({ where: { endpoint: sub.endpoint } });
+                            }
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                console.error('[Notification Approval Error]', err);
+            }
+        }
         return row;
     }
     async deleteOrden(id) {

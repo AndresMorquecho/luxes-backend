@@ -56,10 +56,10 @@ export interface CuentaPorPagarData {
 export interface OrdenCompraData {
   id: string;
   numero: string;
-  proveedorId: string;
+  proveedorId?: string | null;
   proveedor?: ProveedorData;
   usuarioId: string;
-  usuario?: { id: string; nombre: string; email: string };
+  usuario?: { id: string; nombre: string; email: string; rol?: string | null };
   fecha: Date;
   subtotal: number;
   impuesto: number;
@@ -71,10 +71,11 @@ export interface OrdenCompraData {
   fechaCreacion: Date;
   fechaAprobacion?: Date | null;
   aprobadoPorId?: string | null;
-  aprobadoPor?: { id: string; nombre: string; email: string } | null;
+  aprobadoPor?: { id: string; nombre: string; email: string; rol?: string | null } | null;
   detalles?: DetalleCompraData[];
   abonos?: AbonoCompraData[];
   cuentaPorPagar?: CuentaPorPagarData | null;
+  proyectoId?: string | null;
 }
 
 export interface ComprasRepositoryPort {
@@ -115,7 +116,7 @@ export interface ComprasRepositoryPort {
   findOrdenById(id: string): Promise<OrdenCompraData | null>;
 
   createOrden(data: {
-    proveedorId: string;
+    proveedorId?: string;
     usuarioId: string;
     fecha?: Date;
     impuesto?: number;
@@ -123,6 +124,7 @@ export interface ComprasRepositoryPort {
     notas?: string;
     detalles: DetalleCompraInput[];
     fechaVencimiento?: Date | null;
+    proyectoId?: string | null;
   }): Promise<OrdenCompraData>;
 
   updateOrden(id: string, data: {
@@ -134,6 +136,7 @@ export interface ComprasRepositoryPort {
     notas?: string;
     detalles?: DetalleCompraInput[];
     aprobadoPorId?: string;
+    proyectoId?: string | null;
   }): Promise<OrdenCompraData>;
 
   deleteOrden(id: string): Promise<void>;

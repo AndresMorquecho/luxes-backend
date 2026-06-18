@@ -2,7 +2,7 @@ export interface MaterialData {
   id: string;
   nombre: string;
   tipo: string;
-  unidadMedida: string;
+  unidadMedida: any;
   stockActual: number;
   stockMinimo: number;
   precioCosto: number;

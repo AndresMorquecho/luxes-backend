@@ -59,6 +59,7 @@ export class ComprasService {
     search?: string;
     estado?: string;
     estadoPago?: string;
+    creadorRol?: string;
   }): Promise<{ items: OrdenCompraData[]; total: number }> {
     return this.repo.findAllOrdenes(options);
   }
@@ -68,7 +69,7 @@ export class ComprasService {
   }
 
   async createOrden(data: {
-    proveedorId: string;
+    proveedorId?: string;
     usuarioId: string;
     fecha?: Date;
     impuesto?: number;
@@ -76,6 +77,7 @@ export class ComprasService {
     notas?: string;
     detalles: DetalleCompraInput[];
     fechaVencimiento?: Date | null;
+    proyectoId?: string | null;
   }): Promise<OrdenCompraData> {
     if (!data.detalles || data.detalles.length === 0) {
       throw new Error('La orden debe tener al menos un item de detalle.');
@@ -96,6 +98,7 @@ export class ComprasService {
     notas?: string;
     detalles?: DetalleCompraInput[];
     aprobadoPorId?: string;
+    proyectoId?: string | null;
   }): Promise<OrdenCompraData> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) throw new Error('Orden de compra no encontrada.');

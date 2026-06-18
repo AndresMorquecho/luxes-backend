@@ -14,6 +14,7 @@ const mapRecord = (record: {
   cuentaBanco: string;
   banco: string;
   tipoContrato: string;
+  tieneContrato: boolean;
   sueldoDiario: Prisma.Decimal;
   direccion: string;
   foto: string | null;
@@ -29,6 +30,7 @@ const mapRecord = (record: {
     cuentaBanco: record.cuentaBanco,
     banco: record.banco,
     tipoContrato: record.tipoContrato,
+    tieneContrato: record.tieneContrato,
     sueldoDiario: Number(record.sueldoDiario),
     direccion: record.direccion,
     foto: record.foto,
@@ -45,6 +47,7 @@ const toDbData = (data: EmpleadoInput) => {
     cuentaBanco: data.cuentaBanco ?? '',
     banco: data.banco ?? '',
     tipoContrato: data.tipoContrato ?? 'Fijo',
+    tieneContrato: data.tieneContrato ?? true,
     sueldoDiario: data.sueldoDiario ?? 0,
     direccion: data.direccion ?? '',
     foto: data.foto || null,

@@ -9,6 +9,7 @@ export interface EmpleadoProps {
   cuentaBanco: string;
   banco: string;
   tipoContrato: string;
+  tieneContrato: boolean;
   sueldoDiario: number;
   direccion: string;
   foto?: string | null;
@@ -25,6 +26,7 @@ export class Empleado {
   readonly cuentaBanco: string;
   readonly banco: string;
   readonly tipoContrato: string;
+  readonly tieneContrato: boolean;
   readonly sueldoDiario: number;
   readonly direccion: string;
   readonly foto: string | null;
@@ -40,6 +42,7 @@ export class Empleado {
     this.cuentaBanco = props.cuentaBanco;
     this.banco = props.banco;
     this.tipoContrato = props.tipoContrato;
+    this.tieneContrato = props.tieneContrato;
     this.sueldoDiario = props.sueldoDiario;
     this.direccion = props.direccion;
     this.foto = props.foto ?? null;
@@ -57,6 +60,7 @@ export class Empleado {
       cuentaBanco: this.cuentaBanco,
       banco: this.banco,
       tipoContrato: this.tipoContrato,
+      tieneContrato: this.tieneContrato,
       sueldoDiario: this.sueldoDiario,
       direccion: this.direccion,
       foto: this.foto ?? '',

@@ -26,6 +26,7 @@ model User {
   pushSubscriptions   PushSubscription[]
   tareasCreadas       Tarea[]           @relation("TareasCreadas")
   tareasAsignadas     TareaAsignacion[] @relation("TareasAsignadas")
+  cierresCaja         CierreCaja[]
 
   @@map("users")
 }
@@ -90,6 +91,7 @@ model Material {
   categoria     String?                @default("Taller") // "Taller" o "Oficina"
   estadoUso     String?                @default("BODEGA") @map("estado_uso") // "BODEGA", "EN USO", "NO SIRVE", "EN REPARACION"
   aCargo        String?                @map("a_cargo")
+  ancho         Float?
   movimientos   MovimientoInventario[]
   prestamos     Prestamo[]
   detallesCompra DetalleCompra[]
@@ -159,6 +161,8 @@ model MetodoPago {
   descripcion String?
   activo      Boolean       @default(true)
   abonos      AbonoCompra[]
+  gastos      Gasto[]
+  proformas   Proforma[]
 
   @@map("metodos_pago")
 }
@@ -166,8 +170,8 @@ model MetodoPago {
 model OrdenCompra {
   id                String          @id @default(uuid())
   numero            String          @unique
-  proveedorId       String          @map("proveedor_id")
-  proveedor         Proveedor       @relation(fields: [proveedorId], references: [id])
+  proveedorId       String?         @map("proveedor_id")
+  proveedor         Proveedor?      @relation(fields: [proveedorId], references: [id])
   usuarioId         String          @map("usuario_id")
   usuario           User            @relation(fields: [usuarioId], references: [id])
   fecha             DateTime        @default(now())
@@ -185,6 +189,8 @@ model OrdenCompra {
   detalles          DetalleCompra[]
   abonos            AbonoCompra[]
   cuentaPorPagar    CuentaPorPagar?
+  proyectoId        String?         @map("proyecto_id")
+  proyecto          Proyecto?       @relation(fields: [proyectoId], references: [id], onDelete: SetNull)
 
   @@map("ordenes_compra")
 }
@@ -297,6 +303,7 @@ model Empleado {
   cuentaBanco  String             @default("") @map("cuenta_banco")
   banco        String             @default("")
   tipoContrato String             @default("Fijo") @map("tipo_contrato")
+  tieneContrato Boolean            @default(true) @map("tiene_contrato")
   sueldoDiario Decimal            @default(0) @map("sueldo_diario") @db.Decimal(10, 2)
   direccion    String             @default("")
   foto         String?
@@ -308,6 +315,9 @@ model Empleado {
   vacaciones   Vacacion[]
   horasExtras  HoraExtra[]
   nominas      NominaRegistro[]
+  egresos      Egreso[]
+  ingresosDetalles IngresoDetalle[]
+  instalaciones ProyectoInstalacionPersonal[]
 
   @@map("empleados")
 }
@@ -364,6 +374,7 @@ model HoraExtra {
   descripcion     String   @default("")
   valorPorHora    Decimal  @default(2.5) @map("valor_por_hora") @db.Decimal(10, 2)
   total           Decimal  @db.Decimal(10, 2)
+  estado          String   @default("DEUDOR")
 
   @@index([colaboradorId, fecha])
   @@map("horas_extras")
@@ -388,6 +399,34 @@ model NominaRegistro {
   @@map("nomina_registros")
 }
 
+model Egreso {
+  id           String   @id @default(uuid())
+  empleadoId   String   @map("empleado_id")
+  empleado     Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  tipo         String   // "ANTICIPO" | "MULTA" | "OTROS"
+  monto        Decimal  @db.Decimal(10, 2)
+  fecha        DateTime @db.Date
+  motivo       String   @default("")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([empleadoId, fecha])
+  @@map("egresos")
+}
+
+model IngresoDetalle {
+  id           String   @id @default(uuid())
+  empleadoId   String   @map("empleado_id")
+  empleado     Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  tipo         String   // "TRAB_EMP" | "OTROS"
+  monto        Decimal  @db.Decimal(10, 2)
+  fecha        DateTime @db.Date
+  motivo       String   @default("")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([empleadoId, fecha])
+  @@map("ingresos_detalles")
+}
+
 // ── Módulo de Clientes y Proformas ───────────────────────────────────────────
 
 model Cliente {
@@ -402,6 +441,7 @@ model Cliente {
   createdAt DateTime   @default(now()) @map("created_at")
   updatedAt DateTime   @updatedAt @map("updated_at")
   proformas Proforma[]
+  proyectos Proyecto[]
 
   @@map("clientes")
 }
@@ -415,14 +455,32 @@ model Proforma {
   email         String         @default("")
   fecha         DateTime       @db.Date
   vencimiento   DateTime?      @db.Date
+  diasValidez   Int            @default(3) @map("dias_validez")
+  atiende       String         @default("")
+  condiciones   String         @default("")
   iva           Decimal        @default(0.12) @db.Decimal(6, 4)
   notas         String         @default("")
   estado        String         @default("Pendiente")
+  metodoPagoId  String?        @map("metodo_pago_id")
+  metodoPago    MetodoPago?    @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   items         ProformaItem[]
 
   @@map("proformas")
+}
+
+// ── Configuración general de la empresa (singleton) ─────────────────────────────
+model Configuracion {
+  id              String   @id @default("default")
+  condicionesPago String   @default("") @map("condiciones_pago")
+  celular         String   @default("")
+  email           String   @default("")
+  direccion       String   @default("")
+  diasValidez     Int      @default(3) @map("dias_validez")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("configuracion")
 }
 
 model ProformaItem {
@@ -441,15 +499,20 @@ model ProformaItem {
 // ── Módulo de Gastos ───────────────────────────────────────────────────────────
 
 model Gasto {
-  id        String   @id
-  concepto  String
-  categoria String   @default("oficina")
-  fecha     DateTime @db.Date
-  monto     Decimal  @db.Decimal(12, 2)
-  proveedor String   @default("")
-  notas     String   @default("")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id             String                  @id
+  concepto       String
+  categoria      String                  @default("oficina")
+  fecha          DateTime                @db.Date
+  monto          Decimal                 @db.Decimal(12, 2)
+  proveedor      String                  @default("")
+  notas          String                  @default("")
+  proyectoId     String?                 @map("proyecto_id")
+  proyecto       Proyecto?               @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  mantenimientos VehiculoMantenimiento[]
+  metodoPagoId   String?                 @map("metodo_pago_id")
+  metodoPago     MetodoPago?             @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
 
   @@map("gastos")
 }
@@ -485,9 +548,152 @@ model VehiculoMantenimiento {
   monto          Decimal   @default(0) @db.Decimal(12, 2)
   proveedor      String    @default("")
   notas          String    @default("")
+  gastoId        String?   @map("gasto_id")
+  gasto          Gasto?    @relation(fields: [gastoId], references: [id], onDelete: Cascade)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   @@index([vehiculoId, fechaRealizado])
   @@map("vehiculo_mantenimientos")
+}
+
+// ── Módulo de Proyectos ───────────────────────────────────────────────────────
+
+model Proyecto {
+  id                     String            @id
+  nombre                 String
+  clienteId              String?           @map("cliente_id")
+  cliente                Cliente?          @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  clienteNombre          String            @default("") @map("cliente_nombre")
+  clienteEmpresa         String            @default("") @map("cliente_empresa")
+  clienteTelefono        String            @default("") @map("cliente_telefono")
+  clienteEmail           String            @default("") @map("cliente_email")
+  clienteDireccion       String            @default("") @map("cliente_direccion")
+  responsable            String            @default("") // Nombre del responsable del proyecto
+  requiereInstalacion    Boolean           @default(false) @map("requiere_instalacion")
+  faseActual             String            @default("COTIZACION") @map("fase_actual") // COTIZACION, DISEÑO, PRODUCCION, INSTALACION, ENTREGA, COMPLETADO
+  progreso               Int               @default(0) // 0-100
+  prioridad              String            @default("MEDIA") // BAJA, MEDIA, ALTA, URGENTE
+  estado                 String            @default("ACTIVO") // ACTIVO, PAUSADO, CANCELADO, COMPLETADO
+  montoEstimado          Decimal           @default(0) @map("monto_estimado") @db.Decimal(12, 2)
+  fechaCreacion          DateTime          @default(now()) @map("fecha_creacion")
+  fechaEntregaEstimada   DateTime?         @map("fecha_entrega_estimada")
+  fechaCompletado        DateTime?         @map("fecha_completado")
+  descripcion            String            @default("")
+  etiquetas              String            @default("") // JSON array de strings o separadas por coma
+  notas                  String            @default("")
+  
+  // Relaciones
+  fases                  ProyectoFase[]
+  instalacion            ProyectoInstalacion?
+  impresiones            ImpresionJob[]
+  ordenesCompra          OrdenCompra[]
+  gastos                 Gasto[]
+  
+  @@map("proyectos")
+}
+
+model ProyectoFase {
+  id                  String    @id @default(uuid())
+  proyectoId          String    @map("proyecto_id")
+  proyecto            Proyecto  @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  fase                String    // COTIZACION, DISEÑO, PRODUCCION, INSTALACION, ENTREGA, COMPLETADO
+  completada          Boolean   @default(false)
+  fechaCompletada     DateTime? @map("fecha_completada")
+  datos               String    @default("{}") // JSON con datos específicos de la fase
+  
+  @@unique([proyectoId, fase])
+  @@map("proyecto_fases")
+}
+
+model ProyectoInstalacion {
+  id                     String                        @id @default(uuid())
+  proyectoId             String                        @unique @map("proyecto_id")
+  proyecto               Proyecto                      @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  fechaInstalacion       DateTime?                     @map("fecha_instalacion")
+  direccionInstalacion   String                        @default("") @map("direccion_instalacion")
+  notas                  String                        @default("")
+  instalacionCompletada  Boolean                       @default(false) @map("instalacion_completada")
+  notasCierre            String                        @default("") @map("notas_cierre")
+  
+  // Relaciones
+  personalAsignado       ProyectoInstalacionPersonal[]
+  materiales             ProyectoInstalacionMaterial[]
+  
+  @@map("proyecto_instalaciones")
+}
+
+model ProyectoInstalacionPersonal {
+  id             String              @id @default(uuid())
+  instalacionId  String              @map("instalacion_id")
+  instalacion    ProyectoInstalacion @relation(fields: [instalacionId], references: [id], onDelete: Cascade)
+  empleadoId     String              @map("empleado_id")
+  empleado       Empleado            @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  rol            String              @default("") // Ej: "Instalador principal", "Ayudante"
+  
+  @@map("proyecto_instalacion_personal")
+}
+
+model ProyectoInstalacionMaterial {
+  id             String              @id @default(uuid())
+  instalacionId  String              @map("instalacion_id")
+  instalacion    ProyectoInstalacion @relation(fields: [instalacionId], references: [id], onDelete: Cascade)
+  nombre         String
+  cantidad       Decimal             @db.Decimal(12, 2)
+  unidad         String              @default("")
+  observacion    String              @default("")
+  
+  @@map("proyecto_instalacion_materiales")
+}
+
+// ── Módulo de Impresiones / Cola de Impresión ───────────────────────────────
+
+model ImpresionJob {
+  id                Int       @id @default(autoincrement())
+  name              String
+  copies            Int       @default(1)
+  responsible       String?
+  status            String    @default("En espera") // "Listo", "Imprimiendo", "En espera", "Pausado", "Completado", "Cancelado"
+  format            String    // Material/Sustrato
+  elapsedSeconds    Int       @default(0) @map("elapsed_seconds")
+  sentBy            String    @map("sent_by")
+  sentAt            String    @map("sent_at")
+  sentToQueueAt     String?   @map("sent_to_queue_at")
+  startedPrintingAt String?   @map("started_printing_at")
+  startTime         String?   @map("start_time")
+  completedAt       String?   @map("completed_at")
+  fileUrl           String?   @map("file_url")
+  client            String
+  urgency           String    @default("Media")
+  width             Float     @default(1.0)
+  height            Float     @default(1.0)
+  notes             String    @default("")
+  proyectoId        String?   @map("proyecto_id")
+  proyectoNombre    String?   @map("proyecto_nombre")
+  cancelReason      String?   @map("cancel_reason")
+  position          Int       @default(0)
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  // Relación con Proyecto opcional para poder navegar
+  proyecto          Proyecto? @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+
+  @@map("impresion_jobs")
+}
+
+model CierreCaja {
+  id              String   @id @default(uuid())
+  fecha           DateTime @default(now())
+  fechaInicio     DateTime @map("fecha_inicio") @db.Date
+  fechaFin        DateTime @map("fecha_fin") @db.Date
+  totalIngresos   Decimal  @map("total_ingresos") @db.Decimal(12, 2)
+  totalEgresos    Decimal  @map("total_egresos") @db.Decimal(12, 2)
+  balance         Decimal  @db.Decimal(12, 2)
+  metodosDetalle  String   @default("[]") @map("metodos_detalle") // JSON string con desglose por método de pago
+  observaciones   String   @default("")
+  usuarioId       String?  @map("usuario_id")
+  usuario         User?    @relation(fields: [usuarioId], references: [id])
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("cierres_caja")
 }

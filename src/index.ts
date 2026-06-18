@@ -9,14 +9,22 @@ import { createNotificationsModule } from './features/notifications/infrastructu
 import { createTareasModule } from './features/tareas/infrastructure/composition/tareasContainer.js';
 import { createEmpleadosModule } from './features/empleados/infrastructure/composition/empleadosContainer.js';
 import { createAsistenciaModule } from './features/asistencia/infrastructure/composition/asistenciaContainer.js';
+import { createNominaModule } from './features/nomina/infrastructure/composition/nominaContainer.js';
+import { createClientesModule } from './features/clientes/infrastructure/composition/clientesContainer.js';
+import { createProformasModule } from './features/proformas/infrastructure/composition/proformasContainer.js';
+import { createConfiguracionModule } from './features/configuracion/infrastructure/composition/configuracionContainer.js';
+import { createProyectosModule } from './features/proyectos/infrastructure/composition/proyectosContainer.js';
+import { createImpresionesModule } from './features/impresiones/infrastructure/composition/impresionesContainer.js';
+import { createGastosModule } from './features/gastos/infrastructure/composition/gastosContainer.js';
 
 
 async function bootstrap() {
-  // Asegurar que existe el usuario de asistencia para el quiosco
+  // Asegurar que existe el usuario de asistencia para el quiosco y taller
   try {
     const bcrypt = await import('bcryptjs');
     const passwordHash = await bcrypt.default.hash('123456', 10);
     const { prisma } = await import('./config/prismaClient.js');
+    
     await prisma.user.upsert({
       where: { username: 'asistencia' },
       update: {
@@ -34,8 +42,60 @@ async function bootstrap() {
       },
     });
     console.log('[Bootstrap] Usuario de asistencia verificado/creado con éxito.');
+
+    await prisma.user.upsert({
+      where: { username: 'taller' },
+      update: {
+        rol: 'taller',
+        passwordHash: passwordHash,
+      },
+      create: {
+        id: 'USR-TALLER-001',
+        nombre: 'Taller de Impresión',
+        email: 'taller@luxes.com',
+        username: 'taller',
+        rol: 'taller',
+        passwordHash: passwordHash,
+        estado: 'activo',
+      },
+    });
+    console.log('[Bootstrap] Usuario de taller verificado/creado con éxito.');
   } catch (error) {
-    console.error('[Bootstrap] Error al crear usuario de asistencia:', error);
+    console.error('[Bootstrap] Error en bootstrap de usuarios:', error);
+  }
+
+  // Sincronizar el progreso de proyectos existentes
+  try {
+    const { prisma } = await import('./config/prismaClient.js');
+    const PROGRESO_POR_FASE: Record<string, number> = {
+      COTIZACION: 0,
+      'DISEÑO': 20,
+      PRODUCCION: 40,
+      INSTALACION: 70,
+      ENTREGA: 90,
+      COMPLETADO: 100,
+    };
+    
+    const proyectos = await prisma.proyecto.findMany({
+      select: { id: true, faseActual: true, progreso: true }
+    });
+    
+    let syncCount = 0;
+    for (const p of proyectos) {
+      const expectedProgreso = PROGRESO_POR_FASE[p.faseActual] ?? 0;
+      if (p.progreso !== expectedProgreso) {
+        await prisma.proyecto.update({
+          where: { id: p.id },
+          data: { progreso: expectedProgreso }
+        });
+        syncCount++;
+      }
+    }
+    if (syncCount > 0) {
+      console.log(`[Bootstrap] Sincronizados ${syncCount} proyectos con su progreso correspondiente.`);
+    }
+  } catch (error) {
+    console.error('[Bootstrap] Error al sincronizar progreso de proyectos:', error);
   }
 
   const app = express();
@@ -77,6 +137,28 @@ async function bootstrap() {
 
   const { asistenciaRoutes } = await createAsistenciaModule();
   app.use('/api/asistencias', asistenciaRoutes);
+
+  const { nominaRoutes } = await createNominaModule();
+  app.use('/api/nomina', nominaRoutes);
+
+  const { clientesRoutes } = await createClientesModule();
+  app.use('/api/clientes', clientesRoutes);
+
+  const { proformasRoutes } = await createProformasModule();
+  app.use('/api/proformas', proformasRoutes);
+
+  const { configuracionRoutes } = await createConfiguracionModule();
+  app.use('/api/configuracion', configuracionRoutes);
+
+  const { proyectosRoutes } = await createProyectosModule();
+  app.use('/api/proyectos', proyectosRoutes);
+
+  const { impresionesRoutes } = await createImpresionesModule();
+  app.use('/api/impresiones', impresionesRoutes);
+
+  const { gastosRouter, vehiculosRouter } = await createGastosModule();
+  app.use('/api/gastos', gastosRouter);
+  app.use('/api/vehiculos', vehiculosRouter);
 
 
   app.use((_req, res) => {

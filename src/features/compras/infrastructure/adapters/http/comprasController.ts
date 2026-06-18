@@ -56,8 +56,9 @@ export class ComprasController {
       const search = this.str(req.query.search);
       const estado = this.str(req.query.estado);
       const estadoPago = this.str(req.query.estadoPago);
+      const creadorRol = this.str(req.query.creadorRol);
 
-      const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago });
+      const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago, creadorRol });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }

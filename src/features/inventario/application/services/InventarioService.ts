@@ -57,8 +57,9 @@ export class InventarioService {
     if (!mat) throw new Error('Material no encontrado.');
 
     const delta = data.tipo === 'entrada' ? data.cantidad : -data.cantidad;
+    const unitLabel = typeof mat.unidadMedida === 'string' ? mat.unidadMedida : (mat.unidadMedida?.abreviacion || mat.unidadMedida?.nombre || 'unid');
     if (data.tipo === 'salida' && mat.stockActual + delta < 0) {
-      throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${mat.unidadMedida}.`);
+      throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${unitLabel}.`);
     }
 
     const mov = await this.repo.createMovimiento(data);

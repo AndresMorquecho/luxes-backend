@@ -11,6 +11,7 @@ const parseBody = (body) => ({
     cuentaBanco: String(body.cuentaBanco ?? ''),
     banco: String(body.banco ?? ''),
     tipoContrato: String(body.tipoContrato ?? 'Fijo'),
+    tieneContrato: body.tieneContrato !== undefined ? Boolean(body.tieneContrato) : undefined,
     sueldoDiario: Number(body.sueldoDiario) || 0,
     direccion: String(body.direccion ?? ''),
     foto: body.foto ? String(body.foto) : null,

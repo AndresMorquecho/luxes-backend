@@ -9,6 +9,7 @@ export class Empleado {
     cuentaBanco;
     banco;
     tipoContrato;
+    tieneContrato;
     sueldoDiario;
     direccion;
     foto;
@@ -23,6 +24,7 @@ export class Empleado {
         this.cuentaBanco = props.cuentaBanco;
         this.banco = props.banco;
         this.tipoContrato = props.tipoContrato;
+        this.tieneContrato = props.tieneContrato;
         this.sueldoDiario = props.sueldoDiario;
         this.direccion = props.direccion;
         this.foto = props.foto ?? null;
@@ -39,6 +41,7 @@ export class Empleado {
             cuentaBanco: this.cuentaBanco,
             banco: this.banco,
             tipoContrato: this.tipoContrato,
+            tieneContrato: this.tieneContrato,
             sueldoDiario: this.sueldoDiario,
             direccion: this.direccion,
             foto: this.foto ?? '',
