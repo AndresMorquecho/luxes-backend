@@ -17,6 +17,8 @@ export type EmpleadoInput = {
   sueldoDiario?: number;
   direccion?: string;
   foto?: string | null;
+  rol?: string;
+  roleId?: string;
 };
 
 export abstract class EmpleadoRepositoryPort {

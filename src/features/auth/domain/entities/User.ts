@@ -13,6 +13,8 @@ export class User {
   fechaCreacion: string;
   ultimoAcceso: string | null;
   permissions?: string[];
+  sidebarConfig?: string | null;
+  empleadoId?: string | null;
 
   constructor({
     id,
@@ -26,6 +28,8 @@ export class User {
     fechaCreacion,
     ultimoAcceso = null,
     permissions = [],
+    sidebarConfig = null,
+    empleadoId = null,
   }: {
     id: string;
     nombre: string;
@@ -38,6 +42,8 @@ export class User {
     fechaCreacion: string;
     ultimoAcceso?: string | null;
     permissions?: string[];
+    sidebarConfig?: string | null;
+    empleadoId?: string | null;
   }) {
     this.id = id;
     this.nombre = nombre;
@@ -50,6 +56,8 @@ export class User {
     this.fechaCreacion = fechaCreacion;
     this.ultimoAcceso = ultimoAcceso;
     this.permissions = permissions;
+    this.sidebarConfig = sidebarConfig;
+    this.empleadoId = empleadoId;
   }
 
   isActive(): boolean {
@@ -68,6 +76,8 @@ export class User {
       fechaCreacion: this.fechaCreacion,
       ultimoAcceso: this.ultimoAcceso,
       permissions: this.permissions || [],
+      sidebarConfig: this.sidebarConfig,
+      empleadoId: this.empleadoId,
     };
   }
 }

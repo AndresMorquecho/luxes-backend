@@ -90,7 +90,7 @@ export class ComprasService {
   }
 
   async updateOrden(id: string, data: {
-    proveedorId?: string;
+    proveedorId?: string | null;
     fecha?: Date;
     impuesto?: number;
     estado?: string;
@@ -99,6 +99,9 @@ export class ComprasService {
     detalles?: DetalleCompraInput[];
     aprobadoPorId?: string;
     proyectoId?: string | null;
+    abonoMonto?: number;
+    metodoPagoId?: string;
+    abonoReferencia?: string;
   }): Promise<OrdenCompraData> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) throw new Error('Orden de compra no encontrada.');
@@ -181,18 +184,22 @@ export class ComprasService {
 
   // ── Métodos de Pago ────────────────────────────────────────────────────────
 
-  getMetodosPago(): Promise<MetodoPagoData[]> {
-    return this.repo.findAllMetodosPago();
+  getMetodosPago(desde?: Date, hasta?: Date): Promise<MetodoPagoData[]> {
+    return this.repo.findAllMetodosPago(desde, hasta);
   }
 
-  async createMetodoPago(data: { nombre: string; descripcion?: string }): Promise<MetodoPagoData> {
+  async createMetodoPago(data: { nombre: string; descripcion?: string; tipo?: string }): Promise<MetodoPagoData> {
     if (!data.nombre || !data.nombre.trim()) {
       throw new Error('El nombre del método de pago es requerido.');
     }
-    return this.repo.createMetodoPago({ ...data, nombre: data.nombre.trim() });
+    return this.repo.createMetodoPago({ 
+      ...data, 
+      nombre: data.nombre.trim(),
+      tipo: data.tipo || 'EFECTIVO'
+    });
   }
 
-  async updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean }): Promise<MetodoPagoData> {
+  async updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean; tipo?: string }): Promise<MetodoPagoData> {
     return this.repo.updateMetodoPago(id, data);
   }
 

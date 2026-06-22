@@ -17,6 +17,11 @@ export interface MetodoPagoData {
   nombre: string;
   descripcion?: string | null;
   activo: boolean;
+  tipo: string;
+  saldoActual?: number;
+  ingresosPeriod?: number;
+  egresosPeriod?: number;
+  netoPeriod?: number;
 }
 
 export interface DetalleCompraInput {
@@ -128,7 +133,7 @@ export interface ComprasRepositoryPort {
   }): Promise<OrdenCompraData>;
 
   updateOrden(id: string, data: {
-    proveedorId?: string;
+    proveedorId?: string | null;
     fecha?: Date;
     impuesto?: number;
     estado?: string;
@@ -137,6 +142,9 @@ export interface ComprasRepositoryPort {
     detalles?: DetalleCompraInput[];
     aprobadoPorId?: string;
     proyectoId?: string | null;
+    abonoMonto?: number;
+    metodoPagoId?: string;
+    abonoReferencia?: string;
   }): Promise<OrdenCompraData>;
 
   deleteOrden(id: string): Promise<void>;
@@ -167,9 +175,9 @@ export interface ComprasRepositoryPort {
   }): Promise<CuentaPorPagarData>;
 
   // ── Métodos de Pago ──
-  findAllMetodosPago(): Promise<MetodoPagoData[]>;
-  createMetodoPago(data: { nombre: string; descripcion?: string }): Promise<MetodoPagoData>;
-  updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean }): Promise<MetodoPagoData>;
+  findAllMetodosPago(desde?: Date, hasta?: Date): Promise<MetodoPagoData[]>;
+  createMetodoPago(data: { nombre: string; descripcion?: string; tipo?: string }): Promise<MetodoPagoData>;
+  updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean; tipo?: string }): Promise<MetodoPagoData>;
   deleteMetodoPago(id: string): Promise<void>;
 
   // ── Stats ──

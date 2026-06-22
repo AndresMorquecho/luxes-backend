@@ -58,7 +58,8 @@ export class ComprasController {
             const search = this.str(req.query.search);
             const estado = this.str(req.query.estado);
             const estadoPago = this.str(req.query.estadoPago);
-            const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago });
+            const creadorRol = this.str(req.query.creadorRol);
+            const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago, creadorRol });
             return this.ok(res, data);
         }
         catch (e) {
@@ -152,9 +153,18 @@ export class ComprasController {
         }
     }
     // ── Métodos de Pago ────────────────────────────────────────────────────────
-    async listMetodosPago(_req, res) {
+    async listMetodosPago(req, res) {
         try {
-            const data = await this.service.getMetodosPago();
+            const { desde, hasta } = req.query;
+            let desdeDate;
+            let hastaLimit;
+            if (desde && hasta) {
+                const desdeStr = String(desde);
+                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+                const hastaStr = String(hasta);
+                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+            }
+            const data = await this.service.getMetodosPago(desdeDate, hastaLimit);
             return this.ok(res, data);
         }
         catch (e) {
@@ -163,7 +173,8 @@ export class ComprasController {
     }
     async createMetodoPago(req, res) {
         try {
-            const data = await this.service.createMetodoPago(req.body);
+            const { nombre, descripcion, tipo } = req.body || {};
+            const data = await this.service.createMetodoPago({ nombre, descripcion, tipo });
             return res.status(201).json({ success: true, data });
         }
         catch (e) {
@@ -172,7 +183,8 @@ export class ComprasController {
     }
     async updateMetodoPago(req, res) {
         try {
-            const data = await this.service.updateMetodoPago(String(req.params.id), req.body);
+            const { nombre, descripcion, activo, tipo } = req.body || {};
+            const data = await this.service.updateMetodoPago(String(req.params.id), { nombre, descripcion, activo, tipo });
             return this.ok(res, data);
         }
         catch (e) {

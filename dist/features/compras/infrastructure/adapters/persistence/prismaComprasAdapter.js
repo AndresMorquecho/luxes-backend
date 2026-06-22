@@ -30,20 +30,38 @@ export class PrismaComprasAdapter {
     // ── Órdenes de Compra ──────────────────────────────────────────────────────
     ordenInclude = {
         proveedor: true,
-        usuario: { select: { id: true, nombre: true, email: true } },
-        aprobadoPor: { select: { id: true, nombre: true, email: true } },
+        usuario: { select: { id: true, nombre: true, email: true, rol: true } },
+        aprobadoPor: { select: { id: true, nombre: true, email: true, rol: true } },
         detalles: true,
         abonos: { include: { metodoPago: true }, orderBy: { fecha: 'desc' } },
         cuentaPorPagar: true,
         proyecto: { select: { id: true, nombre: true } },
     };
     async findAllOrdenes(options) {
-        const { page = 1, limit = 10, search, estado, estadoPago } = options || {};
+        const { page = 1, limit = 10, search, estado, estadoPago, creadorRol } = options || {};
         const where = {};
         if (estado)
             where.estado = estado;
         if (estadoPago)
             where.estadoPago = estadoPago;
+        if (creadorRol) {
+            const lowerRol = creadorRol.toLowerCase();
+            if (lowerRol === 'impresion' || lowerRol === 'impresión') {
+                where.usuario = {
+                    rol: {
+                        in: ['Impresión', 'impresion', 'IMPRESIÓN', 'IMPRESION'],
+                    }
+                };
+            }
+            else {
+                where.usuario = {
+                    rol: {
+                        equals: creadorRol,
+                        mode: 'insensitive'
+                    }
+                };
+            }
+        }
         if (search) {
             where.OR = [
                 { numero: { contains: search, mode: 'insensitive' } },
@@ -224,9 +242,14 @@ export class PrismaComprasAdapter {
     }
     async updateOrden(id, data) {
         const updateData = {};
-        // Solo actualizar proveedor si se proporciona Y no es vacío
-        if (data.proveedorId && data.proveedorId.trim() !== '') {
-            updateData.proveedor = { connect: { id: data.proveedorId } };
+        // Solo actualizar proveedor si se proporciona
+        if (data.proveedorId !== undefined) {
+            if (data.proveedorId && data.proveedorId.trim() !== '') {
+                updateData.proveedor = { connect: { id: data.proveedorId } };
+            }
+            else {
+                updateData.proveedor = { disconnect: true };
+            }
         }
         if (data.fecha)
             updateData.fecha = new Date(data.fecha);
@@ -254,7 +277,11 @@ export class PrismaComprasAdapter {
                 updateData.proyecto = { disconnect: true };
             }
         }
+        // Recalcular o determinar el total actual
+        let total = 0;
+        let detailsChanged = false;
         if (data.detalles) {
+            detailsChanged = true;
             // Recalculate totals
             const detallesData = data.detalles.map(d => ({
                 descripcion: d.descripcion,
@@ -265,7 +292,7 @@ export class PrismaComprasAdapter {
             }));
             const subtotal = detallesData.reduce((sum, d) => sum + d.subtotal, 0);
             const impuesto = data.impuesto ?? 0;
-            const total = subtotal + impuesto;
+            total = subtotal + impuesto;
             updateData.subtotal = subtotal;
             updateData.impuesto = impuesto;
             updateData.total = total;
@@ -280,33 +307,6 @@ export class PrismaComprasAdapter {
                     ...(d.materialId ? { materialId: d.materialId } : {}),
                 })),
             };
-            // Update or create CxP
-            const cxp = await this.prisma.cuentaPorPagar.findUnique({
-                where: { ordenCompraId: id },
-            });
-            if (total > 0) {
-                if (cxp) {
-                    await this.prisma.cuentaPorPagar.update({
-                        where: { id: cxp.id },
-                        data: {
-                            montoTotal: total,
-                            saldo: total - cxp.montoPagado,
-                            estado: cxp.montoPagado >= total ? 'pagado' : cxp.montoPagado > 0 ? 'parcial' : 'pendiente',
-                        },
-                    });
-                }
-                else {
-                    // Crear cuenta por pagar si no existe
-                    updateData.cuentaPorPagar = {
-                        create: {
-                            montoTotal: total,
-                            montoPagado: 0,
-                            saldo: total,
-                            estado: 'pendiente',
-                        },
-                    };
-                }
-            }
         }
         else if (data.impuesto !== undefined) {
             const existing = await this.prisma.ordenCompra.findUnique({
@@ -315,7 +315,89 @@ export class PrismaComprasAdapter {
             });
             if (existing) {
                 updateData.impuesto = data.impuesto;
-                updateData.total = existing.subtotal + data.impuesto;
+                total = existing.subtotal + data.impuesto;
+                updateData.total = total;
+                detailsChanged = true;
+            }
+        }
+        else {
+            const existing = await this.prisma.ordenCompra.findUnique({
+                where: { id },
+                select: { total: true },
+            });
+            if (existing) {
+                total = existing.total;
+            }
+        }
+        // Cuentas por Pagar (CxP) y Abonos (AbonoCompra)
+        const cxp = await this.prisma.cuentaPorPagar.findUnique({
+            where: { ordenCompraId: id },
+        });
+        const abonoMonto = data.abonoMonto || 0;
+        if (abonoMonto > 0 && data.metodoPagoId) {
+            // Registrar el abono
+            await this.prisma.abonoCompra.create({
+                data: {
+                    ordenCompra: { connect: { id } },
+                    metodoPago: { connect: { id: data.metodoPagoId } },
+                    monto: abonoMonto,
+                    referencia: data.abonoReferencia || null,
+                }
+            });
+            const currentMontoPagado = cxp ? cxp.montoPagado : 0;
+            const newMontoPagado = currentMontoPagado + abonoMonto;
+            const newSaldo = total - newMontoPagado;
+            const newEstado = newSaldo <= 0 ? 'pagado' : 'parcial';
+            updateData.estadoPago = newEstado;
+            if (cxp) {
+                await this.prisma.cuentaPorPagar.update({
+                    where: { id: cxp.id },
+                    data: {
+                        montoTotal: total,
+                        montoPagado: newMontoPagado,
+                        saldo: Math.max(0, newSaldo),
+                        estado: newEstado,
+                    },
+                });
+            }
+            else {
+                updateData.cuentaPorPagar = {
+                    create: {
+                        montoTotal: total,
+                        montoPagado: abonoMonto,
+                        saldo: Math.max(0, total - abonoMonto),
+                        estado: abonoMonto >= total ? 'pagado' : 'parcial',
+                    },
+                };
+            }
+        }
+        else {
+            // Sin abono nuevo, pero si cambiaron los detalles o el impuesto, actualizar el montoTotal y saldo
+            if (detailsChanged && total > 0) {
+                if (cxp) {
+                    const newSaldo = total - cxp.montoPagado;
+                    const newEstado = newSaldo <= 0 ? 'pagado' : cxp.montoPagado > 0 ? 'parcial' : 'pendiente';
+                    updateData.estadoPago = newEstado === 'pendiente' ? 'sin_pagar' : newEstado;
+                    await this.prisma.cuentaPorPagar.update({
+                        where: { id: cxp.id },
+                        data: {
+                            montoTotal: total,
+                            saldo: Math.max(0, newSaldo),
+                            estado: newEstado,
+                        },
+                    });
+                }
+                else {
+                    updateData.cuentaPorPagar = {
+                        create: {
+                            montoTotal: total,
+                            montoPagado: 0,
+                            saldo: total,
+                            estado: 'pendiente',
+                        },
+                    };
+                    updateData.estadoPago = 'sin_pagar';
+                }
             }
         }
         const row = await this.prisma.ordenCompra.update({
@@ -326,7 +408,7 @@ export class PrismaComprasAdapter {
         // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto
         if (data.estado === 'aprobada' && row.proyectoId) {
             try {
-                const provName = row.proveedor?.nombre || 'Proveedor';
+                const provName = row.proveedor?.nombre || 'Sin proveedor específico';
                 await this.prisma.gasto.create({
                     data: {
                         id: `G-OC-${row.id.slice(-8)}-${Date.now()}`,
@@ -457,11 +539,80 @@ export class PrismaComprasAdapter {
         return row;
     }
     // ── Métodos de Pago ────────────────────────────────────────────────────────
-    async findAllMetodosPago() {
-        const rows = await this.prisma.metodoPago.findMany({
+    async findAllMetodosPago(desde, hasta) {
+        const metodos = await this.prisma.metodoPago.findMany({
             orderBy: { nombre: 'asc' },
         });
-        return rows;
+        // 1. Fetch aggregates for all-time transactions grouped by metodoPagoId
+        const abonosProformaAllTime = await this.prisma.abonoProforma.groupBy({
+            by: ['metodoPagoId'],
+            _sum: { monto: true }
+        });
+        const gastosAllTime = await this.prisma.gasto.groupBy({
+            by: ['metodoPagoId'],
+            _sum: { monto: true }
+        });
+        const abonosCompraAllTime = await this.prisma.abonoCompra.groupBy({
+            by: ['metodoPagoId'],
+            _sum: { monto: true }
+        });
+        // 2. Fetch period-specific aggregates if dates are provided
+        let abonosProformaPeriod = [];
+        let gastosPeriod = [];
+        let abonosCompraPeriod = [];
+        if (desde && hasta) {
+            abonosProformaPeriod = await this.prisma.abonoProforma.groupBy({
+                by: ['metodoPagoId'],
+                _sum: { monto: true },
+                where: { fecha: { gte: desde, lte: hasta } }
+            });
+            gastosPeriod = await this.prisma.gasto.groupBy({
+                by: ['metodoPagoId'],
+                _sum: { monto: true },
+                where: { fecha: { gte: desde, lte: hasta } }
+            });
+            abonosCompraPeriod = await this.prisma.abonoCompra.groupBy({
+                by: ['metodoPagoId'],
+                _sum: { monto: true },
+                where: { fecha: { gte: desde, lte: hasta } }
+            });
+        }
+        const mapById = (arr) => {
+            const map = {};
+            for (const item of arr) {
+                if (item.metodoPagoId) {
+                    map[item.metodoPagoId] = Number(item._sum.monto || 0);
+                }
+            }
+            return map;
+        };
+        const ingAllTimeMap = mapById(abonosProformaAllTime);
+        const gasAllTimeMap = mapById(gastosAllTime);
+        const egrAllTimeMap = mapById(abonosCompraAllTime);
+        const ingPeriodMap = (desde && hasta) ? mapById(abonosProformaPeriod) : ingAllTimeMap;
+        const gasPeriodMap = (desde && hasta) ? mapById(gastosPeriod) : gasAllTimeMap;
+        const egrPeriodMap = (desde && hasta) ? mapById(abonosCompraPeriod) : egrAllTimeMap;
+        return metodos.map(m => {
+            const ingAllTime = ingAllTimeMap[m.id] || 0;
+            const gasAllTime = gasAllTimeMap[m.id] || 0;
+            const egrAllTime = egrAllTimeMap[m.id] || 0;
+            const saldoActual = ingAllTime - (gasAllTime + egrAllTime);
+            const ingPeriod = ingPeriodMap[m.id] || 0;
+            const gasPeriod = gasPeriodMap[m.id] || 0;
+            const egrPeriod = egrPeriodMap[m.id] || 0;
+            const egresosPeriod = gasPeriod + egrPeriod;
+            return {
+                id: m.id,
+                nombre: m.nombre,
+                descripcion: m.descripcion,
+                activo: m.activo,
+                tipo: m.tipo,
+                saldoActual,
+                ingresosPeriod: ingPeriod,
+                egresosPeriod: egresosPeriod,
+                netoPeriod: ingPeriod - egresosPeriod,
+            };
+        });
     }
     async createMetodoPago(data) {
         const row = await this.prisma.metodoPago.create({ data });

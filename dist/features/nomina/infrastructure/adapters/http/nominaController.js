@@ -143,77 +143,99 @@ export class NominaController {
                 }
             });
             const empleados = await prisma.empleado.findMany();
+            const empleadoIds = empleados.map(e => e.id);
             const diffDias = Math.floor((fFin.getTime() - fInicio.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+            // Pre-fetch related records in batch to avoid N+1 queries
+            const asistenciasBatch = await prisma.asistencia.findMany({
+                where: {
+                    empleadoId: { in: empleadoIds },
+                    fechaHora: { gte: fInicio, lte: fFin }
+                },
+                select: {
+                    empleadoId: true,
+                    fechaHora: true
+                }
+            });
+            const horasExtrasBatch = await prisma.horaExtra.findMany({
+                where: {
+                    colaboradorId: { in: empleadoIds },
+                    fecha: { gte: fInicio, lte: fFin }
+                }
+            });
+            const ingresosBatch = await prisma.ingresoDetalle.findMany({
+                where: {
+                    empleadoId: { in: empleadoIds },
+                    fecha: { gte: fInicio, lte: fFin }
+                }
+            });
+            const egresosBatch = await prisma.egreso.findMany({
+                where: {
+                    empleadoId: { in: empleadoIds },
+                    fecha: { gte: fInicio, lte: fFin }
+                }
+            });
+            // Group records by employee ID for O(1) retrieval
+            const asistenciasByEmpleado = new Map();
+            for (const a of asistenciasBatch) {
+                if (!asistenciasByEmpleado.has(a.empleadoId)) {
+                    asistenciasByEmpleado.set(a.empleadoId, []);
+                }
+                asistenciasByEmpleado.get(a.empleadoId).push(a.fechaHora);
+            }
+            const horasExtrasByEmpleado = new Map();
+            for (const h of horasExtrasBatch) {
+                if (!horasExtrasByEmpleado.has(h.colaboradorId)) {
+                    horasExtrasByEmpleado.set(h.colaboradorId, []);
+                }
+                horasExtrasByEmpleado.get(h.colaboradorId).push(h);
+            }
+            const ingresosByEmpleado = new Map();
+            for (const i of ingresosBatch) {
+                if (!ingresosByEmpleado.has(i.empleadoId)) {
+                    ingresosByEmpleado.set(i.empleadoId, []);
+                }
+                ingresosByEmpleado.get(i.empleadoId).push(i);
+            }
+            const egresosByEmpleado = new Map();
+            for (const e of egresosBatch) {
+                if (!egresosByEmpleado.has(e.empleadoId)) {
+                    egresosByEmpleado.set(e.empleadoId, []);
+                }
+                egresosByEmpleado.get(e.empleadoId).push(e);
+            }
             const recordsMap = new Map(records.map(r => [r.empleadoId, r]));
-            const updatedRecords = [];
+            const transactionOperations = [];
+            const userIndexInTransaction = new Map();
             for (const emp of empleados) {
-                // Consultar asistencias para este empleado en el periodo
-                const asistencias = await prisma.asistencia.findMany({
-                    where: {
-                        empleadoId: emp.id,
-                        fechaHora: {
-                            gte: fInicio,
-                            lte: fFin
-                        }
-                    },
-                    select: {
-                        fechaHora: true
-                    }
-                });
+                const empAsistencias = asistenciasByEmpleado.get(emp.id) || [];
                 // Contar días únicos con asistencia
-                const uniqueDays = new Set(asistencias.map(a => {
-                    const d = new Date(a.fechaHora);
+                const uniqueDays = new Set(empAsistencias.map(fechaHora => {
+                    const d = new Date(fechaHora);
                     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                 })).size;
                 const hasContract = emp.tieneContrato !== false;
                 const diasTrabajados = uniqueDays;
                 const defaultSueldoBruto = Number(emp.sueldoDiario) * diasTrabajados;
-                // Décimo cuarto: es un abono manual que se registra de poco a poco en cualquier
-                // quincena del año. Por defecto 0 al crear el registro (no se autocompleta por mes).
                 const decimoCuartoVal = 0;
                 const decimoTerceroVal = hasContract ? Math.round((defaultSueldoBruto / 12) * 100) / 100 : 0;
                 const iessVal = hasContract ? Math.round((defaultSueldoBruto * 0.0945) * 100) / 100 : 0;
-                const detailedHorasExtras = await prisma.horaExtra.findMany({
-                    where: {
-                        colaboradorId: emp.id,
-                        fecha: {
-                            gte: fInicio,
-                            lte: fFin
-                        }
-                    }
-                });
-                const horasExtrasSum = detailedHorasExtras.reduce((s, h) => s + Number(h.total), 0);
-                const detailedIngresos = await prisma.ingresoDetalle.findMany({
-                    where: {
-                        empleadoId: emp.id,
-                        fecha: {
-                            gte: fInicio,
-                            lte: fFin
-                        }
-                    }
-                });
+                const empHorasExtras = horasExtrasByEmpleado.get(emp.id) || [];
+                const horasExtrasSum = empHorasExtras.reduce((s, h) => s + Number(h.total), 0);
+                const empIngresos = ingresosByEmpleado.get(emp.id) || [];
                 let trabEmpSum = 0;
                 let otrosIngresosSum = 0;
-                for (const i of detailedIngresos) {
+                for (const i of empIngresos) {
                     const mVal = Number(i.monto);
                     if (i.tipo === 'TRAB_EMP')
                         trabEmpSum += mVal;
                     else if (i.tipo === 'OTROS')
                         otrosIngresosSum += mVal;
                 }
-                const detailedEgresos = await prisma.egreso.findMany({
-                    where: {
-                        empleadoId: emp.id,
-                        fecha: {
-                            gte: fInicio,
-                            lte: fFin
-                        }
-                    }
-                });
+                const empEgresos = egresosByEmpleado.get(emp.id) || [];
                 let anticiposSum = 0;
                 let multasSum = 0;
                 let otrosSum = 0;
-                for (const e of detailedEgresos) {
+                for (const e of empEgresos) {
                     const mVal = Number(e.monto);
                     if (e.tipo === 'ANTICIPO')
                         anticiposSum += mVal;
@@ -224,7 +246,8 @@ export class NominaController {
                 }
                 const existing = recordsMap.get(emp.id);
                 if (!existing) {
-                    const payroll = await prisma.nominaRegistro.create({
+                    userIndexInTransaction.set(emp.id, transactionOperations.length);
+                    transactionOperations.push(prisma.nominaRegistro.create({
                         data: {
                             empleadoId: emp.id,
                             fechaInicio: fInicio,
@@ -253,8 +276,7 @@ export class NominaController {
                             abonos: [],
                             estado: "PENDIENTE"
                         }
-                    });
-                    updatedRecords.push(payroll);
+                    }));
                 }
                 else {
                     // Si existe y no está completamente liquidado/pagado, actualizamos diasLaborados e IESS/Décimos por si hay nuevas marcaciones QR
@@ -283,19 +305,32 @@ export class NominaController {
                         updatedEgresos.anticipos = anticiposSum;
                         updatedEgresos.multas = multasSum;
                         updatedEgresos.dctoGenerico = otrosSum;
-                        const updated = await prisma.nominaRegistro.update({
+                        userIndexInTransaction.set(emp.id, transactionOperations.length);
+                        transactionOperations.push(prisma.nominaRegistro.update({
                             where: { id: existing.id },
                             data: {
                                 diasLaborados: diasTrabajados,
                                 ingresos: updatedIngresos,
                                 egresos: updatedEgresos,
                             }
-                        });
-                        updatedRecords.push(updated);
+                        }));
                     }
-                    else {
-                        updatedRecords.push(existing);
-                    }
+                }
+            }
+            // Execute all write operations in a single atomic database transaction
+            let transactionResults = [];
+            if (transactionOperations.length > 0) {
+                transactionResults = await prisma.$transaction(transactionOperations);
+            }
+            const updatedRecords = [];
+            for (const emp of empleados) {
+                const existing = recordsMap.get(emp.id);
+                const txIndex = userIndexInTransaction.get(emp.id);
+                if (txIndex !== undefined) {
+                    updatedRecords.push(transactionResults[txIndex]);
+                }
+                else {
+                    updatedRecords.push(existing);
                 }
             }
             records = updatedRecords;

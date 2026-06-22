@@ -13,9 +13,25 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
 
   private mapRow(row: any): MaterialData {
     if (!row) return null as any;
-    const { unidadMedida, ...rest } = row;
+    const { unidadMedida, detallesCompra, ...rest } = row;
+
+    const purchases = detallesCompra || [];
+    const approvedPurchases = purchases.filter((d: any) => 
+      d.ordenCompra && (d.ordenCompra.estado === 'APROBADA' || d.ordenCompra.estado === 'RECIBIDA')
+    );
+
+    let cpp = row.precioCosto || 0;
+    if (approvedPurchases.length > 0) {
+      const totalCost = approvedPurchases.reduce((sum: number, d: any) => sum + (d.cantidad * d.precioUnitario), 0);
+      const totalQty = approvedPurchases.reduce((sum: number, d: any) => sum + d.cantidad, 0);
+      if (totalQty > 0) {
+        cpp = totalCost / totalQty;
+      }
+    }
+
     return {
       ...rest,
+      costoPromedioPonderado: cpp,
       unidadMedida: row.unidadMedida ? {
         id: row.unidadMedida.id,
         nombre: row.unidadMedida.nombre,
@@ -54,7 +70,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
       const [rows, total] = await Promise.all([
         this.prisma.material.findMany({
           where,
-          include: { unidadMedida: true },
+          include: { 
+            unidadMedida: true,
+            detallesCompra: { include: { ordenCompra: true } }
+          },
           orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
           skip,
           take: limit,
@@ -68,7 +87,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     } else {
       const rows = await this.prisma.material.findMany({
         where,
-        include: { unidadMedida: true },
+        include: { 
+          unidadMedida: true,
+          detallesCompra: { include: { ordenCompra: true } }
+        },
         orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
       });
       return rows.map(r => this.mapRow(r));
@@ -78,7 +100,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   async findById(id: string): Promise<MaterialData | null> {
     const row = await this.prisma.material.findUnique({
       where: { id },
-      include: { unidadMedida: true },
+      include: { 
+        unidadMedida: true,
+        detallesCompra: { include: { ordenCompra: true } }
+      },
     });
     return this.mapRow(row);
   }

@@ -3,6 +3,7 @@ import { EmpleadoService } from '../../../application/services/EmpleadoService.j
 import { EmpleadoInput } from '../../../domain/ports/EmpleadoRepositoryPort.js';
 import { EmpleadoDocumentoTipo } from '../../../domain/entities/EmpleadoDocumento.js';
 import { isValidDocumentoTipo } from '../persistence/prismaEmpleadoDocumentoAdapter.js';
+import { prisma } from '../../../../../config/prismaClient.js';
 
 export interface EmpleadosController {
   list(req: Request, res: Response): Promise<Response>;
@@ -31,6 +32,8 @@ const parseBody = (body: Record<string, unknown>): EmpleadoInput => ({
   sueldoDiario: Number(body.sueldoDiario) || 0,
   direccion: String(body.direccion ?? ''),
   foto: body.foto ? String(body.foto) : null,
+  rol: body.rol ? String(body.rol) : undefined,
+  roleId: body.roleId ? String(body.roleId) : undefined,
 });
 
 const paramId = (req: Request): string => String(req.params.id);
@@ -63,10 +66,15 @@ export function createEmpleadosController(empleadoService: EmpleadoService): Emp
           });
         }
 
+        const user = await prisma.user.findUnique({ where: { empleadoId: paramId(req) } });
+
         return res.status(200).json({
           success: true,
           data: {
             ...empleado.toJSON(),
+            username: user?.username || '',
+            rol: user?.rol || '',
+            roleId: user?.roleId || '',
             documentos: (await empleadoService.listDocumentos(paramId(req))).map((d) => d.toJSON()),
           },
         });

@@ -19,6 +19,7 @@ model User {
   passwordHash        String        @map("password_hash")
   fechaCreacion       DateTime      @default(now()) @map("fecha_creacion")
   ultimoAcceso        DateTime?     @map("ultimo_acceso")
+  sidebarConfig       String?       @map("sidebar_config")
   auditLogs           AuditLog[]
   prestamos           Prestamo[]
   ordenesCompra       OrdenCompra[]
@@ -27,7 +28,10 @@ model User {
   tareasCreadas       Tarea[]           @relation("TareasCreadas")
   tareasAsignadas     TareaAsignacion[] @relation("TareasAsignadas")
   cierresCaja         CierreCaja[]
+  empleadoId          String?       @unique @map("empleado_id")
+  empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
 
+  @@index([roleId])
   @@map("users")
 }
 
@@ -71,6 +75,7 @@ model AuditLog {
   detalle    String
   severidad  String
 
+  @@index([userId, fecha(sort: Desc)])
   @@map("audit_logs")
 }
 
@@ -96,6 +101,7 @@ model Material {
   prestamos     Prestamo[]
   detallesCompra DetalleCompra[]
 
+  @@index([unidadMedidaId])
   @@map("materiales")
 }
 
@@ -118,6 +124,7 @@ model MovimientoInventario {
   fecha      DateTime @default(now())
   userId     String?  @map("user_id")
 
+  @@index([materialId])
   @@map("movimientos_inventario")
 }
 
@@ -133,6 +140,8 @@ model Prestamo {
   comentarios   String?
   estado        String    @default("prestado") // "prestado" o "devuelto"
 
+  @@index([materialId])
+  @@index([responsableId])
   @@map("prestamos")
 }
 
@@ -160,9 +169,11 @@ model MetodoPago {
   nombre      String        @unique
   descripcion String?
   activo      Boolean       @default(true)
+  tipo        String        @default("EFECTIVO") // "EFECTIVO" o "BANCO"
   abonos      AbonoCompra[]
   gastos      Gasto[]
   proformas   Proforma[]
+  abonosProforma AbonoProforma[]
 
   @@map("metodos_pago")
 }
@@ -192,6 +203,10 @@ model OrdenCompra {
   proyectoId        String?         @map("proyecto_id")
   proyecto          Proyecto?       @relation(fields: [proyectoId], references: [id], onDelete: SetNull)
 
+  @@index([proveedorId])
+  @@index([usuarioId])
+  @@index([aprobadoPorId])
+  @@index([proyectoId])
   @@map("ordenes_compra")
 }
 
@@ -206,6 +221,8 @@ model DetalleCompra {
   precioUnitario  Float        @map("precio_unitario")
   subtotal        Float        @default(0)
 
+  @@index([ordenCompraId])
+  @@index([materialId])
   @@map("detalles_compra")
 }
 
@@ -219,6 +236,8 @@ model AbonoCompra {
   fecha           DateTime     @default(now())
   referencia      String?
 
+  @@index([ordenCompraId])
+  @@index([metodoPagoId])
   @@map("abonos_compra")
 }
 
@@ -246,6 +265,7 @@ model Notification {
   createdBy String?  @map("created_by")
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([userId])
   @@map("notifications")
 }
 
@@ -258,6 +278,7 @@ model PushSubscription {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("fecha_creacion")
 
+  @@index([userId])
   @@map("push_subscriptions")
 }
 
@@ -276,6 +297,7 @@ model Tarea {
   fechaActualizacion DateTime?         @map("fecha_actualizacion")
   asignaciones       TareaAsignacion[]
 
+  @@index([creadoPorId])
   @@map("tareas")
 }
 
@@ -318,6 +340,7 @@ model Empleado {
   egresos      Egreso[]
   ingresosDetalles IngresoDetalle[]
   instalaciones ProyectoInstalacionPersonal[]
+  user         User?
 
   @@map("empleados")
 }
@@ -466,7 +489,10 @@ model Proforma {
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   items         ProformaItem[]
+  abonos        AbonoProforma[]
 
+  @@index([clienteId])
+  @@index([metodoPagoId])
   @@map("proformas")
 }
 
@@ -496,6 +522,21 @@ model ProformaItem {
   @@map("proforma_items")
 }
 
+model AbonoProforma {
+  id            String     @id @default(uuid())
+  proformaId    String     @map("proforma_id")
+  proforma      Proforma   @relation(fields: [proformaId], references: [id], onDelete: Cascade)
+  metodoPagoId  String     @map("metodo_pago_id")
+  metodoPago    MetodoPago @relation(fields: [metodoPagoId], references: [id])
+  monto         Float
+  fecha         DateTime   @default(now())
+  referencia    String?
+
+  @@index([proformaId])
+  @@index([metodoPagoId])
+  @@map("abonos_proforma")
+}
+
 // ── Módulo de Gastos ───────────────────────────────────────────────────────────
 
 model Gasto {
@@ -514,6 +555,8 @@ model Gasto {
   createdAt      DateTime                @default(now()) @map("created_at")
   updatedAt      DateTime                @updatedAt @map("updated_at")
 
+  @@index([proyectoId])
+  @@index([metodoPagoId])
   @@map("gastos")
 }
 
@@ -554,6 +597,7 @@ model VehiculoMantenimiento {
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   @@index([vehiculoId, fechaRealizado])
+  @@index([gastoId])
   @@map("vehiculo_mantenimientos")
 }
 
@@ -590,6 +634,7 @@ model Proyecto {
   ordenesCompra          OrdenCompra[]
   gastos                 Gasto[]
   
+  @@index([clienteId])
   @@map("proyectos")
 }
 
@@ -631,6 +676,8 @@ model ProyectoInstalacionPersonal {
   empleado       Empleado            @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
   rol            String              @default("") // Ej: "Instalador principal", "Ayudante"
   
+  @@index([instalacionId])
+  @@index([empleadoId])
   @@map("proyecto_instalacion_personal")
 }
 
@@ -643,6 +690,7 @@ model ProyectoInstalacionMaterial {
   unidad         String              @default("")
   observacion    String              @default("")
   
+  @@index([instalacionId])
   @@map("proyecto_instalacion_materiales")
 }
 
@@ -677,6 +725,7 @@ model ImpresionJob {
   // Relación con Proyecto opcional para poder navegar
   proyecto          Proyecto? @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
 
+  @@index([proyectoId])
   @@map("impresion_jobs")
 }
 
@@ -695,5 +744,6 @@ model CierreCaja {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
+  @@index([usuarioId])
   @@map("cierres_caja")
 }

@@ -97,14 +97,18 @@ export class ComprasService {
         return this.repo.findAllCuentasPorPagar(options);
     }
     // ── Métodos de Pago ────────────────────────────────────────────────────────
-    getMetodosPago() {
-        return this.repo.findAllMetodosPago();
+    getMetodosPago(desde, hasta) {
+        return this.repo.findAllMetodosPago(desde, hasta);
     }
     async createMetodoPago(data) {
         if (!data.nombre || !data.nombre.trim()) {
             throw new Error('El nombre del método de pago es requerido.');
         }
-        return this.repo.createMetodoPago({ ...data, nombre: data.nombre.trim() });
+        return this.repo.createMetodoPago({
+            ...data,
+            nombre: data.nombre.trim(),
+            tipo: data.tipo || 'EFECTIVO'
+        });
     }
     async updateMetodoPago(id, data) {
         return this.repo.updateMetodoPago(id, data);

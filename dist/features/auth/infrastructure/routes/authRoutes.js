@@ -11,6 +11,7 @@ export function createAuthRoutes(authController) {
     router.post('/register', (req, res) => authController.register(req, res));
     // Rutas protegidas (Usuario Autenticado)
     router.get('/me', authMiddleware, (req, res) => authController.me(req, res));
+    router.put('/users/me/sidebar-config', authMiddleware, (req, res) => authController.updateSidebarConfig(req, res));
     // --- GESTIÓN DE USUARIOS (Solo Admins) ---
     router.get('/users', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.listUsers(req, res));
     router.post('/users', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.createUser(req, res));
@@ -19,7 +20,7 @@ export function createAuthRoutes(authController) {
     router.put('/users/:id/toggle-status', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.toggleUserStatus(req, res));
     router.delete('/users/:id', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.deleteUser(req, res));
     // --- GESTIÓN DE ROLES Y PERMISOS (Solo Admins) ---
-    router.get('/roles', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.listRoles(req, res));
+    router.get('/roles', authMiddleware, (req, res) => authController.listRoles(req, res));
     router.post('/roles', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.createRole(req, res));
     router.put('/roles/:id', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.updateRole(req, res));
     router.delete('/roles/:id', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => authController.deleteRole(req, res));

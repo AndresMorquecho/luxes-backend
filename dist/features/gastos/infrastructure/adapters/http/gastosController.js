@@ -1,4 +1,5 @@
 import { prisma } from '../../../../../config/prismaClient.js';
+import { Prisma } from '@prisma/client';
 async function nextGastoId() {
     const rows = await prisma.gasto.findMany({ select: { id: true } });
     const max = rows.reduce((m, r) => {
@@ -115,26 +116,25 @@ export class GastosController {
             if (!desde || !hasta) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Fechas desde y hasta son requeridas' } });
             }
-            const desdeDate = new Date(String(desde));
-            const hastaLimit = new Date(String(hasta));
-            hastaLimit.setHours(23, 59, 59, 999);
-            // 1. Obtener ingresos (proformas aceptadas/pagadas)
-            const proformas = await prisma.proforma.findMany({
+            const desdeStr = String(desde);
+            const desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+            const hastaStr = String(hasta);
+            const hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+            // 1. Obtener ingresos (abonos reales de proformas)
+            const abonosProforma = await prisma.abonoProforma.findMany({
                 where: {
-                    estado: { in: ['Aprobada', 'Pagada'] },
                     fecha: { gte: desdeDate, lte: hastaLimit },
                 },
-                include: { metodoPago: true, items: true },
+                include: { metodoPago: true },
             });
             // Calcular montos de ingresos por método de pago
             const ingresosDetalle = {};
             let totalIngresos = 0;
-            for (const p of proformas) {
-                const subtotal = p.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-                const total = subtotal * (1 + Number(p.iva));
+            for (const ab of abonosProforma) {
+                const total = Number(ab.monto);
                 totalIngresos += total;
-                const methodId = p.metodoPagoId || 'no_especificado';
-                const methodName = p.metodoPago?.nombre || 'No especificado';
+                const methodId = ab.metodoPagoId || 'no_especificado';
+                const methodName = ab.metodoPago?.nombre || 'No especificado';
                 if (!ingresosDetalle[methodId]) {
                     ingresosDetalle[methodId] = { id: methodId, nombre: methodName, total: 0 };
                 }
@@ -206,7 +206,7 @@ export class GastosController {
                     totalEgresos,
                     balance: totalIngresos - totalEgresos,
                     metodosDetalle: metodosDetalleList,
-                    ingresosConteo: proformas.length,
+                    ingresosConteo: abonosProforma.length,
                     egresosConteo: gastos.length + abonos.length,
                 },
             });
@@ -242,36 +242,177 @@ export class GastosController {
             return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar cierre de caja' } });
         }
     }
+    // --- MOVIMIENTOS FINANCIEROS (VISTA UNIFICADA) ---
+    async listMovimientos(req, res) {
+        try {
+            const { desde, hasta, tipo, metodoPagoId } = req.query;
+            // Default: últimos 30 días
+            let desdeDate = new Date();
+            desdeDate.setDate(desdeDate.getDate() - 30);
+            desdeDate.setHours(0, 0, 0, 0);
+            if (desde) {
+                const desdeStr = String(desde);
+                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+            }
+            let hastaLimit = new Date();
+            hastaLimit.setHours(23, 59, 59, 999);
+            if (hasta) {
+                const hastaStr = String(hasta);
+                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+            }
+            const movimientos = [];
+            // 1. INGRESOS — AbonoProforma
+            if (!tipo || tipo === 'todos' || tipo === 'ingreso') {
+                const whereIngreso = {
+                    fecha: { gte: desdeDate, lte: hastaLimit },
+                };
+                if (metodoPagoId)
+                    whereIngreso.metodoPagoId = String(metodoPagoId);
+                const abonosProforma = await prisma.abonoProforma.findMany({
+                    where: whereIngreso,
+                    include: {
+                        metodoPago: true,
+                        proforma: {
+                            include: {
+                                cliente: { select: { nombre: true } },
+                            },
+                        },
+                    },
+                    orderBy: { fecha: 'desc' },
+                });
+                for (const ab of abonosProforma) {
+                    movimientos.push({
+                        id: ab.id,
+                        tipo: 'ingreso',
+                        origen: 'proforma',
+                        fecha: ab.fecha,
+                        monto: Number(ab.monto),
+                        descripcion: `Cobro Proforma ${ab.proforma?.id || ab.proformaId || ''}`,
+                        referencia: ab.referencia || '',
+                        metodoPago: ab.metodoPago?.nombre || 'No especificado',
+                        metodoPagoId: ab.metodoPagoId,
+                        entidad: ab.proforma?.clienteNombre || ab.proforma?.cliente?.nombre || 'Cliente no especificado',
+                        usuario: ab.proforma?.atiende || '—',
+                    });
+                }
+            }
+            // 2. EGRESOS — Gastos
+            if (!tipo || tipo === 'todos' || tipo === 'egreso') {
+                const whereGasto = {
+                    fecha: { gte: desdeDate, lte: hastaLimit },
+                };
+                if (metodoPagoId)
+                    whereGasto.metodoPagoId = String(metodoPagoId);
+                const gastos = await prisma.gasto.findMany({
+                    where: whereGasto,
+                    include: { metodoPago: true },
+                    orderBy: { fecha: 'desc' },
+                });
+                for (const g of gastos) {
+                    movimientos.push({
+                        id: g.id,
+                        tipo: 'egreso',
+                        origen: 'gasto',
+                        fecha: g.fecha,
+                        monto: Number(g.monto),
+                        descripcion: g.concepto,
+                        referencia: '',
+                        metodoPago: g.metodoPago?.nombre || 'No especificado',
+                        metodoPagoId: g.metodoPagoId,
+                        entidad: g.proveedor || g.categoria || '',
+                        usuario: '—',
+                    });
+                }
+                // 3. EGRESOS — AbonoCompra
+                const whereAbono = {
+                    fecha: { gte: desdeDate, lte: hastaLimit },
+                };
+                if (metodoPagoId)
+                    whereAbono.metodoPagoId = String(metodoPagoId);
+                const abonosCompra = await prisma.abonoCompra.findMany({
+                    where: whereAbono,
+                    include: {
+                        metodoPago: true,
+                        ordenCompra: {
+                            include: {
+                                proveedor: { select: { nombre: true } },
+                                usuario: { select: { nombre: true } },
+                                aprobadoPor: { select: { nombre: true } },
+                            },
+                        },
+                    },
+                    orderBy: { fecha: 'desc' },
+                });
+                for (const ab of abonosCompra) {
+                    movimientos.push({
+                        id: ab.id,
+                        tipo: 'egreso',
+                        origen: 'orden_compra',
+                        fecha: ab.fecha,
+                        monto: Number(ab.monto),
+                        descripcion: `Pago OC ${ab.ordenCompra?.numero || ''}`,
+                        referencia: ab.referencia || '',
+                        metodoPago: ab.metodoPago?.nombre || 'No especificado',
+                        metodoPagoId: ab.metodoPagoId,
+                        entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
+                        usuario: ab.ordenCompra?.aprobadoPor?.nombre || ab.ordenCompra?.usuario?.nombre || '—',
+                    });
+                }
+            }
+            // Sort unified by date descending
+            movimientos.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+            // Compute KPIs
+            const totalIngresos = movimientos.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0);
+            const totalEgresos = movimientos.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0);
+            return res.status(200).json({
+                success: true,
+                data: {
+                    movimientos,
+                    kpi: {
+                        totalIngresos,
+                        totalEgresos,
+                        balance: totalIngresos - totalEgresos,
+                        conteo: movimientos.length,
+                    },
+                },
+            });
+        }
+        catch (error) {
+            console.error('[movimientos/list]', error);
+            return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener movimientos financieros' } });
+        }
+    }
     // --- REPORTES FINANCIEROS DASHBOARD ---
     async getReportesDashboard(req, res) {
         try {
             const { desde, hasta } = req.query;
-            // Por defecto, últimos 30 días
+            // Default: últimos 30 días
             let desdeDate = new Date();
             desdeDate.setDate(desdeDate.getDate() - 30);
-            if (desde)
-                desdeDate = new Date(String(desde));
+            desdeDate.setHours(0, 0, 0, 0);
+            if (desde) {
+                const desdeStr = String(desde);
+                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+            }
             let hastaLimit = new Date();
             hastaLimit.setHours(23, 59, 59, 999);
             if (hasta) {
-                hastaLimit = new Date(String(hasta));
-                hastaLimit.setHours(23, 59, 59, 999);
+                const hastaStr = String(hasta);
+                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
             }
             // 1. Ingresos
-            const proformas = await prisma.proforma.findMany({
+            const abonosProforma = await prisma.abonoProforma.findMany({
                 where: {
-                    estado: { in: ['Aprobada', 'Pagada'] },
                     fecha: { gte: desdeDate, lte: hastaLimit },
                 },
-                include: { items: true, metodoPago: true },
+                include: { metodoPago: true },
             });
             let totalIngresos = 0;
             const ingresosMetodo = {};
-            for (const p of proformas) {
-                const sub = p.items.reduce((s, i) => s + (Number(i.cantidad) * Number(i.precioUnitario)), 0);
-                const tot = sub * (1 + Number(p.iva));
+            for (const ab of abonosProforma) {
+                const tot = Number(ab.monto);
                 totalIngresos += tot;
-                const method = p.metodoPago?.nombre || 'No especificado';
+                const method = ab.metodoPago?.nombre || 'No especificado';
                 ingresosMetodo[method] = (ingresosMetodo[method] || 0) + tot;
             }
             // 2. Egresos
@@ -308,18 +449,12 @@ export class GastosController {
                 const mesInicio = new Date(d.getFullYear(), d.getMonth(), 1);
                 const mesFin = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
                 // Ingresos del mes
-                const profsMes = await prisma.proforma.findMany({
+                const abonosMes = await prisma.abonoProforma.findMany({
                     where: {
-                        estado: { in: ['Aprobada', 'Pagada'] },
                         fecha: { gte: mesInicio, lte: mesFin },
                     },
-                    include: { items: true },
                 });
-                let ingMes = 0;
-                for (const p of profsMes) {
-                    const sub = p.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-                    ingMes += sub * (1 + Number(p.iva));
-                }
+                const ingMes = abonosMes.reduce((sum, ab) => sum + Number(ab.monto), 0);
                 // Egresos del mes
                 const gastsMes = await prisma.gasto.findMany({
                     where: { fecha: { gte: mesInicio, lte: mesFin } },
@@ -348,7 +483,7 @@ export class GastosController {
                         ingresos: totalIngresos,
                         egresos: totalEgresos,
                         balance: totalIngresos - totalEgresos,
-                        conteoVentas: proformas.length,
+                        conteoVentas: abonosProforma.length,
                         conteoEgresos: gastos.length + abonos.length,
                     },
                     breakdownCategorias: categsBreakdown,
@@ -361,6 +496,280 @@ export class GastosController {
         catch (error) {
             console.error('[reportes/dashboard]', error);
             return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al generar reportes financieros' } });
+        }
+    }
+    // --- REPORTES FINANCIEROS Y OPERATIVOS DEL DASHBOARD REDISEÑADO ---
+    async getDashboardSummary(req, res) {
+        try {
+            const { desde, hasta } = req.query;
+            // Default: últimos 30 días
+            let desdeDate = new Date();
+            desdeDate.setDate(desdeDate.getDate() - 30);
+            desdeDate.setHours(0, 0, 0, 0);
+            if (desde) {
+                const desdeStr = String(desde);
+                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+            }
+            let hastaLimit = new Date();
+            hastaLimit.setHours(23, 59, 59, 999);
+            if (hasta) {
+                const hastaStr = String(hasta);
+                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+            }
+            // 1. Usuarios y actividades
+            const dbUsers = await prisma.user.findMany({
+                where: { estado: 'activo' },
+                select: { id: true, nombre: true, username: true, rol: true, empleadoId: true }
+            });
+            const userIds = dbUsers.map(u => u.id);
+            const latestTaskByUser = {};
+            const lastActionByUser = {};
+            if (userIds.length > 0) {
+                // Fetch active tasks in batch
+                const allActiveAssignments = await prisma.tareaAsignacion.findMany({
+                    where: {
+                        userId: { in: userIds },
+                        tarea: { estado: { in: ['pendiente', 'en_progreso'] } }
+                    },
+                    select: {
+                        userId: true,
+                        tarea: {
+                            select: { id: true, titulo: true, estado: true, prioridad: true, fechaCreacion: true }
+                        }
+                    }
+                });
+                const latestTaskTimeByUser = {};
+                for (const assign of allActiveAssignments) {
+                    const uid = assign.userId;
+                    const task = assign.tarea;
+                    const taskTime = new Date(task.fechaCreacion).getTime();
+                    if (!latestTaskByUser[uid] || taskTime > latestTaskTimeByUser[uid]) {
+                        latestTaskByUser[uid] = {
+                            id: task.id,
+                            titulo: task.titulo,
+                            estado: task.estado,
+                            prioridad: task.prioridad
+                        };
+                        latestTaskTimeByUser[uid] = taskTime;
+                    }
+                }
+                // Fetch last actions in batch using PostgreSQL native DISTINCT ON
+                const lastActionsRaw = await prisma.$queryRaw `
+          SELECT DISTINCT ON (user_id) user_id as "userId", fecha, accion, modulo, detalle
+          FROM audit_logs
+          WHERE user_id IN (${Prisma.join(userIds)})
+          ORDER BY user_id, fecha DESC
+        `;
+                for (const action of lastActionsRaw) {
+                    lastActionByUser[action.userId] = {
+                        fecha: action.fecha,
+                        accion: action.accion,
+                        modulo: action.modulo,
+                        detalle: action.detalle
+                    };
+                }
+            }
+            const usersActivity = dbUsers.map(u => ({
+                id: u.id,
+                nombre: u.nombre,
+                username: u.username,
+                rol: u.rol,
+                empleadoId: u.empleadoId,
+                activeTask: latestTaskByUser[u.id] || null,
+                lastAction: lastActionByUser[u.id] || null
+            }));
+            // 2. Cola de impresión
+            const currentPrintingJob = await prisma.impresionJob.findFirst({
+                where: { status: { in: ['Imprimiendo', 'Pausado', 'Listo'] } },
+                select: {
+                    id: true,
+                    name: true,
+                    client: true,
+                    width: true,
+                    height: true,
+                    copies: true,
+                    responsible: true,
+                    status: true,
+                    elapsedSeconds: true,
+                    format: true,
+                    urgency: true,
+                    notes: true,
+                    fileUrl: true,
+                    proyectoNombre: true,
+                    proyectoId: true,
+                    startTime: true
+                }
+            });
+            const printQueue = await prisma.impresionJob.findMany({
+                where: { status: 'En espera' },
+                orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+                take: 5,
+                select: {
+                    id: true,
+                    name: true,
+                    client: true,
+                    width: true,
+                    height: true,
+                    copies: true,
+                    responsible: true,
+                    status: true,
+                    elapsedSeconds: true,
+                    format: true,
+                    urgency: true,
+                    notes: true,
+                    fileUrl: true,
+                    proyectoNombre: true,
+                    proyectoId: true,
+                    startTime: true
+                }
+            });
+            // 3. Proformas en el período
+            const proformas = await prisma.proforma.findMany({
+                where: { fecha: { gte: desdeDate, lte: hastaLimit } },
+                include: { items: true }
+            });
+            let totalFacturado = 0;
+            let porAprobarCount = 0;
+            let rechazadasCount = 0;
+            let aprobadasCount = 0;
+            let pagadasCount = 0;
+            for (const prof of proformas) {
+                const sub = prof.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
+                const total = sub * (1 + Number(prof.iva || 0.12));
+                totalFacturado += total;
+                if (prof.estado === 'Pendiente')
+                    porAprobarCount++;
+                else if (prof.estado === 'Rechazada')
+                    rechazadasCount++;
+                else if (prof.estado === 'Aprobada')
+                    aprobadasCount++;
+                else if (prof.estado === 'Pagada')
+                    pagadasCount++;
+            }
+            // 4. Proyectos y fases
+            const proyectos = await prisma.proyecto.findMany({
+                where: {
+                    OR: [
+                        { fechaCreacion: { gte: desdeDate, lte: hastaLimit } },
+                        { estado: 'ACTIVO' }
+                    ]
+                },
+                select: { id: true, nombre: true, faseActual: true, progreso: true, estado: true, clienteNombre: true, responsable: true }
+            });
+            const proyectosFaseCount = {
+                DISENIO: 0,
+                APROBACION: 0,
+                PRODUCCION: 0,
+                INSTALACION: 0,
+                COMPLETADO: 0
+            };
+            for (const proy of proyectos) {
+                const fase = proy.faseActual;
+                if (proyectosFaseCount[fase] !== undefined) {
+                    proyectosFaseCount[fase]++;
+                }
+            }
+            // 5. Últimos movimientos financieros y KPIs
+            const abonosProforma = await prisma.abonoProforma.findMany({
+                where: { fecha: { gte: desdeDate, lte: hastaLimit } },
+                include: { metodoPago: true, proforma: true }
+            });
+            const dbGastos = await prisma.gasto.findMany({
+                where: { fecha: { gte: desdeDate, lte: hastaLimit } },
+                include: { metodoPago: true }
+            });
+            const abonosCompra = await prisma.abonoCompra.findMany({
+                where: { fecha: { gte: desdeDate, lte: hastaLimit } },
+                include: { metodoPago: true, ordenCompra: { include: { proveedor: true, usuario: true, aprobadoPor: true } } }
+            });
+            const recentMovements = [];
+            let totalIngresos = 0;
+            let totalEgresos = 0;
+            // Incomes
+            for (const ab of abonosProforma) {
+                const monto = Number(ab.monto);
+                totalIngresos += monto;
+                recentMovements.push({
+                    id: ab.id,
+                    tipo: 'ingreso',
+                    origen: 'proforma',
+                    fecha: ab.fecha,
+                    monto,
+                    descripcion: `Cobro Proforma ${ab.proforma?.id || ab.proformaId || ''}`,
+                    referencia: ab.referencia || '',
+                    metodoPago: ab.metodoPago?.nombre || 'No especificado',
+                    entidad: ab.proforma?.clienteNombre || 'Cliente no especificado',
+                    usuario: ab.proforma?.atiende || '—',
+                });
+            }
+            // Expenses - General Gastos
+            for (const g of dbGastos) {
+                const monto = Number(g.monto);
+                totalEgresos += monto;
+                recentMovements.push({
+                    id: g.id,
+                    tipo: 'egreso',
+                    origen: 'gasto',
+                    fecha: g.fecha,
+                    monto,
+                    descripcion: g.concepto,
+                    referencia: '',
+                    metodoPago: g.metodoPago?.nombre || 'No especificado',
+                    entidad: g.proveedor || g.categoria || '',
+                    usuario: '—',
+                });
+            }
+            // Expenses - OC Payments
+            for (const ab of abonosCompra) {
+                const monto = Number(ab.monto);
+                totalEgresos += monto;
+                recentMovements.push({
+                    id: ab.id,
+                    tipo: 'egreso',
+                    origen: 'orden_compra',
+                    fecha: ab.fecha,
+                    monto,
+                    descripcion: `Pago OC ${ab.ordenCompra?.numero || ''}`,
+                    referencia: ab.referencia || '',
+                    metodoPago: ab.metodoPago?.nombre || 'No especificado',
+                    entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
+                    usuario: ab.ordenCompra?.aprobadoPor?.nombre || ab.ordenCompra?.usuario?.nombre || '—',
+                });
+            }
+            // Sort and slice top 5
+            recentMovements.sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+            const top5Movements = recentMovements.slice(0, 5);
+            return res.status(200).json({
+                success: true,
+                data: {
+                    periodo: {
+                        desde: desdeDate,
+                        hasta: hastaLimit
+                    },
+                    kpi: {
+                        ingresos: totalIngresos,
+                        egresos: totalEgresos,
+                        balance: totalIngresos - totalEgresos,
+                        proformasTotal: proformas.length,
+                        proformasMonto: totalFacturado,
+                        porAprobar: porAprobarCount,
+                        rechazadas: rechazadasCount,
+                        aprobadas: aprobadasCount,
+                        pagadas: pagadasCount,
+                        proyectosActivos: proyectos.filter(p => p.estado === 'ACTIVO').length
+                    },
+                    usersActivity,
+                    currentPrintingJob,
+                    printQueue,
+                    proyectosActivos: proyectos,
+                    proyectosFaseCount,
+                    recentMovements: top5Movements
+                }
+            });
+        }
+        catch (error) {
+            console.error('[reportes/dashboard-summary]', error);
+            return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al generar resumen consolidado del dashboard' } });
         }
     }
 }

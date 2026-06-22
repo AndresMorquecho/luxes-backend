@@ -21,6 +21,8 @@ export interface AuthController {
   listPermissions(req: Request, res: Response): Promise<Response>;
   // Historial de Auditoría
   listAuditLogs(req: Request, res: Response): Promise<Response>;
+  // Personalización de interfaz
+  updateSidebarConfig(req: any, res: Response): Promise<Response>;
 }
 
 /**
@@ -351,6 +353,32 @@ export function createAuthController(authService: AuthService): AuthController {
         return res.status(500).json({
           success: false,
           error: { message: 'Error al listar logs de auditoría' },
+        });
+      }
+    },
+
+    async updateSidebarConfig(req: any, res: Response): Promise<Response> {
+      try {
+        const userId = req.user?.id;
+        const { sidebarConfig } = req.body ?? {};
+        if (!userId) {
+          return res.status(401).json({
+            success: false,
+            error: { message: 'Usuario no autenticado' }
+          });
+        }
+        
+        const configStr = sidebarConfig ? JSON.stringify(sidebarConfig) : null;
+        const updatedUser = await authService.updateSidebarConfig(userId, configStr ?? '');
+        return res.status(200).json({
+          success: true,
+          data: updatedUser
+        });
+      } catch (error: any) {
+        console.error('[auth/updateSidebarConfig]', error);
+        return res.status(400).json({
+          success: false,
+          error: { message: error.message || 'Error al actualizar configuración' }
         });
       }
     },

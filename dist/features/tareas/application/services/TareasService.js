@@ -25,10 +25,27 @@ export class TareasService {
         }
         return this.repo.create(data);
     }
-    async updateTarea(id, data) {
+    async updateTarea(id, data, updater) {
         const tarea = await this.repo.findById(id);
         if (!tarea)
             throw new Error('Tarea no encontrada.');
+        const userRole = (updater?.rol || '').toLowerCase();
+        const isAdmin = userRole === 'admin' || userRole === 'administrador';
+        if (!isAdmin) {
+            // Non-admins can only change the "estado"
+            if (data.titulo !== undefined ||
+                data.descripcion !== undefined ||
+                data.prioridad !== undefined ||
+                data.fechaLimite !== undefined ||
+                data.asignadoA !== undefined) {
+                throw new Error('No tienes permisos para modificar los detalles de la tarea.');
+            }
+            // Verify the user is assigned to the task
+            const isAssigned = tarea.asignaciones?.some(a => a.userId === updater?.id);
+            if (!isAssigned) {
+                throw new Error('No puedes actualizar una tarea que no tienes asignada.');
+            }
+        }
         // Validate state transitions
         if (data.estado) {
             const validTransitions = {
@@ -42,7 +59,7 @@ export class TareasService {
                 throw new Error(`No se puede cambiar de "${tarea.estado}" a "${data.estado}".`);
             }
         }
-        return this.repo.update(id, data);
+        return this.repo.update(id, data, updater);
     }
     async deleteTarea(id) {
         const tarea = await this.repo.findById(id);

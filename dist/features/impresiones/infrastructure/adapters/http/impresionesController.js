@@ -145,18 +145,19 @@ export class ImpresionesController {
                     updateData.startedPrintingAt = nowStr;
                     updateData.startTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     updateData.responsible = username;
+                    const consumoMsg = b.consumoDetalle ? ` Materiales a descontar: ${b.consumoDetalle}.` : '';
                     try {
                         await prisma.notification.create({
                             data: {
                                 title: 'Impresión Iniciada',
-                                message: `El operador ${username} ha iniciado la impresión de "${currentJob.name}".`,
+                                message: `El operador ${username} ha iniciado la impresión de "${currentJob.name}".${consumoMsg}`,
                                 rol: 'admin',
                                 createdBy: username,
                             },
                         });
                         await sendPushToRole('admin', {
                             title: '🖨️ Impresión Iniciada',
-                            body: `Se inició la impresión de "${currentJob.name}" por ${username}.`,
+                            body: `Se inició la impresión de "${currentJob.name}" por ${username}.${consumoMsg}`,
                             data: { url: '/colas-impresion' },
                         });
                     }

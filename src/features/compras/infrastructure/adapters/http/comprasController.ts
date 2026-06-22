@@ -141,23 +141,36 @@ export class ComprasController {
 
   // ── Métodos de Pago ────────────────────────────────────────────────────────
 
-  async listMetodosPago(_req: Request, res: Response) {
+  async listMetodosPago(req: Request, res: Response) {
     try {
-      const data = await this.service.getMetodosPago();
+      const { desde, hasta } = req.query;
+      let desdeDate: Date | undefined;
+      let hastaLimit: Date | undefined;
+
+      if (desde && hasta) {
+        const desdeStr = String(desde);
+        desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+        const hastaStr = String(hasta);
+        hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+      }
+
+      const data = await this.service.getMetodosPago(desdeDate, hastaLimit);
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }
 
   async createMetodoPago(req: Request, res: Response) {
     try {
-      const data = await this.service.createMetodoPago(req.body);
+      const { nombre, descripcion, tipo } = req.body || {};
+      const data = await this.service.createMetodoPago({ nombre, descripcion, tipo });
       return res.status(201).json({ success: true, data });
     } catch (e) { return this.fail(res, e, 400); }
   }
 
   async updateMetodoPago(req: Request, res: Response) {
     try {
-      const data = await this.service.updateMetodoPago(String(req.params.id), req.body);
+      const { nombre, descripcion, activo, tipo } = req.body || {};
+      const data = await this.service.updateMetodoPago(String(req.params.id), { nombre, descripcion, activo, tipo });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }
   }

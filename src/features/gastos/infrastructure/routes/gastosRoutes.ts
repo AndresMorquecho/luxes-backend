@@ -16,6 +16,9 @@ export function createGastosRoutes(
   gastosRouter.put('/:id', authMiddleware, (req, res) => gastosController.update(req, res));
   gastosRouter.delete('/:id', authMiddleware, (req, res) => gastosController.remove(req, res));
 
+  // Movimientos financieros (vista unificada)
+  gastosRouter.get('/movimientos', authMiddleware, (req, res) => gastosController.listMovimientos(req, res));
+
   // Cierre de caja
   gastosRouter.get('/cierre/preview', authMiddleware, (req, res) => gastosController.previewCierre(req, res));
   gastosRouter.post('/cierre', authMiddleware, (req, res) => gastosController.saveCierre(req, res));
@@ -23,6 +26,7 @@ export function createGastosRoutes(
 
   // Reportes
   gastosRouter.get('/reportes/dashboard', authMiddleware, (req, res) => gastosController.getReportesDashboard(req, res));
+  gastosRouter.get('/reportes/dashboard-summary', authMiddleware, (req, res) => gastosController.getDashboardSummary(req, res));
 
   // Vehículos
   vehiculosRouter.get('/', authMiddleware, (req, res) => vehiculosController.listVehiculos(req, res));

@@ -15,6 +15,7 @@ export function createAuthRoutes(authController: AuthController): Router {
 
   // Rutas protegidas (Usuario Autenticado)
   router.get('/me', authMiddleware, (req, res) => authController.me(req, res));
+  router.put('/users/me/sidebar-config', authMiddleware, (req, res) => authController.updateSidebarConfig(req, res));
 
   // --- GESTIÓN DE USUARIOS (Solo Admins) ---
   router.get(
@@ -58,7 +59,6 @@ export function createAuthRoutes(authController: AuthController): Router {
   router.get(
     '/roles',
     authMiddleware,
-    requireRoles(['admin', 'Administrador']),
     (req, res) => authController.listRoles(req, res)
   );
   router.post(

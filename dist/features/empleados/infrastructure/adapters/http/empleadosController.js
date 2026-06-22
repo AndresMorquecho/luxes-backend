@@ -1,4 +1,5 @@
 import { isValidDocumentoTipo } from '../persistence/prismaEmpleadoDocumentoAdapter.js';
+import { prisma } from '../../../../../config/prismaClient.js';
 const parseBody = (body) => ({
     nombre: String(body.nombre ?? ''),
     cedula: String(body.cedula ?? ''),
@@ -15,6 +16,8 @@ const parseBody = (body) => ({
     sueldoDiario: Number(body.sueldoDiario) || 0,
     direccion: String(body.direccion ?? ''),
     foto: body.foto ? String(body.foto) : null,
+    rol: body.rol ? String(body.rol) : undefined,
+    roleId: body.roleId ? String(body.roleId) : undefined,
 });
 const paramId = (req) => String(req.params.id);
 export function createEmpleadosController(empleadoService) {
@@ -44,10 +47,14 @@ export function createEmpleadosController(empleadoService) {
                         error: { code: 'NOT_FOUND', message: 'Empleado no encontrado' },
                     });
                 }
+                const user = await prisma.user.findUnique({ where: { empleadoId: paramId(req) } });
                 return res.status(200).json({
                     success: true,
                     data: {
                         ...empleado.toJSON(),
+                        username: user?.username || '',
+                        rol: user?.rol || '',
+                        roleId: user?.roleId || '',
                         documentos: (await empleadoService.listDocumentos(paramId(req))).map((d) => d.toJSON()),
                     },
                 });

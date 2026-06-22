@@ -227,23 +227,35 @@ export class ProyectosController {
                 },
                 include: proyectoInclude,
             });
-            // Si requiere instalación, enviar notificación push a administradores
+            // Si requiere instalación, enviar notificación push y de base de datos a administradores y taller
             if (proyecto.requiereInstalacion) {
                 try {
+                    const rolesToNotify = ['taller', 'admin', 'administrador'];
+                    for (const roleName of rolesToNotify) {
+                        await prisma.notification.create({
+                            data: {
+                                title: 'Nuevo Proyecto con Instalación',
+                                message: `Se ha generado el nuevo proyecto "${proyecto.nombre}" con requerimiento de instalación.`,
+                                rol: roleName,
+                                createdBy: proyecto.responsable || 'Sistema',
+                            },
+                        });
+                    }
                     const payload = {
                         title: '🛠️ Nuevo Proyecto con Instalación',
                         body: `Se ha creado el proyecto "${proyecto.nombre}" con requerimiento de instalación.`,
                         icon: '/LogoGlobo.png',
                         badge: '/LogoGlobo.png',
                         data: {
-                            url: `/proyectos/${proyecto.id}`,
-                            action: 'view_project',
+                            url: `/instalaciones`,
+                            action: 'view_installations',
                             proyectoId: proyecto.id,
                         },
                     };
+                    await sendPushToRole('taller', payload);
                     await sendPushToRole('admin', payload);
                     await sendPushToRole('administrador', payload);
-                    console.log(`[Proyecto ${proyecto.id}] Notificación de proyecto con instalación enviada a administradores`);
+                    console.log(`[Proyecto ${proyecto.id}] Notificaciones de proyecto con instalación enviadas a administradores y taller`);
                 }
                 catch (notifError) {
                     console.error('[Proyecto Create] Error enviando notificación push:', notifError);

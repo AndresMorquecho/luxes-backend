@@ -322,5 +322,30 @@ export function createAuthController(authService) {
                 });
             }
         },
+        async updateSidebarConfig(req, res) {
+            try {
+                const userId = req.user?.id;
+                const { sidebarConfig } = req.body ?? {};
+                if (!userId) {
+                    return res.status(401).json({
+                        success: false,
+                        error: { message: 'Usuario no autenticado' }
+                    });
+                }
+                const configStr = sidebarConfig ? JSON.stringify(sidebarConfig) : null;
+                const updatedUser = await authService.updateSidebarConfig(userId, configStr ?? '');
+                return res.status(200).json({
+                    success: true,
+                    data: updatedUser
+                });
+            }
+            catch (error) {
+                console.error('[auth/updateSidebarConfig]', error);
+                return res.status(400).json({
+                    success: false,
+                    error: { message: error.message || 'Error al actualizar configuración' }
+                });
+            }
+        },
     };
 }

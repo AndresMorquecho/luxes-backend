@@ -42,6 +42,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
+            sidebarConfig: dbUser.sidebarConfig,
+            empleadoId: dbUser.empleadoId,
         });
     }
     async findByUsername(username) {
@@ -66,6 +68,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
+            sidebarConfig: dbUser.sidebarConfig,
+            empleadoId: dbUser.empleadoId,
         });
     }
     async findById(id) {
@@ -87,6 +91,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
+            sidebarConfig: dbUser.sidebarConfig,
+            empleadoId: dbUser.empleadoId,
         });
     }
     async create(user) {
@@ -100,6 +106,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 roleId: user.roleId,
                 estado: user.estado,
                 passwordHash: user.passwordHash,
+                sidebarConfig: user.sidebarConfig,
+                empleadoId: user.empleadoId,
             },
             include: this.userInclude,
         });
@@ -115,6 +123,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
+            sidebarConfig: dbUser.sidebarConfig,
+            empleadoId: dbUser.empleadoId,
         });
     }
     async findAll() {
@@ -137,6 +147,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
                 ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
                 permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
+                sidebarConfig: dbUser.sidebarConfig,
+                empleadoId: dbUser.empleadoId,
             });
         });
     }
@@ -152,6 +164,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 estado: user.estado,
                 passwordHash: user.passwordHash,
                 ultimoAcceso: user.ultimoAcceso ? new Date(user.ultimoAcceso) : null,
+                sidebarConfig: user.sidebarConfig,
+                empleadoId: user.empleadoId,
             },
             include: this.userInclude,
         });
@@ -167,6 +181,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
             ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
+            sidebarConfig: dbUser.sidebarConfig,
+            empleadoId: dbUser.empleadoId,
         });
     }
     async delete(id) {

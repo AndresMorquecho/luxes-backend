@@ -34,7 +34,10 @@ export async function sendPushToRole(
     // Obtener usuarios con el rol especificado que tengan suscripciones push
     const users = await prisma.user.findMany({
       where: {
-        rol: rol,
+        rol: {
+          equals: rol,
+          mode: 'insensitive',
+        },
         estado: 'activo',
         pushSubscriptions: {
           some: {},

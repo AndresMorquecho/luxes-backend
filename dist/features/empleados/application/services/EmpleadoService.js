@@ -23,17 +23,16 @@ export class EmpleadoService {
         if (existing) {
             throw new Error('Ya existe un empleado con esa cédula');
         }
+        const username = data.username?.trim() || data.correo?.trim().split('@')[0] || `user_${data.cedula.trim()}`;
+        const email = data.correo?.trim().toLowerCase() || `${username}@luxes.com`;
         // Validar si el correo ya está registrado en User
-        if (data.correo?.trim()) {
-            const existingEmail = await prisma.user.findFirst({
-                where: { email: data.correo.trim().toLowerCase() }
-            });
-            if (existingEmail) {
-                throw new Error('Ya existe un usuario con ese correo electrónico');
-            }
+        const existingEmail = await prisma.user.findFirst({
+            where: { email }
+        });
+        if (existingEmail) {
+            throw new Error('Ya existe un usuario con ese correo electrónico');
         }
         // Validar si el username ya está registrado en User
-        const username = data.username?.trim() || data.correo?.trim().split('@')[0] || `user_${data.cedula.trim()}`;
         const existingUsername = await prisma.user.findFirst({
             where: { username }
         });
@@ -42,24 +41,25 @@ export class EmpleadoService {
         }
         const id = await this.empleadoRepository.generateNextId();
         const passwordHash = await this.passwordHasher.hash(data.contraseña?.trim() || DEFAULT_PASSWORD);
-        const empleado = await this.empleadoRepository.create(id, { ...data, passwordHash });
-        // Crear el usuario correspondiente de manera automática
-        if (data.correo?.trim()) {
-            const defaultRole = await prisma.role.findFirst({
+        const empleado = await this.empleadoRepository.create(id, { ...data, correo: email, passwordHash });
+        // Crear el usuario correspondiente de manera automática y vincularlo
+        const defaultRole = data.roleId
+            ? await prisma.role.findUnique({ where: { id: data.roleId } })
+            : await prisma.role.findFirst({
                 where: { name: { in: ['User', 'Colaborador', 'visor'], mode: 'insensitive' } }
             });
-            await prisma.user.create({
-                data: {
-                    nombre: data.nombre,
-                    email: data.correo.trim().toLowerCase(),
-                    username,
-                    passwordHash: await this.passwordHasher.hash('123456'),
-                    rol: defaultRole?.name || 'visor',
-                    roleId: defaultRole?.id || null,
-                    estado: 'activo'
-                }
-            });
-        }
+        await prisma.user.create({
+            data: {
+                nombre: data.nombre,
+                email,
+                username,
+                passwordHash,
+                rol: defaultRole?.name || data.rol || 'visor',
+                roleId: defaultRole?.id || null,
+                estado: 'activo',
+                empleadoId: empleado.id
+            }
+        });
         return empleado;
     }
     async updateEmpleado(id, data) {
@@ -76,7 +76,49 @@ export class EmpleadoService {
         if (data.contraseña?.trim()) {
             updateData.passwordHash = await this.passwordHasher.hash(data.contraseña.trim());
         }
-        return this.empleadoRepository.update(id, updateData);
+        const empleado = await this.empleadoRepository.update(id, updateData);
+        // Sincronizar con User
+        const email = data.correo?.trim().toLowerCase();
+        const username = data.username?.trim();
+        const user = await prisma.user.findUnique({ where: { empleadoId: id } });
+        if (user) {
+            if (email && email !== user.email) {
+                const existingEmail = await prisma.user.findFirst({ where: { email } });
+                if (existingEmail) {
+                    throw new Error('Ya existe un usuario con ese correo electrónico');
+                }
+            }
+            if (username && username !== user.username) {
+                const existingUsername = await prisma.user.findFirst({ where: { username } });
+                if (existingUsername) {
+                    throw new Error('Ya existe un usuario con ese nombre de usuario');
+                }
+            }
+            let userRol = user.rol;
+            let userRoleId = user.roleId;
+            if (data.roleId) {
+                const selectedRole = await prisma.role.findUnique({ where: { id: data.roleId } });
+                if (selectedRole) {
+                    userRol = selectedRole.name;
+                    userRoleId = selectedRole.id;
+                }
+            }
+            else if (data.rol) {
+                userRol = data.rol;
+            }
+            await prisma.user.update({
+                where: { id: user.id },
+                data: {
+                    nombre: data.nombre,
+                    email: email || user.email,
+                    username: username || user.username,
+                    rol: userRol,
+                    roleId: userRoleId,
+                    ...(data.contraseña?.trim() ? { passwordHash: updateData.passwordHash } : {})
+                }
+            });
+        }
+        return empleado;
     }
     async deleteEmpleado(id) {
         const current = await this.empleadoRepository.findById(id);

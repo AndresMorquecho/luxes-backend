@@ -69,7 +69,8 @@ export class TareasController {
   // ── Update task ────────────────────────────────────────────────────────────
   async updateTarea(req: Request, res: Response) {
     try {
-      const data = await this.service.updateTarea(String(req.params.id), req.body);
+      const updater = (req as any).user;
+      const data = await this.service.updateTarea(String(req.params.id), req.body, updater);
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }
   }

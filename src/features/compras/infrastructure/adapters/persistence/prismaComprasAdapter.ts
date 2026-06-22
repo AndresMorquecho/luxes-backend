@@ -293,7 +293,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
   }
 
   async updateOrden(id: string, data: {
-    proveedorId?: string;
+    proveedorId?: string | null;
     fecha?: Date;
     impuesto?: number;
     estado?: string;
@@ -302,12 +302,19 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     detalles?: DetalleCompraInput[];
     aprobadoPorId?: string;
     proyectoId?: string | null;
+    abonoMonto?: number;
+    metodoPagoId?: string;
+    abonoReferencia?: string;
   }): Promise<OrdenCompraData> {
     const updateData: any = {};
     
-    // Solo actualizar proveedor si se proporciona Y no es vacío
-    if (data.proveedorId && data.proveedorId.trim() !== '') {
-      updateData.proveedor = { connect: { id: data.proveedorId } };
+    // Solo actualizar proveedor si se proporciona
+    if (data.proveedorId !== undefined) {
+      if (data.proveedorId && data.proveedorId.trim() !== '') {
+        updateData.proveedor = { connect: { id: data.proveedorId } };
+      } else {
+        updateData.proveedor = { disconnect: true };
+      }
     }
     
     if (data.fecha) updateData.fecha = new Date(data.fecha);
@@ -335,7 +342,12 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       }
     }
 
+    // Recalcular o determinar el total actual
+    let total = 0;
+    let detailsChanged = false;
+
     if (data.detalles) {
+      detailsChanged = true;
       // Recalculate totals
       const detallesData = data.detalles.map(d => ({
         descripcion: d.descripcion,
@@ -347,7 +359,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
 
       const subtotal = detallesData.reduce((sum, d) => sum + d.subtotal, 0);
       const impuesto = data.impuesto ?? 0;
-      const total = subtotal + impuesto;
+      total = subtotal + impuesto;
 
       updateData.subtotal = subtotal;
       updateData.impuesto = impuesto;
@@ -364,24 +376,88 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
           ...(d.materialId ? { materialId: d.materialId } : {}),
         })),
       };
-
-      // Update or create CxP
-      const cxp = await this.prisma.cuentaPorPagar.findUnique({
-        where: { ordenCompraId: id },
+    } else if (data.impuesto !== undefined) {
+      const existing = await this.prisma.ordenCompra.findUnique({
+        where: { id },
+        select: { subtotal: true },
       });
-      
-      if (total > 0) {
+      if (existing) {
+        updateData.impuesto = data.impuesto;
+        total = existing.subtotal + data.impuesto;
+        updateData.total = total;
+        detailsChanged = true;
+      }
+    } else {
+      const existing = await this.prisma.ordenCompra.findUnique({
+        where: { id },
+        select: { total: true },
+      });
+      if (existing) {
+        total = existing.total;
+      }
+    }
+
+    // Cuentas por Pagar (CxP) y Abonos (AbonoCompra)
+    const cxp = await this.prisma.cuentaPorPagar.findUnique({
+      where: { ordenCompraId: id },
+    });
+
+    const abonoMonto = data.abonoMonto || 0;
+    if (abonoMonto > 0 && data.metodoPagoId) {
+      // Registrar el abono
+      await this.prisma.abonoCompra.create({
+        data: {
+          ordenCompra: { connect: { id } },
+          metodoPago: { connect: { id: data.metodoPagoId } },
+          monto: abonoMonto,
+          referencia: data.abonoReferencia || null,
+        }
+      });
+
+      const currentMontoPagado = cxp ? cxp.montoPagado : 0;
+      const newMontoPagado = currentMontoPagado + abonoMonto;
+      const newSaldo = total - newMontoPagado;
+      const newEstado = newSaldo <= 0 ? 'pagado' : 'parcial';
+
+      updateData.estadoPago = newEstado;
+
+      if (cxp) {
+        await this.prisma.cuentaPorPagar.update({
+          where: { id: cxp.id },
+          data: {
+            montoTotal: total,
+            montoPagado: newMontoPagado,
+            saldo: Math.max(0, newSaldo),
+            estado: newEstado,
+          },
+        });
+      } else {
+        updateData.cuentaPorPagar = {
+          create: {
+            montoTotal: total,
+            montoPagado: abonoMonto,
+            saldo: Math.max(0, total - abonoMonto),
+            estado: abonoMonto >= total ? 'pagado' : 'parcial',
+          },
+        };
+      }
+    } else {
+      // Sin abono nuevo, pero si cambiaron los detalles o el impuesto, actualizar el montoTotal y saldo
+      if (detailsChanged && total > 0) {
         if (cxp) {
+          const newSaldo = total - cxp.montoPagado;
+          const newEstado = newSaldo <= 0 ? 'pagado' : cxp.montoPagado > 0 ? 'parcial' : 'pendiente';
+          updateData.estadoPago = newEstado === 'pendiente' ? 'sin_pagar' : newEstado;
+
           await this.prisma.cuentaPorPagar.update({
             where: { id: cxp.id },
             data: {
               montoTotal: total,
-              saldo: total - cxp.montoPagado,
-              estado: cxp.montoPagado >= total ? 'pagado' : cxp.montoPagado > 0 ? 'parcial' : 'pendiente',
+              saldo: Math.max(0, newSaldo),
+              estado: newEstado,
             },
           });
         } else {
-          // Crear cuenta por pagar si no existe
           updateData.cuentaPorPagar = {
             create: {
               montoTotal: total,
@@ -390,16 +466,8 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
               estado: 'pendiente',
             },
           };
+          updateData.estadoPago = 'sin_pagar';
         }
-      }
-    } else if (data.impuesto !== undefined) {
-      const existing = await this.prisma.ordenCompra.findUnique({
-        where: { id },
-        select: { subtotal: true },
-      });
-      if (existing) {
-        updateData.impuesto = data.impuesto;
-        updateData.total = existing.subtotal + data.impuesto;
       }
     }
 
@@ -412,7 +480,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto
     if (data.estado === 'aprobada' && row.proyectoId) {
       try {
-        const provName = (row as any).proveedor?.nombre || 'Proveedor';
+        const provName = (row as any).proveedor?.nombre || 'Sin proveedor específico';
         await this.prisma.gasto.create({
           data: {
             id: `G-OC-${row.id.slice(-8)}-${Date.now()}`,
@@ -569,19 +637,101 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
 
   // ── Métodos de Pago ────────────────────────────────────────────────────────
 
-  async findAllMetodosPago(): Promise<MetodoPagoData[]> {
-    const rows = await this.prisma.metodoPago.findMany({
+  async findAllMetodosPago(desde?: Date, hasta?: Date): Promise<MetodoPagoData[]> {
+    const metodos = await this.prisma.metodoPago.findMany({
       orderBy: { nombre: 'asc' },
     });
-    return rows as unknown as MetodoPagoData[];
+
+    // 1. Fetch aggregates for all-time transactions grouped by metodoPagoId
+    const abonosProformaAllTime = await this.prisma.abonoProforma.groupBy({
+      by: ['metodoPagoId'],
+      _sum: { monto: true }
+    } as any);
+
+    const gastosAllTime = await this.prisma.gasto.groupBy({
+      by: ['metodoPagoId'],
+      _sum: { monto: true }
+    } as any);
+
+    const abonosCompraAllTime = await this.prisma.abonoCompra.groupBy({
+      by: ['metodoPagoId'],
+      _sum: { monto: true }
+    } as any);
+
+    // 2. Fetch period-specific aggregates if dates are provided
+    let abonosProformaPeriod: any[] = [];
+    let gastosPeriod: any[] = [];
+    let abonosCompraPeriod: any[] = [];
+
+    if (desde && hasta) {
+      abonosProformaPeriod = await this.prisma.abonoProforma.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { gte: desde, lte: hasta } }
+      } as any);
+
+      gastosPeriod = await this.prisma.gasto.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { gte: desde, lte: hasta } }
+      } as any);
+
+      abonosCompraPeriod = await this.prisma.abonoCompra.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { gte: desde, lte: hasta } }
+      } as any);
+    }
+
+    const mapById = (arr: any[]) => {
+      const map: Record<string, number> = {};
+      for (const item of arr) {
+        if (item.metodoPagoId) {
+          map[item.metodoPagoId] = Number(item._sum.monto || 0);
+        }
+      }
+      return map;
+    };
+
+    const ingAllTimeMap = mapById(abonosProformaAllTime);
+    const gasAllTimeMap = mapById(gastosAllTime);
+    const egrAllTimeMap = mapById(abonosCompraAllTime);
+
+    const ingPeriodMap = (desde && hasta) ? mapById(abonosProformaPeriod) : ingAllTimeMap;
+    const gasPeriodMap = (desde && hasta) ? mapById(gastosPeriod) : gasAllTimeMap;
+    const egrPeriodMap = (desde && hasta) ? mapById(abonosCompraPeriod) : egrAllTimeMap;
+
+    return metodos.map(m => {
+      const ingAllTime = ingAllTimeMap[m.id] || 0;
+      const gasAllTime = gasAllTimeMap[m.id] || 0;
+      const egrAllTime = egrAllTimeMap[m.id] || 0;
+      const saldoActual = ingAllTime - (gasAllTime + egrAllTime);
+
+      const ingPeriod = ingPeriodMap[m.id] || 0;
+      const gasPeriod = gasPeriodMap[m.id] || 0;
+      const egrPeriod = egrPeriodMap[m.id] || 0;
+      const egresosPeriod = gasPeriod + egrPeriod;
+
+      return {
+        id: m.id,
+        nombre: m.nombre,
+        descripcion: m.descripcion,
+        activo: m.activo,
+        tipo: m.tipo,
+        saldoActual,
+        ingresosPeriod: ingPeriod,
+        egresosPeriod: egresosPeriod,
+        netoPeriod: ingPeriod - egresosPeriod,
+      } as unknown as MetodoPagoData;
+    });
   }
 
-  async createMetodoPago(data: { nombre: string; descripcion?: string }): Promise<MetodoPagoData> {
+  async createMetodoPago(data: { nombre: string; descripcion?: string; tipo?: string }): Promise<MetodoPagoData> {
     const row = await this.prisma.metodoPago.create({ data });
     return row as unknown as MetodoPagoData;
   }
 
-  async updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean }): Promise<MetodoPagoData> {
+  async updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean; tipo?: string }): Promise<MetodoPagoData> {
     const row = await this.prisma.metodoPago.update({ where: { id }, data });
     return row as unknown as MetodoPagoData;
   }

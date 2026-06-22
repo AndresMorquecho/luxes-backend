@@ -46,78 +46,35 @@ async function main() {
   }
 
   // 2. Sembrar Roles
-  console.log('Sembrando roles...');
-  const adminRole = await prisma.role.upsert({
-    where: { name: 'Administrador' },
-    update: { description: 'Control Total del Sistema' },
-    create: { name: 'Administrador', description: 'Control Total del Sistema' },
+  console.log('Limpiando y sembrando roles...');
+  // Limpiar relaciones previas para evitar conflictos de foreign key
+  await prisma.user.updateMany({ data: { roleId: null, rol: 'visor' } });
+  await prisma.rolePermission.deleteMany({});
+  await prisma.role.deleteMany({});
+
+  const adminRole = await prisma.role.create({
+    data: { name: 'Administrador', description: 'Control Total del Sistema' },
   });
 
-  const clientServiceRole = await prisma.role.upsert({
-    where: { name: 'Servicio al Cliente' },
-    update: { description: 'Gestión operativa de cobros y pedidos' },
-    create: { name: 'Servicio al Cliente', description: 'Gestión operativa de cobros y pedidos' },
+  const ventasDisenadorRole = await prisma.role.create({
+    data: { name: 'Ventas / Diseñador', description: 'Gestión de ventas, diseño de proyectos, clientes y caja' },
   });
 
-  const userRole = await prisma.role.upsert({
-    where: { name: 'User' },
-    update: { description: 'Acceso básico de consulta' },
-    create: { name: 'User', description: 'Acceso básico de consulta' },
+  const impresionRole = await prisma.role.create({
+    data: { name: 'Impresión', description: 'Módulo de impresión, cola de impresión e inventario' },
   });
 
-  const impresionRole = await prisma.role.upsert({
-    where: { name: 'Impresión' },
-    update: { description: 'Módulo de impresión, cola de impresión e inventario' },
-    create: { name: 'Impresión', description: 'Módulo de impresión, cola de impresión e inventario' },
-  });
-
-  const ventasRole = await prisma.role.upsert({
-    where: { name: 'Ventas' },
-    update: { description: 'Gestión de ventas, clientes, proveedores y proyectos' },
-    create: { name: 'Ventas', description: 'Gestión de ventas, clientes, proveedores y proyectos' },
-  });
-
-  const disenadorRole = await prisma.role.upsert({
-    where: { name: 'Diseñador' },
-    update: { description: 'Gestión de diseño de proyectos y relaciones' },
-    create: { name: 'Diseñador', description: 'Gestión de diseño de proyectos y relaciones' },
-  });
-
-  const tallerRole = await prisma.role.upsert({
-    where: { name: 'Taller' },
-    update: { description: 'Gestión de taller, instalaciones y compras' },
-    create: { name: 'Taller', description: 'Gestión de taller, instalaciones y compras' },
+  const tallerRole = await prisma.role.create({
+    data: { name: 'Taller', description: 'Gestión de taller, instalaciones y compras' },
   });
 
   // 3. Relacionar Roles con Permisos
   console.log('Vinculando permisos a roles...');
-  await prisma.rolePermission.deleteMany({});
 
   // Administrador: Todos los permisos
   for (const perm of dbPermissions) {
     await prisma.rolePermission.create({
       data: { roleId: adminRole.id, permissionId: perm.id },
-    });
-  }
-
-  // Servicio al Cliente
-  const scKeys = [
-    'pedidos', 'recepcion_pedidos', 'entregas_pedidos', 'clientes', 'abonos',
-    'inventario', 'marcas', 'catalogos_logistica', 'control_caja',
-    'analisis_cartera', 'registro_llamadas', 'fidelizacion_clientes', 'cambios_devoluciones',
-    'configuracion_sistema',
-  ];
-  for (const perm of dbPermissions.filter(p => scKeys.includes(p.key))) {
-    await prisma.rolePermission.create({
-      data: { roleId: clientServiceRole.id, permissionId: perm.id },
-    });
-  }
-
-  // User: solo módulos básicos
-  const userKeys = ['dashboard', 'pedidos', 'recepcion_pedidos', 'entregas_pedidos', 'clientes', 'control_caja'];
-  for (const perm of dbPermissions.filter(p => userKeys.includes(p.key))) {
-    await prisma.rolePermission.create({
-      data: { roleId: userRole.id, permissionId: perm.id },
     });
   }
 
@@ -129,19 +86,11 @@ async function main() {
     });
   }
 
-  // Ventas: clientes, abonos, proformas, etc.
-  const ventasKeys = ['clientes', 'abonos', 'control_caja'];
-  for (const perm of dbPermissions.filter(p => ventasKeys.includes(p.key))) {
+  // Ventas / Diseñador: clientes, abonos, caja
+  const ventasDisenadorKeys = ['clientes', 'abonos', 'control_caja'];
+  for (const perm of dbPermissions.filter(p => ventasDisenadorKeys.includes(p.key))) {
     await prisma.rolePermission.create({
-      data: { roleId: ventasRole.id, permissionId: perm.id },
-    });
-  }
-
-  // Diseñador: clientes, abonos, etc. (mismos permisos que Ventas inicialmente)
-  const disenadorKeys = ['clientes', 'abonos', 'control_caja'];
-  for (const perm of dbPermissions.filter(p => disenadorKeys.includes(p.key))) {
-    await prisma.rolePermission.create({
-      data: { roleId: disenadorRole.id, permissionId: perm.id },
+      data: { roleId: ventasDisenadorRole.id, permissionId: perm.id },
     });
   }
 
@@ -153,28 +102,107 @@ async function main() {
     });
   }
 
-  // 4. Sembrar Usuarios
+  // 4. Sembrar Empleados y Usuarios
+  console.log('Sembrando colaboradores (empleados)...');
+  const empleadosData = [
+    {
+      id: 'EMP-001',
+      nombre: 'Andrés Israel',
+      cedula: '0999999991',
+      cargo: 'Administrador Principal',
+      departamento: 'Administración',
+      correo: 'admin@luxes.com',
+    },
+    {
+      id: 'EMP-002',
+      nombre: 'María Fernanda Torres',
+      cedula: '0999999992',
+      cargo: 'Servicio al Cliente',
+      departamento: 'Operaciones',
+      correo: 'maria.torres@luxes.com',
+    },
+    {
+      id: 'EMP-003',
+      nombre: 'Impresor Principal',
+      cedula: '0999999993',
+      cargo: 'Impresor',
+      departamento: 'Producción',
+      correo: 'impresion@luxes.com',
+    },
+    {
+      id: 'EMP-004',
+      nombre: 'Andrés Israel',
+      cedula: '0999999994',
+      cargo: 'Vendedor Principal',
+      departamento: 'Ventas',
+      correo: 'ventas@luxes.com',
+    },
+    {
+      id: 'EMP-005',
+      nombre: 'Diseñador Creativo',
+      cedula: '0999999995',
+      cargo: 'Diseñador',
+      departamento: 'Diseño',
+      correo: 'disenador@luxes.com',
+    },
+    {
+      id: 'EMP-006',
+      nombre: 'Usuario Multirol',
+      cedula: '0999999996',
+      cargo: 'Administrador Auxiliar',
+      departamento: 'Administración',
+      correo: 'multirol@luxes.com',
+    },
+    {
+      id: 'EMP-TALLER-001',
+      nombre: 'Taller Técnico',
+      cedula: '0999999997',
+      cargo: 'Técnico de Taller',
+      departamento: 'Taller',
+      correo: 'taller@luxes.com',
+    },
+  ];
+
+  for (const emp of empleadosData) {
+    await prisma.empleado.upsert({
+      where: { id: emp.id },
+      update: {
+        nombre: emp.nombre,
+        cedula: emp.cedula,
+        cargo: emp.cargo,
+        departamento: emp.departamento,
+        correo: emp.correo,
+      },
+      create: {
+        ...emp,
+        passwordHash: defaultPasswordHash,
+      },
+    });
+  }
+
   console.log('Sembrando usuarios...');
   const usersData = [
     {
       id: 'USR-001',
-      nombre: 'Admin Principal',
+      nombre: 'Andrés Israel',
       email: 'admin@luxes.com',
       username: 'admin',
       rol: 'Administrador',
       roleId: adminRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-01-15T00:00:00Z'),
+      empleadoId: 'EMP-001',
     },
     {
       id: 'USR-002',
       nombre: 'María Fernanda Torres',
       email: 'maria.torres@luxes.com',
       username: 'maria.torres',
-      rol: 'Servicio al Cliente',
-      roleId: clientServiceRole.id,
+      rol: 'Ventas / Diseñador',
+      roleId: ventasDisenadorRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-02-20T00:00:00Z'),
+      empleadoId: 'EMP-002',
     },
     {
       id: 'USR-003',
@@ -185,26 +213,29 @@ async function main() {
       roleId: impresionRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-003',
     },
     {
       id: 'USR-004',
-      nombre: 'Vendedor Principal',
+      nombre: 'Andrés Israel',
       email: 'ventas@luxes.com',
       username: 'ventas',
-      rol: 'Ventas',
-      roleId: ventasRole.id,
+      rol: 'Ventas / Diseñador',
+      roleId: ventasDisenadorRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-004',
     },
     {
       id: 'USR-005',
       nombre: 'Diseñador Creativo',
       email: 'disenador@luxes.com',
       username: 'disenador',
-      rol: 'Diseñador',
-      roleId: disenadorRole.id,
+      rol: 'Ventas / Diseñador',
+      roleId: ventasDisenadorRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-005',
     },
     {
       id: 'USR-006',
@@ -215,6 +246,7 @@ async function main() {
       roleId: adminRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-006',
     },
     {
       id: 'USR-TALLER-001',
@@ -225,6 +257,7 @@ async function main() {
       roleId: tallerRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-TALLER-001',
     },
   ];
 
@@ -237,7 +270,8 @@ async function main() {
         email: user.email, 
         nombre: user.nombre, 
         username: user.username,
-        passwordHash: defaultPasswordHash
+        passwordHash: defaultPasswordHash,
+        empleadoId: user.empleadoId
       },
       create: { ...user, passwordHash: defaultPasswordHash },
     });
@@ -260,7 +294,7 @@ async function main() {
     {
       fecha: new Date('2026-06-03T09:20:00Z'),
       userId: 'USR-001',
-      usuarioNom: 'Admin Principal',
+      usuarioNom: 'Andrés Israel',
       accion: 'Crear material',
       modulo: 'Inventario',
       detalle: 'Agregó material: Vinilo autoadhesivo brillante (consumible).',
@@ -269,7 +303,7 @@ async function main() {
     {
       fecha: new Date('2026-06-02T14:30:00Z'),
       userId: 'USR-001',
-      usuarioNom: 'Admin Principal',
+      usuarioNom: 'Andrés Israel',
       accion: 'Desactivar usuario',
       modulo: 'Usuarios y Roles',
       detalle: 'Desactivó usuario: lucia.fernandez.',
@@ -521,30 +555,138 @@ async function main() {
   }
 
   console.log('Sembrando proveedores y métodos de pago...');
-  await prisma.abonoCompra.deleteMany({});
-  await prisma.cuentaPorPagar.deleteMany({});
-  await prisma.detalleCompra.deleteMany({});
-  await prisma.ordenCompra.deleteMany({});
-  await prisma.proveedor.deleteMany({});
-  await prisma.metodoPago.deleteMany({});
 
   const proveedores = [
     { nombre: 'Distribuidora de Vinilos S.A.', ruc: '0991728394001', direccion: 'Av. Juan Tanca Marengo', telefono: '0999999999', email: 'ventas@vinilos.com', contacto: 'Juan Pérez' },
     { nombre: 'Aceros del Pacífico', ruc: '1792837492001', direccion: 'Vía a Daule Km 12', telefono: '0988888888', email: 'info@acerospacifico.com', contacto: 'María Gómez' },
     { nombre: 'Suministros Gráficos Express', ruc: '0983748293001', direccion: 'Centro de Guayaquil', telefono: '0977777777', email: 'express@graficos.com', contacto: 'Carlos Ruiz' }
   ];
+  
+  const dbProveedores = [];
   for (const prov of proveedores) {
-    await prisma.proveedor.create({ data: prov });
+    const dbProv = await prisma.proveedor.upsert({
+      where: { ruc: prov.ruc },
+      update: {
+        nombre: prov.nombre,
+        direccion: prov.direccion,
+        telefono: prov.telefono,
+        email: prov.email,
+        contacto: prov.contacto
+      },
+      create: prov
+    });
+    dbProveedores.push(dbProv);
   }
 
   const metodosPago = [
-    { nombre: 'Caja Chica', descripcion: 'Efectivo para compras menores' },
-    { nombre: 'Caja General', descripcion: 'Efectivo de la caja principal' },
-    { nombre: 'Banco (Transferencia)', descripcion: 'Transferencia bancaria directa' },
-    { nombre: 'Banco (Cheque)', descripcion: 'Cheque emitido por la empresa' }
+    { nombre: 'Caja Chica', descripcion: 'Efectivo para compras menores', tipo: 'EFECTIVO' },
+    { nombre: 'Caja General', descripcion: 'Efectivo de la caja principal', tipo: 'EFECTIVO' },
+    { nombre: 'Banco (Transferencia)', descripcion: 'Transferencia bancaria directa', tipo: 'BANCO' },
+    { nombre: 'Banco (Cheque)', descripcion: 'Cheque emitido por la empresa', tipo: 'BANCO' }
   ];
+  
+  const dbMetodosPago = [];
   for (const mp of metodosPago) {
-    await prisma.metodoPago.create({ data: mp });
+    const dbMp = await prisma.metodoPago.upsert({
+      where: { nombre: mp.nombre },
+      update: { descripcion: mp.descripcion, tipo: mp.tipo },
+      create: mp,
+    });
+    dbMetodosPago.push(dbMp);
+  }
+
+  // Sanitizar proformas históricas para actualizar "Admin Principal" y "Vendedor Principal" a "Andrés Israel"
+  console.log('Sanitizando proformas históricas...');
+  await prisma.proforma.updateMany({
+    where: { atiende: 'Admin Principal' },
+    data: { atiende: 'Andrés Israel' }
+  });
+  await prisma.proforma.updateMany({
+    where: { atiende: 'Vendedor Principal' },
+    data: { atiende: 'Andrés Israel' }
+  });
+
+  // Sembrar datos de prueba para Egresos (Orden de Compra y AbonoCompra)
+  console.log('Sembrando egresos de prueba...');
+  const provVinilos = dbProveedores.find(p => p.ruc === '0991728394001');
+  const metodoBanco = dbMetodosPago.find(m => m.nombre === 'Banco (Transferencia)');
+  const adminUser = await prisma.user.findFirst({ where: { username: 'admin' } });
+
+  if (provVinilos && metodoBanco && adminUser) {
+    // 1. Upsert Orden Compra de prueba
+    const ocId = 'OC-SEED-001';
+    await prisma.ordenCompra.upsert({
+      where: { numero: 'OC-2026-0001' },
+      update: {
+        proveedorId: provVinilos.id,
+        usuarioId: adminUser.id,
+        subtotal: 100,
+        impuesto: 12,
+        total: 112,
+        estado: 'aprobada',
+        estadoPago: 'pagado',
+        concepto: 'Compra de vinilo e insumos gráficos de prueba',
+      },
+      create: {
+        id: ocId,
+        numero: 'OC-2026-0001',
+        proveedorId: provVinilos.id,
+        usuarioId: adminUser.id,
+        fecha: new Date(),
+        subtotal: 100,
+        impuesto: 12,
+        total: 112,
+        estado: 'aprobada',
+        estadoPago: 'pagado',
+        concepto: 'Compra de vinilo e insumos gráficos de prueba',
+        aprobadoPorId: adminUser.id,
+        fechaAprobacion: new Date()
+      }
+    });
+
+    // 2. Upsert Abono Compra de prueba
+    const abonoId = 'ABONO-SEED-001';
+    await prisma.abonoCompra.upsert({
+      where: { id: abonoId },
+      update: {
+        ordenCompraId: ocId,
+        metodoPagoId: metodoBanco.id,
+        monto: 112,
+        referencia: 'TRANSF-982173'
+      },
+      create: {
+        id: abonoId,
+        ordenCompraId: ocId,
+        metodoPagoId: metodoBanco.id,
+        monto: 112,
+        fecha: new Date(),
+        referencia: 'TRANSF-982173'
+      }
+    });
+  }
+
+  // Sembrar Gasto de prueba
+  if (metodoBanco) {
+    const gastoId = 'GASTO-SEED-001';
+    await prisma.gasto.upsert({
+      where: { id: gastoId },
+      update: {
+        concepto: 'Pago de internet y telefonía oficina de prueba',
+        categoria: 'servicios',
+        monto: 45.00,
+        proveedor: 'Netlife S.A.',
+        metodoPagoId: metodoBanco.id
+      },
+      create: {
+        id: gastoId,
+        concepto: 'Pago de internet y telefonía oficina de prueba',
+        categoria: 'servicios',
+        fecha: new Date(),
+        monto: 45.00,
+        proveedor: 'Netlife S.A.',
+        metodoPagoId: metodoBanco.id
+      }
+    });
   }
 
   console.log('Sembrado finalizado exitosamente.');

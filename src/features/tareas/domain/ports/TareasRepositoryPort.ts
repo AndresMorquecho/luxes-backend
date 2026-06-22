@@ -55,7 +55,7 @@ export interface TareasRepositoryPort {
     estado?: string;
     fechaLimite?: Date | null;
     asignadoA?: string[];
-  }): Promise<TareaData>;
+  }, updater?: { id: string; rol: string; email: string }): Promise<TareaData>;
 
   delete(id: string): Promise<void>;
 
