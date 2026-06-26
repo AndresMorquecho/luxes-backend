@@ -32,16 +32,21 @@ export class PrismaComprasAdapter {
         proveedor: true,
         usuario: { select: { id: true, nombre: true, email: true, rol: true } },
         aprobadoPor: { select: { id: true, nombre: true, email: true, rol: true } },
+        recibidoPor: { select: { id: true, nombre: true, email: true, rol: true } },
         detalles: true,
         abonos: { include: { metodoPago: true }, orderBy: { fecha: 'desc' } },
         cuentaPorPagar: true,
         proyecto: { select: { id: true, nombre: true } },
     };
     async findAllOrdenes(options) {
-        const { page = 1, limit = 10, search, estado, estadoPago, creadorRol } = options || {};
+        const { page = 1, limit = 10, search, estado, estadoPago, creadorRol, pendienteRecepcion } = options || {};
         const where = {};
-        if (estado)
+        if (pendienteRecepcion) {
+            where.estado = { in: ['aprobada', 'parcialmente_recibida'] };
+        }
+        else if (estado) {
             where.estado = estado;
+        }
         if (estadoPago)
             where.estadoPago = estadoPago;
         if (creadorRol) {
@@ -72,11 +77,16 @@ export class PrismaComprasAdapter {
             ];
         }
         const skip = (page - 1) * limit;
+        const orderBy = estado === 'recibida'
+            ? [{ fechaRecepcion: 'desc' }, { fechaCreacion: 'desc' }]
+            : pendienteRecepcion
+                ? [{ fechaAprobacion: 'desc' }, { fechaCreacion: 'desc' }]
+                : { fechaCreacion: 'desc' };
         const [rows, total] = await Promise.all([
             this.prisma.ordenCompra.findMany({
                 where,
                 include: this.ordenInclude,
-                orderBy: { fechaCreacion: 'desc' },
+                orderBy,
                 skip,
                 take: limit,
             }),
@@ -180,32 +190,17 @@ export class PrismaComprasAdapter {
                     title: 'Nueva Orden de Compra',
                     message: `Se ha generado la orden de compra ${row.numero} por un valor de $${row.total.toFixed(2)} pendiente de aprobación.`,
                     rol: 'admin',
-                    permission: 'aprobacion_ordenes_compra',
                     createdBy: usuario?.nombre || 'Usuario desconocido',
-                }
+                },
             });
-            // Dispatch Web Push Notifications
-            // 1. Get all users who have the 'aprobacion_ordenes_compra' permission, or are administrators
+            // Push solo a administradores
             const adminUsers = await this.prisma.user.findMany({
                 where: {
-                    OR: [
-                        { rol: { in: ['admin', 'administrador'] } },
-                        {
-                            role: {
-                                permissions: {
-                                    some: {
-                                        permission: {
-                                            key: 'aprobacion_ordenes_compra'
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    ]
+                    rol: { in: ['admin', 'administrador', 'Admin', 'Administrador'] },
                 },
                 include: {
-                    pushSubscriptions: true
-                }
+                    pushSubscriptions: true,
+                },
             });
             // 2. Loop through users and their subscriptions to send push messages
             const pushPayload = JSON.stringify({
@@ -241,6 +236,10 @@ export class PrismaComprasAdapter {
         return row;
     }
     async updateOrden(id, data) {
+        const ordenAnterior = await this.prisma.ordenCompra.findUnique({
+            where: { id },
+            select: { estado: true, usuarioId: true },
+        });
         const updateData = {};
         // Solo actualizar proveedor si se proporciona
         if (data.proveedorId !== undefined) {
@@ -269,6 +268,12 @@ export class PrismaComprasAdapter {
             updateData.concepto = data.concepto;
         if (data.notas !== undefined)
             updateData.notas = data.notas;
+        if (data.fechaRecepcion)
+            updateData.fechaRecepcion = new Date(data.fechaRecepcion);
+        if (data.notasRecepcion !== undefined)
+            updateData.notasRecepcion = data.notasRecepcion;
+        if (data.recibidoPorId)
+            updateData.recibidoPorId = data.recibidoPorId;
         if (data.proyectoId !== undefined) {
             if (data.proyectoId) {
                 updateData.proyecto = { connect: { id: data.proyectoId } };
@@ -426,42 +431,50 @@ export class PrismaComprasAdapter {
             catch (err) {
                 console.error('[Gasto Automático Error] No se pudo crear el gasto para el proyecto:', err);
             }
-            // Enviar notificación de aprobación al taller
+        }
+        // Notificar al creador solo en la transición a aprobada (con o sin proyecto)
+        const pasoAAprobada = data.estado === 'aprobada' && ordenAnterior?.estado !== 'aprobada';
+        if (pasoAAprobada) {
             try {
+                const aprobador = data.aprobadoPorId
+                    ? await this.prisma.user.findUnique({
+                        where: { id: data.aprobadoPorId },
+                        select: { nombre: true },
+                    })
+                    : row.aprobadoPor;
+                const aprobadorNombre = aprobador?.nombre || 'Administración';
                 const notif = await this.prisma.notification.create({
                     data: {
                         title: 'Orden de Compra Aprobada',
-                        message: `La orden de compra ${row.numero} ha sido aprobada.`,
-                        rol: 'taller',
-                        createdBy: 'Administración',
-                    }
+                        message: `La orden de compra ${row.numero} ha sido aprobada por ${aprobadorNombre}.`,
+                        userId: row.usuarioId,
+                        createdBy: aprobadorNombre,
+                    },
                 });
-                // Obtener usuarios del taller
-                const tallerUsers = await this.prisma.user.findMany({
+                console.log(`[Notification] Aprobación OC ${row.numero} → usuario ${row.usuarioId}`);
+                const usersToNotify = await this.prisma.user.findMany({
                     where: {
                         OR: [
-                            { rol: { in: ['taller'] } },
-                            { id: row.usuarioId } // También al emisor original
-                        ]
+                            { id: row.usuarioId },
+                            { rol: { in: ['taller', 'Taller'] } },
+                        ],
                     },
-                    include: {
-                        pushSubscriptions: true
-                    }
+                    include: { pushSubscriptions: true },
                 });
                 const pushPayload = JSON.stringify({
                     title: notif.title,
                     body: notif.message,
-                    url: `/inventario/recepcion/${row.id}`
+                    url: '/compras/recepcion',
                 });
-                for (const user of tallerUsers) {
+                for (const user of usersToNotify) {
                     for (const sub of user.pushSubscriptions) {
                         try {
                             const subscriptionParams = {
                                 endpoint: sub.endpoint,
                                 keys: {
                                     p256dh: sub.p256dh,
-                                    auth: sub.auth
-                                }
+                                    auth: sub.auth,
+                                },
                             };
                             await webpush.sendNotification(subscriptionParams, pushPayload);
                         }
@@ -479,6 +492,16 @@ export class PrismaComprasAdapter {
             }
         }
         return row;
+    }
+    async updateDetalleRecepcion(id, data) {
+        await this.prisma.detalleCompra.update({
+            where: { id },
+            data: {
+                cantidadRecibida: data.cantidadRecibida,
+                descargableInventario: data.descargableInventario,
+                ...(data.fechaRecepcion ? { fechaRecepcion: data.fechaRecepcion } : {}),
+            },
+        });
     }
     async deleteOrden(id) {
         await this.prisma.ordenCompra.delete({ where: { id } });

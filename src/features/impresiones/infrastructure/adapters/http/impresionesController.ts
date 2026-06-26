@@ -80,9 +80,10 @@ export class ImpresionesController {
         },
       });
 
-      // Create database notifications for all relevant roles
+      // Create database notifications for canonical roles only
+      // (expandRoleAliases in the query handles alias expansion)
       try {
-        const rolesToNotify = ['taller', 'impresión', 'impresion', 'admin', 'administrador'];
+        const rolesToNotify = ['taller', 'impresión', 'admin'];
         for (const roleName of rolesToNotify) {
           await prisma.notification.create({
             data: {
@@ -94,16 +95,15 @@ export class ImpresionesController {
           });
         }
 
-        // Push notifications
+        // Push notifications - one per canonical role
         const pushPayload = {
-          title: '🖨️ Nuevo Trabajo en Cola',
+          title: 'Nuevo Trabajo en Cola',
           body: `El documento "${job.name}" para ${job.client} está listo para impresión en el taller.`,
           data: {
             url: '/colas-impresion',
           },
         };
-        await sendPushToRole('Impresión', pushPayload);
-        await sendPushToRole('impresion', pushPayload);
+        await sendPushToRole('impresión', pushPayload);
         await sendPushToRole('taller', pushPayload);
         await sendPushToRole('admin', pushPayload);
       } catch (notifErr) {

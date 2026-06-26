@@ -223,7 +223,7 @@ export class PrismaTareasAdapter {
                         notifTitle = 'Tarea Finalizada';
                         notifMessage = `${updaterName} terminó la tarea "${row.titulo}" el ${fechaHoraStr}.`;
                     }
-                    // Create database notifications for administrators
+                    // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
                     await this.prisma.notification.create({
                         data: {
                             title: notifTitle,
@@ -232,22 +232,13 @@ export class PrismaTareasAdapter {
                             createdBy: updaterName,
                         },
                     });
-                    await this.prisma.notification.create({
-                        data: {
-                            title: notifTitle,
-                            message: notifMessage,
-                            rol: 'administrador',
-                            createdBy: updaterName,
-                        },
-                    });
-                    // Send PWA push notifications to administrators
+                    // Send PWA push notification to administrators (single canonical role)
                     const pushPayload = {
                         title: notifTitle,
                         body: notifMessage,
                         data: { url: '/tareas' },
                     };
                     await sendPushToRole('admin', pushPayload).catch(() => { });
-                    await sendPushToRole('administrador', pushPayload).catch(() => { });
                 }
                 catch (err) {
                     console.error('[Tareas Status Notification Error]', err);

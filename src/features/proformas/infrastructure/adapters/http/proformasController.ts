@@ -18,21 +18,43 @@ const toDateStr = (d: Date | null | undefined): string =>
 const toDateTimeStr = (d: Date | null | undefined): string =>
   d ? new Date(d).toISOString() : '';
 
+/**
+ * Crea UNA sola notificación en BD por cada rol canónico y envía UN push por rol canónico.
+ * Esto evita duplicados: antes se creaba una notif por cada alias ('admin', 'administrador')
+ * y la query expandía aliases, por lo que el usuario veía N copias.
+ *
+ * Roles canónicos: 'admin' (cubre administrador), 'ventas' (cubre diseñador/disenador),
+ * 'taller', 'impresión' (cubre impresion).
+ */
+function canonicalRole(rol: string): string {
+  const r = rol.toLowerCase();
+  if (r === 'administrador') return 'admin';
+  if (r === 'diseñador' || r === 'disenador') return 'ventas';
+  if (r === 'impresion') return 'impresión';
+  return r;
+}
+
 async function notifyRoles(
   roles: string[],
   data: { title: string; message: string; createdBy: string; url?: string },
 ) {
+  // Deduplicar por rol canónico para crear UNA sola notif/push por grupo
+  const seen = new Set<string>();
   for (const roleName of roles) {
+    const canon = canonicalRole(roleName);
+    if (seen.has(canon)) continue;
+    seen.add(canon);
+
     await prisma.notification.create({
       data: {
         title: data.title,
         message: data.message,
-        rol: roleName.toLowerCase(),
+        rol: canon,
         createdBy: data.createdBy,
       },
     });
     if (data.url) {
-      await sendPushToRole(roleName, {
+      await sendPushToRole(canon, {
         title: data.title,
         body: data.message,
         data: { url: data.url },
@@ -45,6 +67,7 @@ async function notifyVentasEquipo(
   proforma: { id: string; atiende: string; creadoPorUserId?: string | null },
   data: { title: string; message: string; createdBy: string },
 ) {
+  // 1. Notificación personal al creador/vendedor de la proforma
   if (proforma.creadoPorUserId) {
     await prisma.notification.create({
       data: {
@@ -73,7 +96,8 @@ async function notifyVentasEquipo(
     }
   }
 
-  await notifyRoles(['ventas', 'diseñador', 'disenador'], {
+  // 2. UNA sola notificación por rol para el equipo de ventas (sin aliases duplicados)
+  await notifyRoles(['ventas'], {
     ...data,
     url: `/proformas/detalle/${proforma.id}`,
   });

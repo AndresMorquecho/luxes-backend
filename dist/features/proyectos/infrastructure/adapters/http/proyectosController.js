@@ -16,6 +16,56 @@ async function nextProyectoId() {
     return `PROY-${String(max + 1).padStart(3, '0')}`;
 }
 const toDateStr = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
+function parseFaseDatos(datos) {
+    if (!datos)
+        return {};
+    try {
+        return JSON.parse(datos);
+    }
+    catch {
+        return {};
+    }
+}
+function getPersonalEncuesta(datosInstalacion, instalacion) {
+    const desdeDatos = datosInstalacion.personalAsignado;
+    if (Array.isArray(desdeDatos) && desdeDatos.length > 0) {
+        return desdeDatos.map((p, index) => ({
+            empleadoId: String(p.empleadoId || p.id || `personal-${index}`),
+            id: String(p.empleadoId || p.id || `personal-${index}`),
+            nombre: String(p.nombre || ''),
+            rol: String(p.rol || 'Técnico'),
+        }));
+    }
+    return (instalacion?.personalAsignado || []).map((p, index) => ({
+        empleadoId: p.empleadoId || `personal-${index}`,
+        id: p.empleadoId || `personal-${index}`,
+        nombre: p.empleado?.nombre || '',
+        rol: p.rol || 'Técnico',
+    }));
+}
+function getInstalacionCompletionErrors(datos, ordenesCompra = []) {
+    const faltantes = [];
+    if (!datos.fechaInstalacion || !datos.horaInstalacion) {
+        faltantes.push('Debe iniciar la instalación en obra antes de finalizarla');
+    }
+    const personal = datos.personalAsignado;
+    if (!Array.isArray(personal) || personal.length === 0) {
+        faltantes.push('Debe asignar al menos un técnico');
+    }
+    const materiales = datos.materiales;
+    if (!Array.isArray(materiales) || materiales.length === 0) {
+        faltantes.push('Debe registrar al menos un material');
+    }
+    const evidencias = datos.evidencias;
+    if (!Array.isArray(evidencias) || evidencias.length === 0) {
+        faltantes.push('Debe subir al menos una evidencia fotográfica');
+    }
+    const ocSinRecibir = ordenesCompra.filter((oc) => String(oc.estado || '').toLowerCase() === 'aprobada');
+    if (ocSinRecibir.length > 0) {
+        faltantes.push(`Hay ${ocSinRecibir.length} orden(es) de compra aprobada(s) sin recibir`);
+    }
+    return faltantes;
+}
 const PROGRESO_POR_FASE = {
     COTIZACION: 0,
     'DISEÑO': 20,
@@ -230,8 +280,8 @@ export class ProyectosController {
             // Si requiere instalación, enviar notificación push y de base de datos a administradores y taller
             if (proyecto.requiereInstalacion) {
                 try {
-                    const rolesToNotify = ['taller', 'admin', 'administrador'];
-                    for (const roleName of rolesToNotify) {
+                    // UNA sola notificación por grupo de roles (taller + admin)
+                    for (const roleName of ['taller', 'admin']) {
                         await prisma.notification.create({
                             data: {
                                 title: 'Nuevo Proyecto con Instalación',
@@ -242,7 +292,7 @@ export class ProyectosController {
                         });
                     }
                     const payload = {
-                        title: '🛠️ Nuevo Proyecto con Instalación',
+                        title: 'Nuevo Proyecto con Instalación',
                         body: `Se ha creado el proyecto "${proyecto.nombre}" con requerimiento de instalación.`,
                         icon: '/LogoGlobo.png',
                         badge: '/LogoGlobo.png',
@@ -254,7 +304,6 @@ export class ProyectosController {
                     };
                     await sendPushToRole('taller', payload);
                     await sendPushToRole('admin', payload);
-                    await sendPushToRole('administrador', payload);
                     console.log(`[Proyecto ${proyecto.id}] Notificaciones de proyecto con instalación enviadas a administradores y taller`);
                 }
                 catch (notifError) {
@@ -391,9 +440,52 @@ export class ProyectosController {
             // Obtener el proyecto para la notificación
             const proyecto = await prisma.proyecto.findUnique({
                 where: { id: String(id) },
-                include: { fases: true },
+                include: { fases: true, ordenesCompra: true },
             });
+            if (!proyecto) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' },
+                });
+            }
+            // Obtener los datos anteriores de la fase de instalación
+            const faseInstalacionAnterior = proyecto.fases?.find(f => f.fase === 'INSTALACION');
+            let datosInstalacionAnterior = {};
+            if (faseInstalacionAnterior?.datos) {
+                try {
+                    datosInstalacionAnterior = JSON.parse(faseInstalacionAnterior.datos);
+                }
+                catch (e) {
+                    console.error(e);
+                }
+            }
+            const datosMerged = {
+                ...datosInstalacionAnterior,
+                ...datos,
+            };
+            if (String(fase) === 'INSTALACION' &&
+                datos.instalacionCompletada === true &&
+                datosInstalacionAnterior.instalacionCompletada === true) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_STATE', message: 'La instalación ya fue completada' },
+                });
+            }
+            if (String(fase) === 'INSTALACION' && datos.instalacionCompletada === true) {
+                const errores = getInstalacionCompletionErrors(datosMerged, proyecto.ordenesCompra || []);
+                if (errores.length > 0) {
+                    return res.status(400).json({
+                        success: false,
+                        error: {
+                            code: 'INSTALACION_INCOMPLETA',
+                            message: errores[0],
+                            details: errores,
+                        },
+                    });
+                }
+            }
             // Actualizar o crear la fase
+            const datosAGuardar = String(fase) === 'INSTALACION' ? datosMerged : datos;
             await prisma.proyectoFase.upsert({
                 where: {
                     proyectoId_fase: {
@@ -404,14 +496,14 @@ export class ProyectosController {
                 update: {
                     completada: String(fase) === 'INSTALACION' ? (datos.instalacionCompletada === true) : true,
                     fechaCompletada: (String(fase) === 'INSTALACION' ? (datos.instalacionCompletada === true) : true) ? new Date() : null,
-                    datos: JSON.stringify(datos),
+                    datos: JSON.stringify(datosAGuardar),
                 },
                 create: {
                     proyectoId: String(id),
                     fase: String(fase),
                     completada: String(fase) === 'INSTALACION' ? (datos.instalacionCompletada === true) : true,
                     fechaCompletada: (String(fase) === 'INSTALACION' ? (datos.instalacionCompletada === true) : true) ? new Date() : null,
-                    datos: JSON.stringify(datos),
+                    datos: JSON.stringify(datosAGuardar),
                 },
             });
             // Actualizar fase actual del proyecto y su progreso
@@ -422,17 +514,6 @@ export class ProyectosController {
                     progreso: PROGRESO_POR_FASE[String(fase)] ?? 0
                 },
             });
-            // Obtener los datos anteriores de la fase de instalación
-            const faseInstalacionAnterior = proyecto?.fases?.find(f => f.fase === 'INSTALACION');
-            let datosInstalacionAnterior = {};
-            if (faseInstalacionAnterior?.datos) {
-                try {
-                    datosInstalacionAnterior = JSON.parse(faseInstalacionAnterior.datos);
-                }
-                catch (e) {
-                    console.error(e);
-                }
-            }
             // Si es la fase de DISEÑO y tiene fecha de aprobación, enviar notificación a Taller
             if (fase === 'DISEÑO' && datos.fechaAprobacionDiseno) {
                 try {
@@ -463,7 +544,7 @@ export class ProyectosController {
             if (seIniciaInstalacion) {
                 try {
                     const payload = {
-                        title: '🚀 Instalación Iniciada',
+                        title: 'Instalación Iniciada',
                         body: `El equipo técnico ha iniciado la instalación en sitio para el proyecto "${proyecto?.nombre || id}".`,
                         icon: '/LogoGlobo.png',
                         badge: '/LogoGlobo.png',
@@ -473,8 +554,16 @@ export class ProyectosController {
                             proyectoId: id,
                         },
                     };
+                    // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
+                    await prisma.notification.create({
+                        data: {
+                            title: payload.title,
+                            message: payload.body,
+                            rol: 'admin',
+                            createdBy: 'Taller',
+                        },
+                    });
                     await sendPushToRole('admin', payload);
-                    await sendPushToRole('administrador', payload);
                     console.log(`[Proyecto ${id}] Notificación de instalación iniciada enviada a administradores`);
                 }
                 catch (notifError) {
@@ -488,7 +577,7 @@ export class ProyectosController {
             if (seCompletaInstalacion) {
                 try {
                     const payload = {
-                        title: '✅ Instalación Completada',
+                        title: 'Instalación Completada',
                         body: `La instalación del proyecto "${proyecto?.nombre || id}" ha sido completada en el sitio.`,
                         icon: '/LogoGlobo.png',
                         badge: '/LogoGlobo.png',
@@ -498,8 +587,16 @@ export class ProyectosController {
                             proyectoId: id,
                         },
                     };
+                    // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
+                    await prisma.notification.create({
+                        data: {
+                            title: payload.title,
+                            message: payload.body,
+                            rol: 'admin',
+                            createdBy: 'Taller',
+                        },
+                    });
                     await sendPushToRole('admin', payload);
-                    await sendPushToRole('administrador', payload);
                     console.log(`[Proyecto ${id}] Notificación de instalación completada enviada a administradores`);
                 }
                 catch (notifError) {
@@ -661,6 +758,171 @@ export class ProyectosController {
             return res.status(500).json({
                 success: false,
                 error: { code: 'INTERNAL_ERROR', message: 'Error al subir archivo' },
+            });
+        }
+    }
+    /** Contexto público para el formulario de encuesta del cliente */
+    async getEncuesta(req, res) {
+        try {
+            const { id } = req.params;
+            const proyecto = await prisma.proyecto.findUnique({
+                where: { id: String(id) },
+                include: proyectoInclude,
+            });
+            if (!proyecto) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' },
+                });
+            }
+            const faseInstalacion = proyecto.fases?.find((f) => f.fase === 'INSTALACION');
+            const datosInstalacion = parseFaseDatos(faseInstalacion?.datos);
+            const encuesta = datosInstalacion.encuestaSatisfaccion;
+            const instalacionCompletada = datosInstalacion.instalacionCompletada === true
+                || proyecto.instalacion?.instalacionCompletada === true;
+            return res.status(200).json({
+                success: true,
+                data: {
+                    id: proyecto.id,
+                    nombre: proyecto.nombre,
+                    clienteNombre: proyecto.clienteNombre || 'Cliente',
+                    instalacionCompletada,
+                    encuestaCompletada: encuesta?.completada === true,
+                    encuesta: encuesta?.completada === true ? encuesta : null,
+                    personal: getPersonalEncuesta(datosInstalacion, proyecto.instalacion),
+                },
+            });
+        }
+        catch (error) {
+            console.error('[encuesta/get]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al cargar encuesta' },
+            });
+        }
+    }
+    /** Guardar respuesta de encuesta del cliente (sin autenticación) */
+    async submitEncuesta(req, res) {
+        try {
+            const { id } = req.params;
+            const body = req.body || {};
+            const calificacionGeneral = Number(body.calificacionGeneral);
+            const comentarios = String(body.comentarios || '').trim();
+            const calificacionesPersonal = Array.isArray(body.personal) ? body.personal : [];
+            if (!Number.isFinite(calificacionGeneral) || calificacionGeneral < 1 || calificacionGeneral > 5) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_RATING', message: 'La calificación general debe ser entre 1 y 5' },
+                });
+            }
+            const proyecto = await prisma.proyecto.findUnique({
+                where: { id: String(id) },
+                include: proyectoInclude,
+            });
+            if (!proyecto) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' },
+                });
+            }
+            const faseInstalacion = proyecto.fases?.find((f) => f.fase === 'INSTALACION');
+            const datosInstalacion = parseFaseDatos(faseInstalacion?.datos);
+            const encuestaAnterior = datosInstalacion.encuestaSatisfaccion;
+            if (encuestaAnterior?.completada === true) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'ALREADY_SUBMITTED', message: 'La encuesta ya fue respondida' },
+                });
+            }
+            const instalacionCompletada = datosInstalacion.instalacionCompletada === true
+                || proyecto.instalacion?.instalacionCompletada === true;
+            if (!instalacionCompletada) {
+                return res.status(400).json({
+                    success: false,
+                    error: {
+                        code: 'INSTALLATION_PENDING',
+                        message: 'La instalación aún no ha sido completada en obra',
+                    },
+                });
+            }
+            const personalBase = getPersonalEncuesta(datosInstalacion, proyecto.instalacion);
+            const personalCalificado = personalBase.map((p) => {
+                const encontrado = calificacionesPersonal.find((c) => {
+                    const candidatoId = String(c.empleadoId || c.id || '');
+                    return candidatoId === p.empleadoId || candidatoId === p.id;
+                });
+                const estrellasEnviadas = Number(encontrado?.estrellas);
+                const estrellasValidas = Number.isFinite(estrellasEnviadas)
+                    && estrellasEnviadas >= 1
+                    && estrellasEnviadas <= 5
+                    ? estrellasEnviadas
+                    : calificacionGeneral;
+                return {
+                    empleadoId: p.empleadoId,
+                    nombre: p.nombre,
+                    rol: p.rol,
+                    estrellas: estrellasValidas,
+                };
+            });
+            const fechaRespuesta = new Date().toISOString();
+            const encuestaSatisfaccion = {
+                completada: true,
+                fecha: fechaRespuesta.split('T')[0],
+                fechaRespuesta,
+                calificacionGeneral,
+                comentarios,
+                personal: personalCalificado,
+            };
+            const datosActualizados = {
+                ...datosInstalacion,
+                encuestaSatisfaccion,
+            };
+            await prisma.proyectoFase.upsert({
+                where: {
+                    proyectoId_fase: {
+                        proyectoId: String(id),
+                        fase: 'INSTALACION',
+                    },
+                },
+                update: {
+                    datos: JSON.stringify(datosActualizados),
+                },
+                create: {
+                    proyectoId: String(id),
+                    fase: 'INSTALACION',
+                    completada: true,
+                    fechaCompletada: new Date(),
+                    datos: JSON.stringify(datosActualizados),
+                },
+            });
+            try {
+                const payload = {
+                    title: '⭐ Nueva encuesta de satisfacción',
+                    body: `El cliente calificó el proyecto "${proyecto.nombre}" con ${calificacionGeneral}/5 estrellas.`,
+                    icon: '/LogoGlobo.png',
+                    badge: '/LogoGlobo.png',
+                    data: {
+                        url: `/proyectos/${proyecto.id}`,
+                        action: 'view_project',
+                        proyectoId: proyecto.id,
+                    },
+                };
+                await sendPushToRole('admin', payload);
+                await sendPushToRole('administrador', payload);
+            }
+            catch (notifError) {
+                console.error('[encuesta/submit] Error enviando notificación:', notifError);
+            }
+            return res.status(200).json({
+                success: true,
+                data: encuestaSatisfaccion,
+            });
+        }
+        catch (error) {
+            console.error('[encuesta/submit]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al guardar encuesta' },
             });
         }
     }

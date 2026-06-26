@@ -24,6 +24,18 @@ export interface PushNotificationPayload {
 }
 
 /**
+ * Expande un rol canónico a todos los aliases que los usuarios pueden tener en la BD.
+ * Esto permite enviar push a 'admin' y que también llegue a usuarios con rol 'administrador'.
+ */
+function expandPushRoleAliases(rol: string): string[] {
+  const r = rol.toLowerCase();
+  if (r === 'admin' || r === 'administrador') return ['admin', 'administrador'];
+  if (r === 'ventas' || r === 'diseñador' || r === 'disenador') return ['ventas', 'diseñador', 'disenador'];
+  if (r === 'impresión' || r === 'impresion') return ['impresión', 'impresion'];
+  return [r];
+}
+
+/**
  * Envía notificaciones push a usuarios con un rol específico
  */
 export async function sendPushToRole(
@@ -31,11 +43,14 @@ export async function sendPushToRole(
   payload: PushNotificationPayload
 ): Promise<void> {
   try {
-    // Obtener usuarios con el rol especificado que tengan suscripciones push
+    // Expandir aliases para cubrir todas las variantes del rol en la BD
+    const roleAliases = expandPushRoleAliases(rol);
+
+    // Obtener usuarios con cualquiera de los aliases que tengan suscripciones push
     const users = await prisma.user.findMany({
       where: {
         rol: {
-          equals: rol,
+          in: roleAliases,
           mode: 'insensitive',
         },
         estado: 'activo',
@@ -48,7 +63,7 @@ export async function sendPushToRole(
       },
     });
 
-    console.log(`[Push Notification] Sending to ${users.length} users with rol "${rol}"`);
+    console.log(`[Push Notification] Sending to ${users.length} users with rol "${rol}" (aliases: ${roleAliases.join(', ')})`);
 
     const pushPayload = JSON.stringify(payload);
 

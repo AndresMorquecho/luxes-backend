@@ -333,8 +333,8 @@ export class ProyectosController {
       // Si requiere instalación, enviar notificación push y de base de datos a administradores y taller
       if (proyecto.requiereInstalacion) {
         try {
-          const rolesToNotify = ['taller', 'admin', 'administrador'];
-          for (const roleName of rolesToNotify) {
+          // UNA sola notificación por grupo de roles (taller + admin)
+          for (const roleName of ['taller', 'admin']) {
             await prisma.notification.create({
               data: {
                 title: 'Nuevo Proyecto con Instalación',
@@ -346,7 +346,7 @@ export class ProyectosController {
           }
 
           const payload = {
-            title: '🛠️ Nuevo Proyecto con Instalación',
+            title: 'Nuevo Proyecto con Instalación',
             body: `Se ha creado el proyecto "${proyecto.nombre}" con requerimiento de instalación.`,
             icon: '/LogoGlobo.png',
             badge: '/LogoGlobo.png',
@@ -358,7 +358,6 @@ export class ProyectosController {
           };
           await sendPushToRole('taller', payload);
           await sendPushToRole('admin', payload);
-          await sendPushToRole('administrador', payload);
           console.log(`[Proyecto ${proyecto.id}] Notificaciones de proyecto con instalación enviadas a administradores y taller`);
         } catch (notifError) {
           console.error('[Proyecto Create] Error enviando notificación push:', notifError);
@@ -620,18 +619,16 @@ export class ProyectosController {
               proyectoId: id,
             },
           };
-          for (const roleName of ['admin', 'administrador']) {
-            await prisma.notification.create({
-              data: {
-                title: payload.title,
-                message: payload.body,
-                rol: roleName,
-                createdBy: 'Taller',
-              },
-            });
-          }
+          // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
+          await prisma.notification.create({
+            data: {
+              title: payload.title,
+              message: payload.body,
+              rol: 'admin',
+              createdBy: 'Taller',
+            },
+          });
           await sendPushToRole('admin', payload);
-          await sendPushToRole('administrador', payload);
           console.log(`[Proyecto ${id}] Notificación de instalación iniciada enviada a administradores`);
         } catch (notifError) {
           console.error('[Proyecto] Error sending push notification for started installation:', notifError);
@@ -657,18 +654,16 @@ export class ProyectosController {
               proyectoId: id,
             },
           };
-          for (const roleName of ['admin', 'administrador']) {
-            await prisma.notification.create({
-              data: {
-                title: payload.title,
-                message: payload.body,
-                rol: roleName,
-                createdBy: 'Taller',
-              },
-            });
-          }
+          // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
+          await prisma.notification.create({
+            data: {
+              title: payload.title,
+              message: payload.body,
+              rol: 'admin',
+              createdBy: 'Taller',
+            },
+          });
           await sendPushToRole('admin', payload);
-          await sendPushToRole('administrador', payload);
           console.log(`[Proyecto ${id}] Notificación de instalación completada enviada a administradores`);
         } catch (notifError) {
           console.error('[Proyecto] Error sending push notification for completed installation:', notifError);

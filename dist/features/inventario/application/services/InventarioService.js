@@ -69,14 +69,14 @@ export class InventarioService {
         });
         return prestamo;
     }
-    async devolverPrestamo(id) {
+    async devolverPrestamo(id, observacionDevolucion) {
         const prestamo = await this.repo.findPrestamoById(id);
         if (!prestamo)
             throw new Error('Préstamo no encontrado.');
         if (prestamo.estado === 'devuelto') {
             throw new Error('Esta herramienta ya fue devuelta.');
         }
-        const updated = await this.repo.returnPrestamo(id, new Date());
+        const updated = await this.repo.returnPrestamo(id, new Date(), observacionDevolucion);
         await this.repo.adjustStock(prestamo.materialId, prestamo.cantidad);
         // Sincronizar estado del material
         await this.repo.update(prestamo.materialId, {

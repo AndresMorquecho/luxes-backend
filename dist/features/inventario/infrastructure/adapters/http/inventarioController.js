@@ -1,3 +1,4 @@
+import { resolveInventarioCategoria } from '../../utils/inventarioCategoriaPorRol.js';
 export class InventarioController {
     service;
     constructor(service) {
@@ -13,6 +14,9 @@ export class InventarioController {
     str(val) {
         return typeof val === 'string' ? val : undefined;
     }
+    userRol(req) {
+        return req.user?.rol;
+    }
     // ── Materiales ──────────────────────────────────────────────────────────────
     async listMateriales(req, res) {
         try {
@@ -20,7 +24,7 @@ export class InventarioController {
             const page = req.query.page ? parseInt(String(req.query.page), 10) : undefined;
             const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
             const search = this.str(req.query.search);
-            const categoria = this.str(req.query.categoria);
+            const categoria = resolveInventarioCategoria(this.userRol(req), this.str(req.query.categoria));
             const data = await this.service.getInventario({ tipo, page, limit, search, categoria });
             return this.ok(res, data);
         }
@@ -48,7 +52,12 @@ export class InventarioController {
     }
     async createMaterial(req, res) {
         try {
-            const data = await this.service.createMaterial(req.body);
+            const body = { ...req.body };
+            const categoriaRol = resolveInventarioCategoria(this.userRol(req));
+            if (categoriaRol) {
+                body.categoria = categoriaRol;
+            }
+            const data = await this.service.createMaterial(body);
             return res.status(201).json({ success: true, data });
         }
         catch (e) {
@@ -85,9 +94,12 @@ export class InventarioController {
     }
     async createMovimiento(req, res) {
         try {
+            const body = req.body;
+            const fecha = body.fecha ? new Date(String(body.fecha)) : undefined;
             const data = await this.service.registrarMovimiento({
-                ...req.body,
+                ...body,
                 materialId: String(req.params.id),
+                ...(fecha && !Number.isNaN(fecha.getTime()) ? { fecha } : {}),
             });
             return res.status(201).json({ success: true, data });
         }
@@ -116,7 +128,10 @@ export class InventarioController {
     }
     async returnPrestamo(req, res) {
         try {
-            const data = await this.service.devolverPrestamo(String(req.params.id));
+            const observacion = typeof req.body?.observacionDevolucion === 'string'
+                ? req.body.observacionDevolucion.trim()
+                : undefined;
+            const data = await this.service.devolverPrestamo(String(req.params.id), observacion || undefined);
             return this.ok(res, data);
         }
         catch (e) {

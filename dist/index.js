@@ -42,15 +42,14 @@ async function bootstrap() {
         await prisma.user.upsert({
             where: { username: 'taller' },
             update: {
-                rol: 'taller',
-                passwordHash: passwordHash,
+                rol: 'Taller',
             },
             create: {
                 id: 'USR-TALLER-001',
-                nombre: 'Taller de Impresión',
+                nombre: 'Taller Técnico',
                 email: 'taller@luxes.com',
                 username: 'taller',
-                rol: 'taller',
+                rol: 'Taller',
                 passwordHash: passwordHash,
                 estado: 'activo',
             },
@@ -129,7 +128,8 @@ async function bootstrap() {
     app.use('/api/proformas', proformasRoutes);
     const { configuracionRoutes } = await createConfiguracionModule();
     app.use('/api/configuracion', configuracionRoutes);
-    const { proyectosRoutes } = await createProyectosModule();
+    const { proyectosRoutes, encuestaRoutes } = await createProyectosModule();
+    app.use('/api/encuesta', encuestaRoutes);
     app.use('/api/proyectos', proyectosRoutes);
     const { impresionesRoutes } = await createImpresionesModule();
     app.use('/api/impresiones', impresionesRoutes);
@@ -142,9 +142,18 @@ async function bootstrap() {
             error: { code: 'NOT_FOUND', message: 'Ruta no encontrada' },
         });
     });
-    app.listen(env.port, () => {
+    const server = app.listen(env.port, () => {
         console.log(`Luxes API corriendo en http://localhost:${env.port}`);
         console.log(`Login: POST http://localhost:${env.port}/api/auth/login`);
+    });
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.error(`[Error] El puerto ${env.port} ya está en uso. Cambia PORT en .env (por ejemplo 4000) o detén el proceso que lo ocupa.`);
+        }
+        else {
+            console.error('[Error] No se pudo iniciar el servidor:', err);
+        }
+        process.exit(1);
     });
 }
 bootstrap().catch((error) => {
