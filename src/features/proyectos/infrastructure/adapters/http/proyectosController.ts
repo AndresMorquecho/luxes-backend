@@ -20,8 +20,28 @@ async function nextProyectoId(): Promise<string> {
   return `PROY-${String(max + 1).padStart(3, '0')}`;
 }
 
-const toDateStr = (d: Date | null | undefined): string =>
-  d ? new Date(d).toISOString().split('T')[0] : '';
+const toDateStr = (d: Date | null | undefined): string => {
+  if (!d) return '';
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return '';
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/** Normaliza fecha de inicio del proyecto (YYYY-MM-DD → mediodía UTC) */
+function parseFechaInicio(value?: unknown): Date {
+  const str = typeof value === 'string' ? value.trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return new Date(`${str}T12:00:00.000Z`);
+  }
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return new Date(`${y}-${m}-${d}T12:00:00.000Z`);
+}
 
 type InstalacionDatos = Record<string, unknown>;
 
@@ -143,6 +163,7 @@ function mapProyecto(p: any) {
     estado: p.estado,
     montoEstimado: Number(p.montoEstimado),
     fechaCreacion: toDateStr(p.fechaCreacion),
+    fechaInicio: toDateStr(p.fechaCreacion),
     fechaEntregaEstimada: toDateStr(p.fechaEntregaEstimada),
     fechaCompletado: toDateStr(p.fechaCompletado),
     descripcion: p.descripcion,
@@ -322,6 +343,7 @@ export class ProyectosController {
           prioridad: b.prioridad || 'MEDIA',
           estado: b.estado || 'ACTIVO',
           montoEstimado: Number(b.montoEstimado) || 0,
+          fechaCreacion: parseFechaInicio(b.fechaCreacion ?? b.fechaInicio),
           fechaEntregaEstimada: b.fechaEntregaEstimada ? new Date(b.fechaEntregaEstimada) : null,
           descripcion: b.descripcion || '',
           etiquetas: Array.isArray(b.etiquetas) ? b.etiquetas.join(',') : (b.etiquetas || ''),

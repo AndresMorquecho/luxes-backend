@@ -3,6 +3,23 @@ import { UserRepositoryPort } from '../ports/UserRepositoryPort.js';
 import { PasswordHasherPort } from '../ports/PasswordHasherPort.js';
 import { ValidationError, UserAlreadyExistsError } from '../errors/AuthErrors.js';
 
+/** Mapea nombre de rol del UI a slug almacenado en users.rol */
+function normalizeRol(rol?: string): string {
+  if (!rol?.trim()) return 'visor';
+  const r = rol.trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    administrador: 'admin',
+    'ventas / diseñador': 'ventas',
+    'ventas / disenador': 'ventas',
+    diseñador: 'disenador',
+    impresión: 'impresion',
+    'servicio al cliente': 'visor',
+    user: 'visor',
+    editor: 'visor',
+  };
+  return aliases[r] || r;
+}
+
 interface RegisterInput {
   nombre?: string;
   email?: string;
@@ -31,10 +48,7 @@ export async function registerUser(
     throw new ValidationError('La contraseña es requerida y debe tener al menos 6 caracteres');
   }
 
-  const parsedRol = rol?.toLowerCase() || 'visor';
-  if (!['admin', 'editor', 'visor', 'administrador', 'servicio al cliente', 'user'].includes(parsedRol)) {
-    throw new ValidationError('El rol ingresado no es válido');
-  }
+  const parsedRol = normalizeRol(rol);
 
   // Verificar si ya existe por email o username
   const existingUser = await userRepository.findByUsernameOrEmail(email);
