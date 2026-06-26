@@ -11,6 +11,11 @@
     "dev": "tsx watch src/index.ts",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-notifications": "tsx prisma/seed-notifications.ts",
+    "db:seed-ejemplo-recepcion": "tsx prisma/seed-ejemplo-recepcion.ts",
+    "db:seed-ejemplo-instalacion": "tsx prisma/seed-ejemplo-instalacion.ts",
+    "db:ensure-role-users": "tsx prisma/ensure-role-users.ts",
+    "db:fix-inventory-categories": "tsx prisma/fix-inventory-categories.ts",
     "db:setup": "prisma migrate deploy && tsx prisma/seed.ts"
   },
   "keywords": [],

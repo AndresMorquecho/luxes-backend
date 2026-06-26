@@ -12,6 +12,7 @@ export function createProformasRoutes(controller: ProformasController): Router {
   router.patch('/:id/estado', authMiddleware, (req, res) => controller.updateEstado(req, res));
   router.post('/:id/aprobar', authMiddleware, (req, res) => controller.aprobar(req, res));
   router.post('/:id/rechazar', authMiddleware, (req, res) => controller.rechazar(req, res));
+  router.post('/:id/enviar', authMiddleware, (req, res) => controller.enviar(req, res));
   router.post('/:id/abonos', authMiddleware, (req, res) => controller.registrarAbono(req, res));
   router.delete('/:id', authMiddleware, (req, res) => controller.remove(req, res));
 

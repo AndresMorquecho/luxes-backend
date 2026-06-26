@@ -21,17 +21,27 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     );
 
     let cpp = row.precioCosto || 0;
+    let ultimaFechaCompra: string | null = null;
     if (approvedPurchases.length > 0) {
       const totalCost = approvedPurchases.reduce((sum: number, d: any) => sum + (d.cantidad * d.precioUnitario), 0);
       const totalQty = approvedPurchases.reduce((sum: number, d: any) => sum + d.cantidad, 0);
       if (totalQty > 0) {
         cpp = totalCost / totalQty;
       }
+
+      const fechasCompra = approvedPurchases
+        .map((d: any) => d.ordenCompra?.fechaRecepcion || d.ordenCompra?.fecha)
+        .filter(Boolean)
+        .map((f: Date) => new Date(f).getTime());
+      if (fechasCompra.length > 0) {
+        ultimaFechaCompra = new Date(Math.max(...fechasCompra)).toISOString().split('T')[0];
+      }
     }
 
     return {
       ...rest,
       costoPromedioPonderado: cpp,
+      ultimaFechaCompra,
       unidadMedida: row.unidadMedida ? {
         id: row.unidadMedida.id,
         nombre: row.unidadMedida.nombre,
@@ -203,13 +213,14 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     return rows as unknown as MovimientoData[];
   }
 
-  async createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'>): Promise<MovimientoData> {
+  async createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData> {
     const row = await this.prisma.movimientoInventario.create({
       data: {
         tipo: data.tipo,
         cantidad: data.cantidad,
         motivo: data.motivo,
         userId: data.userId,
+        ...(data.fecha ? { fecha: data.fecha } : {}),
         material: { connect: { id: data.materialId } },
       },
     });
@@ -247,6 +258,9 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
         cantidad: data.cantidad,
         comentarios: data.comentarios,
         estado: data.estado ?? 'prestado',
+        fechaDevolucionEsperada: (data as any).fechaDevolucionEsperada
+          ? new Date((data as any).fechaDevolucionEsperada)
+          : null,
         material: { connect: { id: data.materialId } },
         responsable: { connect: { id: data.responsableId } },
       },
@@ -258,10 +272,16 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     return row as unknown as PrestamoData;
   }
 
-  async returnPrestamo(id: string, fechaRetorno: Date): Promise<PrestamoData> {
+  async returnPrestamo(id: string, fechaRetorno: Date, observacionDevolucion?: string | null): Promise<PrestamoData> {
     const row = await this.prisma.prestamo.update({
       where: { id },
-      data: { fechaRetorno, estado: 'devuelto' },
+      data: {
+        fechaRetorno,
+        estado: 'devuelto',
+        ...(observacionDevolucion != null && observacionDevolucion !== ''
+          ? { observacionDevolucion }
+          : {}),
+      },
       include: {
         material: { select: { nombre: true, tipo: true, unidadMedida: true } },
         responsable: { select: { nombre: true, username: true } },

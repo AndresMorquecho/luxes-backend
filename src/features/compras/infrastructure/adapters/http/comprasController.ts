@@ -57,8 +57,9 @@ export class ComprasController {
       const estado = this.str(req.query.estado);
       const estadoPago = this.str(req.query.estadoPago);
       const creadorRol = this.str(req.query.creadorRol);
+      const pendienteRecepcion = req.query.pendienteRecepcion === 'true' || req.query.pendienteRecepcion === '1';
 
-      const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago, creadorRol });
+      const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago, creadorRol, pendienteRecepcion });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }
@@ -199,12 +200,16 @@ export class ComprasController {
         throw new Error('Usuario no autenticado o sesión inválida.');
       }
 
-      const { detalles } = req.body;
+      const { detalles, fechaRecepcion, notasRecepcion } = req.body;
       if (!Array.isArray(detalles)) {
         throw new Error('Los detalles recibidos son requeridos y deben ser un arreglo.');
       }
 
-      const data = await this.service.recepcionarOrden(id, userId, detalles);
+      const data = await this.service.recepcionarOrden(id, userId, {
+        fechaRecepcion,
+        notasRecepcion,
+        detalles,
+      });
       return this.ok(res, data);
     } catch (e) {
       return this.fail(res, e, 400);

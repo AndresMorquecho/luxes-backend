@@ -13,16 +13,64 @@ function stripEmojis(text: string): string {
     .trim();
 }
 
+function expandRoleAliases(role: string): string[] {
+  const r = role.toLowerCase();
+  const aliases = new Set([r]);
+  if (r === 'impresión' || r === 'impresion') {
+    aliases.add('impresión');
+    aliases.add('impresion');
+  }
+  if (r === 'admin' || r === 'administrador') {
+    aliases.add('admin');
+    aliases.add('administrador');
+  }
+  if (r === 'taller') {
+    aliases.add('taller');
+  }
+  if (r === 'ventas' || r.includes('ventas') || r === 'diseñador' || r === 'disenador') {
+    aliases.add('ventas');
+    aliases.add('diseñador');
+    aliases.add('disenador');
+  }
+  return Array.from(aliases);
+}
+
+/**
+ * Una notificación es visible solo si cumple TODOS los criterios definidos:
+ * - userId → solo ese usuario
+ * - rol → el rol del usuario debe coincidir (si está definido)
+ * - permission → el usuario debe tener ese permiso (si está definido)
+ */
+function buildVisibilityFilter(userId: string, role: string, userPermissions: string[]) {
+  const roleAliases = expandRoleAliases(role);
+
+  const permissionClause = userPermissions.length > 0
+    ? { OR: [{ permission: null }, { permission: { in: userPermissions } }] }
+    : { permission: null };
+
+  return {
+    OR: [
+      { userId },
+      {
+        AND: [
+          { userId: null },
+          {
+            OR: [
+              { rol: null },
+              { rol: { in: roleAliases } },
+            ],
+          },
+          permissionClause,
+        ],
+      },
+    ],
+  };
+}
+
 export class PrismaNotificationAdapter implements NotificationRepositoryPort {
   constructor(private readonly prisma: PrismaClient) {}
 
   async findAllForUser(userId: string, role: string): Promise<NotificationData[]> {
-    const rolesToCheck = [role.toLowerCase()];
-    if (role.toLowerCase() === 'admin' || role.toLowerCase() === 'administrador') {
-      rolesToCheck.push('admin');
-      rolesToCheck.push('administrador');
-    }
-
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -37,37 +85,23 @@ export class PrismaNotificationAdapter implements NotificationRepositoryPort {
         },
       },
     });
-    const userPermissions = user?.role?.permissions.map(rp => rp.permission.key) || [];
+    const userPermissions = user?.role?.permissions.map((rp) => rp.permission.key) || [];
 
     const rows = await this.prisma.notification.findMany({
       where: {
         isRead: false,
-        OR: [
-          { userId },
-          { rol: { in: rolesToCheck } },
-          { permission: { in: userPermissions } },
-          {
-            AND: [
-              { rol: null },
-              { permission: null },
-              { userId: null },
-            ],
-          },
-        ],
+        ...buildVisibilityFilter(userId, role, userPermissions),
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return rows as unknown as NotificationData[];
+    return rows.map((row) => ({
+      ...row,
+      createdBy: row.createdBy || 'Sistema Luxes',
+    })) as unknown as NotificationData[];
   }
 
   async countUnreadForUser(userId: string, role: string): Promise<number> {
-    const rolesToCheck = [role.toLowerCase()];
-    if (role.toLowerCase() === 'admin' || role.toLowerCase() === 'administrador') {
-      rolesToCheck.push('admin');
-      rolesToCheck.push('administrador');
-    }
-
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -82,23 +116,12 @@ export class PrismaNotificationAdapter implements NotificationRepositoryPort {
         },
       },
     });
-    const userPermissions = user?.role?.permissions.map(rp => rp.permission.key) || [];
+    const userPermissions = user?.role?.permissions.map((rp) => rp.permission.key) || [];
 
     const count = await this.prisma.notification.count({
       where: {
         isRead: false,
-        OR: [
-          { userId },
-          { rol: { in: rolesToCheck } },
-          { permission: { in: userPermissions } },
-          {
-            AND: [
-              { rol: null },
-              { permission: null },
-              { userId: null },
-            ],
-          },
-        ],
+        ...buildVisibilityFilter(userId, role, userPermissions),
       },
     });
 
@@ -110,7 +133,10 @@ export class PrismaNotificationAdapter implements NotificationRepositoryPort {
       where: { id },
       data: { isRead: true },
     });
-    return row as unknown as NotificationData;
+    return {
+      ...row,
+      createdBy: row.createdBy || 'Sistema Luxes',
+    } as unknown as NotificationData;
   }
 
   async createNotification(data: {

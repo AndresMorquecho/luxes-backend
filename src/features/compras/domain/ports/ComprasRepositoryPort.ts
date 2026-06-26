@@ -35,6 +35,9 @@ export interface DetalleCompraData extends DetalleCompraInput {
   id: string;
   ordenCompraId: string;
   subtotal: number;
+  cantidadRecibida?: number | null;
+  descargableInventario?: boolean | null;
+  fechaRecepcion?: Date | null;
 }
 
 export interface AbonoCompraData {
@@ -77,6 +80,10 @@ export interface OrdenCompraData {
   fechaAprobacion?: Date | null;
   aprobadoPorId?: string | null;
   aprobadoPor?: { id: string; nombre: string; email: string; rol?: string | null } | null;
+  fechaRecepcion?: Date | null;
+  notasRecepcion?: string | null;
+  recibidoPorId?: string | null;
+  recibidoPor?: { id: string; nombre: string; email: string; rol?: string | null } | null;
   detalles?: DetalleCompraData[];
   abonos?: AbonoCompraData[];
   cuentaPorPagar?: CuentaPorPagarData | null;
@@ -116,6 +123,8 @@ export interface ComprasRepositoryPort {
     search?: string;
     estado?: string;
     estadoPago?: string;
+    creadorRol?: string;
+    pendienteRecepcion?: boolean;
   }): Promise<{ items: OrdenCompraData[]; total: number }>;
 
   findOrdenById(id: string): Promise<OrdenCompraData | null>;
@@ -145,7 +154,16 @@ export interface ComprasRepositoryPort {
     abonoMonto?: number;
     metodoPagoId?: string;
     abonoReferencia?: string;
+    fechaRecepcion?: Date;
+    notasRecepcion?: string;
+    recibidoPorId?: string;
   }): Promise<OrdenCompraData>;
+
+  updateDetalleRecepcion(id: string, data: {
+    cantidadRecibida: number;
+    descargableInventario: boolean;
+    fechaRecepcion?: Date;
+  }): Promise<void>;
 
   deleteOrden(id: string): Promise<void>;
 

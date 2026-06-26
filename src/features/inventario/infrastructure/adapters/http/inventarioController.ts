@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import type { InventarioService } from '../../../application/services/InventarioService.js';
+import { resolveInventarioCategoria } from '../../utils/inventarioCategoriaPorRol.js';
 
 export class InventarioController {
   constructor(private readonly service: InventarioService) {}
@@ -17,6 +18,10 @@ export class InventarioController {
     return typeof val === 'string' ? val : undefined;
   }
 
+  private userRol(req: Request): string | undefined {
+    return (req as any).user?.rol;
+  }
+
   // ── Materiales ──────────────────────────────────────────────────────────────
 
   async listMateriales(req: Request, res: Response) {
@@ -25,7 +30,7 @@ export class InventarioController {
       const page = req.query.page ? parseInt(String(req.query.page), 10) : undefined;
       const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
       const search = this.str(req.query.search);
-      const categoria = this.str(req.query.categoria);
+      const categoria = resolveInventarioCategoria(this.userRol(req), this.str(req.query.categoria));
 
       const data = await this.service.getInventario({ tipo, page, limit, search, categoria });
       return this.ok(res, data);
@@ -48,7 +53,12 @@ export class InventarioController {
 
   async createMaterial(req: Request, res: Response) {
     try {
-      const data = await this.service.createMaterial(req.body);
+      const body = { ...req.body };
+      const categoriaRol = resolveInventarioCategoria(this.userRol(req));
+      if (categoriaRol) {
+        body.categoria = categoriaRol;
+      }
+      const data = await this.service.createMaterial(body);
       return res.status(201).json({ success: true, data });
     } catch (e) { return this.fail(res, e); }
   }
@@ -78,10 +88,13 @@ export class InventarioController {
 
   async createMovimiento(req: Request, res: Response) {
     try {
+      const body = req.body as Record<string, unknown>;
+      const fecha = body.fecha ? new Date(String(body.fecha)) : undefined;
       const data = await this.service.registrarMovimiento({
-        ...req.body,
+        ...body,
         materialId: String(req.params.id),
-      });
+        ...(fecha && !Number.isNaN(fecha.getTime()) ? { fecha } : {}),
+      } as Parameters<InventarioService['registrarMovimiento']>[0]);
       return res.status(201).json({ success: true, data });
     } catch (e) { return this.fail(res, e, 400); }
   }
@@ -104,7 +117,13 @@ export class InventarioController {
 
   async returnPrestamo(req: Request, res: Response) {
     try {
-      const data = await this.service.devolverPrestamo(String(req.params.id));
+      const observacion = typeof req.body?.observacionDevolucion === 'string'
+        ? req.body.observacionDevolucion.trim()
+        : undefined;
+      const data = await this.service.devolverPrestamo(
+        String(req.params.id),
+        observacion || undefined,
+      );
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }
   }

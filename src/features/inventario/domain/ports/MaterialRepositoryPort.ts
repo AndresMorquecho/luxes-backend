@@ -36,7 +36,9 @@ export interface PrestamoData {
   cantidad: number;
   fechaSalida: Date;
   fechaRetorno?: Date | null;
+  fechaDevolucionEsperada?: Date | null;
   comentarios?: string | null;
+  observacionDevolucion?: string | null;
   estado: string;
 }
 
@@ -67,13 +69,13 @@ export interface MaterialRepositoryPort {
 
   // Movimientos
   listMovimientos(materialId?: string): Promise<MovimientoData[]>;
-  createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'>): Promise<MovimientoData>;
+  createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData>;
 
   // Préstamos
   listPrestamos(estado?: string): Promise<PrestamoData[]>;
   findPrestamoById(id: string): Promise<PrestamoData | null>;
   createPrestamo(data: Omit<PrestamoData, 'id' | 'fechaSalida'>): Promise<PrestamoData>;
-  returnPrestamo(id: string, fechaRetorno: Date): Promise<PrestamoData>;
+  returnPrestamo(id: string, fechaRetorno: Date, observacionDevolucion?: string | null): Promise<PrestamoData>;
 
   // Stock helpers
   adjustStock(materialId: string, delta: number): Promise<void>;

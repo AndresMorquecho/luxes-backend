@@ -24,6 +24,7 @@ model User {
   prestamos           Prestamo[]
   ordenesCompra       OrdenCompra[]
   ordenesAprobadas    OrdenCompra[] @relation("OrdenAprobada")
+  ordenesRecibidas    OrdenCompra[] @relation("OrdenRecibida")
   pushSubscriptions   PushSubscription[]
   tareasCreadas       Tarea[]           @relation("TareasCreadas")
   tareasAsignadas     TareaAsignacion[] @relation("TareasAsignadas")
@@ -136,8 +137,10 @@ model Prestamo {
   responsable   User      @relation(fields: [responsableId], references: [id], onDelete: Cascade)
   cantidad      Float     @default(1)
   fechaSalida   DateTime  @default(now()) @map("fecha_salida")
+  fechaDevolucionEsperada DateTime? @map("fecha_devolucion_esperada") @db.Date
   fechaRetorno  DateTime? @map("fecha_retorno")
   comentarios   String?
+  observacionDevolucion String? @map("observacion_devolucion")
   estado        String    @default("prestado") // "prestado" o "devuelto"
 
   @@index([materialId])
@@ -197,6 +200,10 @@ model OrdenCompra {
   fechaAprobacion   DateTime?       @map("fecha_aprobacion")
   aprobadoPorId     String?         @map("aprobado_por_id")
   aprobadoPor       User?           @relation("OrdenAprobada", fields: [aprobadoPorId], references: [id], onDelete: SetNull)
+  fechaRecepcion    DateTime?       @map("fecha_recepcion")
+  notasRecepcion    String?           @map("notas_recepcion")
+  recibidoPorId     String?         @map("recibido_por_id")
+  recibidoPor       User?           @relation("OrdenRecibida", fields: [recibidoPorId], references: [id], onDelete: SetNull)
   detalles          DetalleCompra[]
   abonos            AbonoCompra[]
   cuentaPorPagar    CuentaPorPagar?
@@ -206,6 +213,7 @@ model OrdenCompra {
   @@index([proveedorId])
   @@index([usuarioId])
   @@index([aprobadoPorId])
+  @@index([recibidoPorId])
   @@index([proyectoId])
   @@map("ordenes_compra")
 }
@@ -220,6 +228,9 @@ model DetalleCompra {
   cantidad        Float
   precioUnitario  Float        @map("precio_unitario")
   subtotal        Float        @default(0)
+  cantidadRecibida      Float?    @map("cantidad_recibida")
+  descargableInventario Boolean?  @map("descargable_inventario")
+  fechaRecepcion        DateTime? @map("fecha_recepcion")
 
   @@index([ordenCompraId])
   @@index([materialId])
@@ -486,6 +497,9 @@ model Proforma {
   estado        String         @default("Pendiente")
   metodoPagoId  String?        @map("metodo_pago_id")
   metodoPago    MetodoPago?    @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
+  fechaEnvio      DateTime?    @map("fecha_envio") @db.Date
+  fechaAprobacion DateTime?    @map("fecha_aprobacion")
+  creadoPorUserId String?      @map("creado_por_user_id")
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   items         ProformaItem[]

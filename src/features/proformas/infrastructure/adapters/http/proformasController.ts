@@ -15,6 +15,70 @@ async function nextProformaId(): Promise<string> {
 const toDateStr = (d: Date | null | undefined): string =>
   d ? new Date(d).toISOString().split('T')[0] : '';
 
+const toDateTimeStr = (d: Date | null | undefined): string =>
+  d ? new Date(d).toISOString() : '';
+
+async function notifyRoles(
+  roles: string[],
+  data: { title: string; message: string; createdBy: string; url?: string },
+) {
+  for (const roleName of roles) {
+    await prisma.notification.create({
+      data: {
+        title: data.title,
+        message: data.message,
+        rol: roleName.toLowerCase(),
+        createdBy: data.createdBy,
+      },
+    });
+    if (data.url) {
+      await sendPushToRole(roleName, {
+        title: data.title,
+        body: data.message,
+        data: { url: data.url },
+      }).catch(() => {});
+    }
+  }
+}
+
+async function notifyVentasEquipo(
+  proforma: { id: string; atiende: string; creadoPorUserId?: string | null },
+  data: { title: string; message: string; createdBy: string },
+) {
+  if (proforma.creadoPorUserId) {
+    await prisma.notification.create({
+      data: {
+        title: data.title,
+        message: data.message,
+        userId: proforma.creadoPorUserId,
+        createdBy: data.createdBy,
+      },
+    });
+  } else if (proforma.atiende) {
+    const vendedor = await prisma.user.findFirst({
+      where: {
+        nombre: { equals: proforma.atiende, mode: 'insensitive' },
+      },
+      select: { id: true },
+    });
+    if (vendedor) {
+      await prisma.notification.create({
+        data: {
+          title: data.title,
+          message: data.message,
+          userId: vendedor.id,
+          createdBy: data.createdBy,
+        },
+      });
+    }
+  }
+
+  await notifyRoles(['ventas', 'diseñador', 'disenador'], {
+    ...data,
+    url: `/proformas/detalle/${proforma.id}`,
+  });
+}
+
 /** Mapea el registro Prisma a la forma que consume el frontend */
 function mapProforma(p: any) {
   return {
@@ -33,6 +97,9 @@ function mapProforma(p: any) {
     estado: p.estado,
     metodoPagoId: p.metodoPagoId,
     metodoPago: p.metodoPago,
+    fechaEnvio: toDateStr(p.fechaEnvio),
+    fechaAprobacion: toDateTimeStr(p.fechaAprobacion),
+    creadoPorUserId: p.creadoPorUserId || null,
     items: (p.items || [])
       .slice()
       .sort((a: any, b: any) => a.orden - b.orden)
@@ -159,6 +226,7 @@ export class ProformasController {
       const b = req.body || {};
       const id = await nextProformaId();
       const clienteId = await resolveClienteId(b.clienteId);
+      const creadoPorUserId = (req as any).user?.id || null;
       const created = await prisma.proforma.create({
         data: {
           id,
@@ -166,15 +234,16 @@ export class ProformasController {
           clienteNombre: b.cliente ?? b.clienteNombre ?? '',
           telefono: b.telefono ?? '',
           email: b.email ?? '',
-          fecha: b.fecha ? new Date(b.fecha) : new Date(),
-          vencimiento: b.vencimiento ? new Date(b.vencimiento) : null,
+          fecha: b.fecha ? new Date(b.fecha + (String(b.fecha).includes('T') ? '' : 'T12:00:00')) : new Date(),
+          vencimiento: b.vencimiento ? new Date(b.vencimiento + (String(b.vencimiento).includes('T') ? '' : 'T12:00:00')) : null,
           diasValidez: Number(b.diasValidez ?? 3),
-          atiende: b.atiende ?? '',
+          atiende: b.atiende ?? (req as any).user?.nombre ?? '',
           condiciones: b.condiciones ?? '',
           iva: Number(b.iva ?? 0.12),
           notas: b.notas ?? '',
           estado: b.estado ?? 'Pendiente',
           metodoPagoId: b.metodoPagoId || null,
+          creadoPorUserId,
           items: { create: buildItems(b.items) },
         },
         include: { items: true, metodoPago: true },
@@ -187,24 +256,12 @@ export class ProformasController {
           const totalVal = subtotal * (1 + Number(created.iva));
           const createdByNom = (req as any).user?.nombre || created.atiende || 'Sistema';
 
-          for (const roleName of ['admin', 'administrador']) {
-            await prisma.notification.create({
-              data: {
-                title: 'Nueva Proforma Pendiente de Aprobación',
-                message: `Se ha generado la proforma ${created.id} para el cliente "${created.clienteNombre}" por un total de $${totalVal.toFixed(2)}. Requiere aprobación.`,
-                rol: roleName,
-                createdBy: createdByNom,
-              },
-            });
-
-            await sendPushToRole(roleName, {
-              title: 'Nueva Proforma Pendiente',
-              body: `La proforma ${created.id} para "${created.clienteNombre}" de $${totalVal.toFixed(2)} requiere tu aprobación.`,
-              data: {
-                url: `/proformas/detalle/${created.id}`
-              }
-            }).catch(() => {});
-          }
+          await notifyRoles(['admin', 'administrador'], {
+            title: 'Nueva Proforma Pendiente de Aprobación',
+            message: `Se ha generado la proforma ${created.id} para el cliente "${created.clienteNombre}" por un total de $${totalVal.toFixed(2)}. Requiere aprobación.`,
+            createdBy: createdByNom,
+            url: `/proformas/detalle/${created.id}`,
+          });
         } catch (notifErr) {
           console.error('[proformas/create/notify]', notifErr);
         }
@@ -231,8 +288,8 @@ export class ProformasController {
           clienteNombre: b.cliente ?? b.clienteNombre ?? '',
           telefono: b.telefono ?? '',
           email: b.email ?? '',
-          fecha: b.fecha ? new Date(b.fecha) : undefined,
-          vencimiento: b.vencimiento ? new Date(b.vencimiento) : null,
+          fecha: b.fecha ? new Date(String(b.fecha).includes('T') ? b.fecha : `${b.fecha}T12:00:00`) : undefined,
+          vencimiento: b.vencimiento ? new Date(String(b.vencimiento).includes('T') ? b.vencimiento : `${b.vencimiento}T12:00:00`) : null,
           diasValidez: Number(b.diasValidez ?? 3),
           atiende: b.atiende ?? '',
           condiciones: b.condiciones ?? '',
@@ -258,6 +315,17 @@ export class ProformasController {
     try {
       const { id } = req.params;
       const { estado, metodoPagoId } = req.body || {};
+
+      const userRole = ((req as any).user?.rol || '').toUpperCase();
+      const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
+      const estadoStr = String(estado || '');
+      if ((estadoStr === 'Aprobada' || estadoStr === 'Pagada' || estadoStr === 'Rechazada') && !isAdmin) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Solo administradores pueden cambiar a ese estado' },
+        });
+      }
+
       const updated = await prisma.proforma.update({
         where: { id: String(id) },
         data: { 
@@ -358,11 +426,19 @@ export class ProformasController {
           data: {
             estado: nuevoEstado,
             metodoPagoId: String(metodoPagoId),
+            fechaAprobacion: new Date(),
           },
           include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
         });
 
         return updated;
+      });
+
+      const adminNombre = (req as any).user?.nombre || 'Administración';
+      await notifyVentasEquipo(result, {
+        title: 'Proforma Aprobada',
+        message: `La proforma ${result.id} para "${result.clienteNombre}" fue aprobada (${nuevoEstado}).`,
+        createdBy: adminNombre,
       });
 
       return res.status(200).json({ success: true, data: mapProforma(result) });
@@ -398,6 +474,13 @@ export class ProformasController {
         where: { id: proforma.id },
         data: { estado: 'Rechazada' },
         include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+      });
+
+      const adminNombre = (req as any).user?.nombre || 'Administración';
+      await notifyVentasEquipo(updated, {
+        title: 'Proforma Rechazada',
+        message: `La proforma ${updated.id} para "${updated.clienteNombre}" fue rechazada.`,
+        createdBy: adminNombre,
       });
 
       return res.status(200).json({ success: true, data: mapProforma(updated) });
@@ -476,6 +559,55 @@ export class ProformasController {
     } catch (error) {
       console.error('[proformas/registrarAbono]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar abono' } });
+    }
+  }
+
+  async enviar(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+      const proforma = await prisma.proforma.findUnique({
+        where: { id: String(id) },
+        include: { items: true },
+      });
+
+      if (!proforma) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Proforma no encontrada' },
+        });
+      }
+
+      const updated = await prisma.proforma.update({
+        where: { id: String(id) },
+        data: { fechaEnvio: new Date() },
+        include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+      });
+
+      const subtotal = (updated.items || []).reduce(
+        (s, item) => s + Number(item.cantidad) * Number(item.precioUnitario),
+        0,
+      );
+      const total = subtotal * (1 + Number(updated.iva));
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          ...mapProforma(updated),
+          resumenEnvio: {
+            cliente: updated.clienteNombre,
+            telefono: updated.telefono,
+            email: updated.email,
+            total: total.toFixed(2),
+            items: updated.items.length,
+          },
+        },
+      });
+    } catch (error) {
+      console.error('[proformas/enviar]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al registrar envío de proforma' },
+      });
     }
   }
 
