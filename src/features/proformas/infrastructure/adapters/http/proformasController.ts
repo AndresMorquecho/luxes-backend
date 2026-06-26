@@ -168,15 +168,20 @@ export class ProformasController {
         search = '', 
         estado = '',
         fechaDesde = '',
-        fechaHasta = ''
+        fechaHasta = '',
+        clienteId = ''
       } = req.query;
 
       const pageNum = Math.max(1, parseInt(String(page), 10));
-      const limitNum = Math.max(1, Math.min(100, parseInt(String(limit), 10)));
+      const limitNum = Math.max(1, Math.min(1000, parseInt(String(limit), 10))); // Permite límites de hasta 1000 para cargas de listados completos en frontend
       const skip = (pageNum - 1) * limitNum;
 
       // Construir filtros dinámicos
       const where: any = {};
+
+      if (clienteId && String(clienteId).trim()) {
+        where.clienteId = String(clienteId).trim();
+      }
 
       // Excluir rechazadas por defecto a menos que se busque específicamente
       if (estado && String(estado).trim()) {
