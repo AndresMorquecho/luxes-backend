@@ -1,11 +1,7 @@
 import { Asistencia } from '../../domain/entities/Asistencia.js';
+import { SECUENCIA_MARCACIONES, resolveProximaMarcacion, resolveTipoRegistro, isDiaLaboralCompleto, } from '../../domain/marcacionLogic.js';
 import { prisma } from '../../../../config/prismaClient.js';
-export const SECUENCIA_MARCACIONES = [
-    { tipo: 'ENTRADA', label: 'Entrada' },
-    { tipo: 'INICIO_ALMUERZO', label: 'Inicio Almuerzo' },
-    { tipo: 'FIN_ALMUERZO', label: 'Fin Almuerzo' },
-    { tipo: 'SALIDA', label: 'Salida' },
-];
+export { SECUENCIA_MARCACIONES };
 export class AsistenciaService {
     asistenciaRepository;
     constructor(asistenciaRepository) {
@@ -20,16 +16,12 @@ export class AsistenciaService {
     }
     async getProximaMarcacion(empleadoId) {
         const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(empleadoId);
-        if (todayMarks.length >= 4) {
-            return null;
-        }
-        return SECUENCIA_MARCACIONES[todayMarks.length];
+        return resolveProximaMarcacion(todayMarks);
     }
     async getTodayForEmpleado(empleadoId) {
         return this.asistenciaRepository.findTodayByEmpleado(empleadoId);
     }
     async registrarAsistencia(input) {
-        // Verificar que el empleado existe
         const empleado = await prisma.empleado.findUnique({
             where: { id: input.empleadoId },
             select: { nombre: true },
@@ -38,10 +30,13 @@ export class AsistenciaService {
             throw new Error(`Empleado con ID '${input.empleadoId}' no encontrado en el sistema.`);
         }
         const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(input.empleadoId);
-        if (todayMarks.length >= 4) {
-            throw new Error(`El colaborador ${empleado.nombre} ya completó las 4 marcaciones del día.`);
+        if (isDiaLaboralCompleto(todayMarks)) {
+            throw new Error(`El colaborador ${empleado.nombre} ya completó las marcaciones del día.`);
         }
-        const proxima = SECUENCIA_MARCACIONES[todayMarks.length];
+        const proxima = resolveTipoRegistro(todayMarks, {
+            omitirAlmuerzo: input.omitirAlmuerzo,
+            horaActual: new Date(),
+        });
         const asistencia = await this.asistenciaRepository.create({
             empleadoId: input.empleadoId,
             tipo: proxima.tipo,
@@ -50,7 +45,6 @@ export class AsistenciaService {
             ubicacionLat: input.ubicacionLat,
             ubicacionLng: input.ubicacionLng,
         });
-        // Añadir el nombre del empleado para la respuesta
         return new Asistencia({
             ...asistencia.toJSON(),
             nombreEmpleado: empleado.nombre,
@@ -64,7 +58,6 @@ export class AsistenciaService {
         if (!empleado) {
             throw new Error(`Empleado con ID '${input.empleadoId}' no encontrado.`);
         }
-        // Calcular inicio y fin del día para la fecha especificada
         const targetDate = new Date(input.fecha + 'T00:00:00');
         const start = new Date(targetDate);
         start.setHours(0, 0, 0, 0);

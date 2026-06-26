@@ -61,7 +61,7 @@ export class AsistenciaController {
 
   async registrar(req: Request, res: Response): Promise<Response> {
     try {
-      const { empleadoId, ubicacion } = req.body;
+      const { empleadoId, ubicacion, omitirAlmuerzo } = req.body;
 
       if (!empleadoId) {
         return res.status(400).json({
@@ -77,6 +77,7 @@ export class AsistenciaController {
         empleadoId: String(empleadoId).trim(),
         ubicacionLat: lat,
         ubicacionLng: lng,
+        omitirAlmuerzo: omitirAlmuerzo === true,
       });
 
       return res.status(201).json({

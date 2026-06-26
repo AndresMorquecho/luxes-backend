@@ -64,29 +64,34 @@ export class AuthService {
             if (data.roleId)
                 u.roleId = data.roleId;
             u.estado = data.estado || 'activo';
-            // 1:1 Link - Generate Empleado
-            const records = await prisma.empleado.findMany({ select: { id: true } });
-            const maxNum = records.reduce((max, record) => {
-                const match = record.id.match(/^EMP-(\d+)$/);
-                if (!match)
-                    return max;
-                const num = parseInt(match[1], 10);
-                return num > max ? num : max;
-            }, 0);
-            const nextEmpId = `EMP-${String(maxNum + 1).padStart(3, '0')}`;
-            const dummyCedula = '99' + String(maxNum + 1).padStart(8, '0');
-            await prisma.empleado.create({
-                data: {
-                    id: nextEmpId,
-                    nombre: data.nombre,
-                    cedula: dummyCedula,
-                    correo: data.email || `${data.username}@luxes.com`,
-                    cargo: data.rol || 'visor',
-                    passwordHash: u.passwordHash,
-                }
-            });
-            u.empleadoId = nextEmpId;
-            await this.userRepository.update(u);
+            try {
+                // 1:1 Link - Generate Empleado
+                const records = await prisma.empleado.findMany({ select: { id: true } });
+                const maxNum = records.reduce((max, record) => {
+                    const match = record.id.match(/^EMP-(\d+)$/);
+                    if (!match)
+                        return max;
+                    const num = parseInt(match[1], 10);
+                    return num > max ? num : max;
+                }, 0);
+                const nextEmpId = `EMP-${String(maxNum + 1).padStart(3, '0')}`;
+                const dummyCedula = '99' + String(maxNum + 1).padStart(8, '0');
+                await prisma.empleado.create({
+                    data: {
+                        id: nextEmpId,
+                        nombre: data.nombre,
+                        cedula: dummyCedula,
+                        correo: data.email || `${data.username}@luxes.com`,
+                        cargo: data.rol || 'visor',
+                        passwordHash: u.passwordHash,
+                    },
+                });
+                u.empleadoId = nextEmpId;
+                await this.userRepository.update(u);
+            }
+            catch (empErr) {
+                console.warn('[createUser] No se pudo crear empleado vinculado:', empErr);
+            }
         }
         // Registrar en auditoría
         if (this.auditLogRepository) {

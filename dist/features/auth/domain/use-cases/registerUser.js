@@ -1,5 +1,22 @@
 import { User } from '../entities/User.js';
 import { ValidationError, UserAlreadyExistsError } from '../errors/AuthErrors.js';
+/** Mapea nombre de rol del UI a slug almacenado en users.rol */
+function normalizeRol(rol) {
+    if (!rol?.trim())
+        return 'visor';
+    const r = rol.trim().toLowerCase();
+    const aliases = {
+        administrador: 'admin',
+        'ventas / diseñador': 'ventas',
+        'ventas / disenador': 'ventas',
+        diseñador: 'disenador',
+        impresión: 'impresion',
+        'servicio al cliente': 'visor',
+        user: 'visor',
+        editor: 'visor',
+    };
+    return aliases[r] || r;
+}
 /**
  * Caso de uso: Registrar un nuevo usuario.
  * Aplica lógica de negocio de dominio para validar campos, contraseñas y unicidad.
@@ -14,10 +31,7 @@ export async function registerUser({ nombre, email, username, password, rol }, {
     if (!password || password.length < 6) {
         throw new ValidationError('La contraseña es requerida y debe tener al menos 6 caracteres');
     }
-    const parsedRol = rol?.toLowerCase() || 'visor';
-    if (!['admin', 'editor', 'visor', 'administrador', 'servicio al cliente', 'user'].includes(parsedRol)) {
-        throw new ValidationError('El rol ingresado no es válido');
-    }
+    const parsedRol = normalizeRol(rol);
     // Verificar si ya existe por email o username
     const existingUser = await userRepository.findByUsernameOrEmail(email);
     if (existingUser) {
