@@ -788,7 +788,45 @@ export class ProyectosController {
       // Construir la URL del archivo
       const archivoUrl = `/uploads/proyectos/${id}/${file.filename}`;
 
-      // Guardar la URL en la fase de diseño
+      // Obtener datos existentes de la fase de diseño
+      const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+        where: {
+          proyectoId_fase: {
+            proyectoId: String(id),
+            fase: 'DISEÑO',
+          },
+        },
+      });
+
+      const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
+
+      const nuevoArchivo = {
+        name: file.originalname,
+        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+        type: file.mimetype,
+        url: archivoUrl,
+      };
+
+      // Obtener arreglo de archivos actuales
+      let archivosArte: any[] = [];
+      if (Array.isArray(datosExistentes.archivosArte)) {
+        archivosArte = [...datosExistentes.archivosArte];
+      } else if (datosExistentes.archivoArte) {
+        archivosArte = [datosExistentes.archivoArte];
+      }
+
+      // Evitar duplicar el mismo archivo por URL
+      if (!archivosArte.some(f => f.url === archivoUrl)) {
+        archivosArte.push(nuevoArchivo);
+      }
+
+      const datosActualizados = {
+        ...datosExistentes,
+        archivosArte,
+        archivoArte: archivosArte[0] || null,
+      };
+
+      // Guardar en la fase de diseño
       await prisma.proyectoFase.upsert({
         where: {
           proyectoId_fase: {
@@ -797,27 +835,13 @@ export class ProyectosController {
           },
         },
         update: {
-          datos: JSON.stringify({
-            archivoArte: {
-              name: file.originalname,
-              size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-              type: file.mimetype,
-              url: archivoUrl,
-            },
-          }),
+          datos: JSON.stringify(datosActualizados),
         },
         create: {
           proyectoId: String(id),
           fase: 'DISEÑO',
           completada: false,
-          datos: JSON.stringify({
-            archivoArte: {
-              name: file.originalname,
-              size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-              type: file.mimetype,
-              url: archivoUrl,
-            },
-          }),
+          datos: JSON.stringify(datosActualizados),
         },
       });
 
