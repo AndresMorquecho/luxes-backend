@@ -1,15 +1,10 @@
-import { prisma } from './config/prismaClient.js';
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
 async function main() {
-    console.log('--- CLIENTES ---');
-    const clientes = await prisma.cliente.findMany();
-    console.log(clientes);
-    console.log('--- PROFORMAS ---');
-    const proformas = await prisma.proforma.findMany();
-    console.log(proformas.map(p => ({ id: p.id, clienteId: p.clienteId, clienteNombre: p.clienteNombre, estado: p.estado })));
-    console.log('--- PROYECTOS ---');
-    const proyectos = await prisma.proyecto.findMany();
-    console.log(proyectos.map(p => ({ id: p.id, nombre: p.nombre, clienteId: p.clienteId, clienteNombre: p.clienteNombre, estado: p.estado })));
+    const p = await prisma.proyecto.findFirst({
+        where: { id: 'PROY-004' },
+        include: { fases: true }
+    });
+    console.log("PROJECT PROY-004:", JSON.stringify(p, null, 2));
 }
-main()
-    .catch(console.error)
-    .finally(() => prisma.$disconnect());
+main().catch(console.error).finally(() => prisma.$disconnect());
