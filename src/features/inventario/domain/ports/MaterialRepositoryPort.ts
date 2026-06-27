@@ -77,6 +77,9 @@ export interface MaterialRepositoryPort {
   createPrestamo(data: Omit<PrestamoData, 'id' | 'fechaSalida'>): Promise<PrestamoData>;
   returnPrestamo(id: string, fechaRetorno: Date, observacionDevolucion?: string | null): Promise<PrestamoData>;
 
+  // Historial
+  getMaterialHistorial(id: string): Promise<any>;
+
   // Stock helpers
   adjustStock(materialId: string, delta: number): Promise<void>;
 }

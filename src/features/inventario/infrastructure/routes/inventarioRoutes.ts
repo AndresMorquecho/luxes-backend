@@ -19,6 +19,8 @@ export function createInventarioRoutes(ctrl: InventarioController): Router {
   router.post('/',                   (req, res) => ctrl.createMaterial(req, res));
   // PUT  /api/inventario/:id
   router.put('/:id',                 (req, res) => ctrl.updateMaterial(req, res));
+  // GET  /api/inventario/:id/historial
+  router.get('/:id/historial',       (req, res) => ctrl.getMaterialHistorial(req, res));
   // DELETE /api/inventario/:id
   router.delete('/:id',              (req, res) => ctrl.deleteMaterial(req, res));
 
