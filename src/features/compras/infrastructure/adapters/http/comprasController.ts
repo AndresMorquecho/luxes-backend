@@ -55,11 +55,26 @@ export class ComprasController {
       const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
       const search = this.str(req.query.search);
       const estado = this.str(req.query.estado);
+      const estadosRaw = this.str(req.query.estados);
+      const estados = estadosRaw
+        ? estadosRaw.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined;
       const estadoPago = this.str(req.query.estadoPago);
       const creadorRol = this.str(req.query.creadorRol);
+      const creadorId = this.str(req.query.creadorId);
       const pendienteRecepcion = req.query.pendienteRecepcion === 'true' || req.query.pendienteRecepcion === '1';
 
-      const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago, creadorRol, pendienteRecepcion });
+      const data = await this.service.getOrdenes({
+        page,
+        limit,
+        search,
+        estado,
+        estados,
+        estadoPago,
+        creadorRol,
+        creadorId,
+        pendienteRecepcion,
+      });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }

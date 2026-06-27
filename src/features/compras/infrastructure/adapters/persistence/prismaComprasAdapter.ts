@@ -64,19 +64,34 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     limit?: number;
     search?: string;
     estado?: string;
+    estados?: string[];
     estadoPago?: string;
     creadorRol?: string;
+    creadorId?: string;
     pendienteRecepcion?: boolean;
   }): Promise<{ items: OrdenCompraData[]; total: number }> {
-    const { page = 1, limit = 10, search, estado, estadoPago, creadorRol, pendienteRecepcion } = options || {};
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      estado,
+      estados,
+      estadoPago,
+      creadorRol,
+      creadorId,
+      pendienteRecepcion,
+    } = options || {};
 
     const where: any = {};
     if (pendienteRecepcion) {
       where.estado = { in: ['aprobada', 'parcialmente_recibida'] };
+    } else if (estados?.length) {
+      where.estado = { in: estados };
     } else if (estado) {
       where.estado = estado;
     }
     if (estadoPago) where.estadoPago = estadoPago;
+    if (creadorId) where.usuarioId = creadorId;
     if (creadorRol) {
       const lowerRol = creadorRol.toLowerCase();
       if (lowerRol === 'impresion' || lowerRol === 'impresión') {

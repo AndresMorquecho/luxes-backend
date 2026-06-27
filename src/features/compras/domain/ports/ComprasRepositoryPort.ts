@@ -122,8 +122,10 @@ export interface ComprasRepositoryPort {
     limit?: number;
     search?: string;
     estado?: string;
+    estados?: string[];
     estadoPago?: string;
     creadorRol?: string;
+    creadorId?: string;
     pendienteRecepcion?: boolean;
   }): Promise<{ items: OrdenCompraData[]; total: number }>;
 
