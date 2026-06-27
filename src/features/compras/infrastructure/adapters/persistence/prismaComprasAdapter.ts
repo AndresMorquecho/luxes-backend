@@ -500,7 +500,8 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       include: this.ordenInclude,
     });
 
-    // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto
+    // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto (Deshabilitado en Costeo por Consumo)
+    /*
     if (data.estado === 'aprobada' && row.proyectoId) {
       try {
         const provName = (row as any).proveedor?.nombre || 'Sin proveedor específico';
@@ -521,6 +522,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
         console.error('[Gasto Automático Error] No se pudo crear el gasto para el proyecto:', err);
       }
     }
+    */
 
     // Notificar al creador solo en la transición a aprobada (con o sin proyecto)
     const pasoAAprobada = data.estado === 'aprobada' && ordenAnterior?.estado !== 'aprobada';

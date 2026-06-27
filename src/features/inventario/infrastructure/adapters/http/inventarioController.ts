@@ -127,4 +127,11 @@ export class InventarioController {
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }
   }
+
+  async getMaterialHistorial(req: Request, res: Response) {
+    try {
+      const data = await this.service.getMaterialHistorial(String(req.params.id));
+      return this.ok(res, data);
+    } catch (e) { return this.fail(res, e); }
+  }
 }

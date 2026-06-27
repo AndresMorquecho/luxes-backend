@@ -290,12 +290,126 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     return row as unknown as PrestamoData;
   }
 
-  // ── Stock ───────────────────────────────────────────────────────────────────
-
   async adjustStock(materialId: string, delta: number): Promise<void> {
     await this.prisma.material.update({
       where: { id: materialId },
       data: { stockActual: { increment: delta } },
     });
+  }
+
+  async getMaterialHistorial(idOrCodigo: string): Promise<any> {
+    const material = await this.prisma.material.findFirst({
+      where: {
+        OR: [
+          { id: idOrCodigo },
+          { codigo: idOrCodigo }
+        ]
+      },
+      include: { unidadMedida: true }
+    });
+    if (!material) throw new Error('Material no encontrado.');
+    const id = material.id;
+
+    // 1. Query Compras (DetalleCompra)
+    const detallesCompra = await this.prisma.detalleCompra.findMany({
+      where: { materialId: id },
+      include: {
+        ordenCompra: {
+          include: { proveedor: true }
+        }
+      },
+      orderBy: { ordenCompra: { fecha: 'desc' } }
+    });
+
+    const compras = detallesCompra.map(d => ({
+      id: d.id,
+      ordenId: d.ordenCompraId,
+      numero: d.ordenCompra.numero,
+      fecha: d.ordenCompra.fecha ? new Date(d.ordenCompra.fecha).toISOString().split('T')[0] : '',
+      fechaRecepcion: d.fechaRecepcion ? new Date(d.fechaRecepcion).toISOString().split('T')[0] : (d.ordenCompra.fechaRecepcion ? new Date(d.ordenCompra.fechaRecepcion).toISOString().split('T')[0] : ''),
+      proveedor: d.ordenCompra.proveedor?.nombre || 'Sin proveedor',
+      cantidad: d.cantidad,
+      cantidadRecibida: d.cantidadRecibida,
+      precioUnitario: d.precioUnitario,
+      subtotal: d.subtotal,
+      estado: d.ordenCompra.estado
+    }));
+
+    // 2. Query Movimientos (MovimientoInventario)
+    const movimientosDb = await this.prisma.movimientoInventario.findMany({
+      where: { materialId: id },
+      orderBy: { fecha: 'desc' }
+    });
+
+    const movimientos = movimientosDb.map(m => ({
+      id: m.id,
+      tipo: m.tipo,
+      cantidad: m.cantidad,
+      motivo: m.motivo,
+      fecha: m.fecha ? new Date(m.fecha).toISOString() : ''
+    }));
+
+    // 3. Query Usos en Proyectos (ProyectoFase)
+    const fasesInstalacion = await this.prisma.proyectoFase.findMany({
+      where: {
+        fase: 'INSTALACION'
+      },
+      include: {
+        proyecto: true
+      }
+    });
+
+    const usos: any[] = [];
+    const matSku = material.codigo || '';
+    const matNombreLower = material.nombre.toLowerCase();
+
+    for (const fase of fasesInstalacion) {
+      if (!fase.datos) continue;
+      try {
+        const datos = JSON.parse(fase.datos);
+        const materiales = datos.materiales;
+        if (Array.isArray(materiales)) {
+          const matched = materiales.filter((m: any) => 
+            (m.sku && m.sku === matSku) || 
+            (m.nombre && m.nombre.toLowerCase() === matNombreLower)
+          );
+
+          for (const m of matched) {
+            usos.push({
+              proyectoId: fase.proyectoId,
+              proyectoNombre: fase.proyecto.nombre,
+              cliente: fase.proyecto.clienteEmpresa || fase.proyecto.clienteNombre || 'Sin cliente',
+              cantidad: m.cantidadLaveada !== undefined ? m.cantidadLaveada : (m.cantidadLlevada !== undefined ? m.cantidadLlevada : (m.cantidad || 0)),
+              unidad: m.unidad || '',
+              fecha: datos.fechaInstalacion || (fase.fechaCompletada ? new Date(fase.fechaCompletada).toISOString().split('T')[0] : ''),
+              responsable: m.responsable || datos.personalAsignado?.[0]?.nombre || 'Sin asignar',
+              observacion: m.observacion || m.observaciones || ''
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error parsing fase datos:', err);
+      }
+    }
+
+    usos.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+    return {
+      material: {
+        id: material.id,
+        nombre: material.nombre,
+        codigo: material.codigo,
+        categoria: material.categoria,
+        tipo: material.tipo,
+        stockActual: material.stockActual,
+        unidadMedida: material.unidadMedida ? {
+          nombre: material.unidadMedida.nombre,
+          abreviacion: material.unidadMedida.abreviacion
+        } : { nombre: 'unidades', abreviacion: 'unid' }
+      },
+      compras,
+      usos,
+      movimientos
+    };
   }
 }

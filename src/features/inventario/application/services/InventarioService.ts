@@ -114,4 +114,8 @@ export class InventarioService {
 
     return updated;
   }
+
+  async getMaterialHistorial(id: string): Promise<any> {
+    return this.repo.getMaterialHistorial(id);
+  }
 }
