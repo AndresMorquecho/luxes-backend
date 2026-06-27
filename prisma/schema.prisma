@@ -30,7 +30,7 @@ model User {
   tareasAsignadas     TareaAsignacion[] @relation("TareasAsignadas")
   cierresCaja         CierreCaja[]
   empleadoId          String?       @unique @map("empleado_id")
-  empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+  empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
 
   @@index([roleId])
   @@map("users")
@@ -431,6 +431,17 @@ model NominaRegistro {
 
   @@unique([empleadoId, fechaInicio, fechaFin])
   @@map("nomina_registros")
+}
+
+model NominaPeriodoConfig {
+  id          String   @id @default(uuid())
+  fechaInicio DateTime @map("fecha_inicio") @db.Date
+  fechaFin    DateTime @map("fecha_fin") @db.Date
+  feriados    Json     @default("[]")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([fechaInicio, fechaFin])
+  @@map("nomina_periodo_config")
 }
 
 model Egreso {

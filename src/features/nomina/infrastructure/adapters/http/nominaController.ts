@@ -1,6 +1,12 @@
 import { Request, Response } from 'express';
 import ExcelJS from 'exceljs';
 import { prisma } from '../../../../../config/prismaClient.js';
+import { sueldoDiarioEfectivo } from '../../../../../shared/utils/sueldoHelpers.js';
+import {
+  calcDiasLaborables,
+  calcDiasLaborados,
+  normalizeFeriados,
+} from '../../../../../shared/utils/nominaPeriodoHelpers.js';
 
 export class NominaController {
   // ─── Horas Extras (Overtime) Endpoints ───
@@ -149,6 +155,19 @@ export class NominaController {
 
       const fInicio = new Date(String(fechaInicio));
       const fFin = new Date(String(fechaFin));
+      const fInicioStr = String(fechaInicio).slice(0, 10);
+      const fFinStr = String(fechaFin).slice(0, 10);
+
+      const periodoConfig = await prisma.nominaPeriodoConfig.findUnique({
+        where: {
+          fechaInicio_fechaFin: {
+            fechaInicio: fInicio,
+            fechaFin: fFin,
+          },
+        },
+      });
+      const feriados = normalizeFeriados(periodoConfig?.feriados);
+      const diasLaborablesPeriodo = calcDiasLaborables(fInicioStr, fFinStr);
 
       let records = await prisma.nominaRegistro.findMany({
         where: {
@@ -159,7 +178,7 @@ export class NominaController {
 
       const empleados = await prisma.empleado.findMany();
       const empleadoIds = empleados.map(e => e.id);
-      const diffDias = Math.floor((fFin.getTime() - fInicio.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      const diffDias = diasLaborablesPeriodo;
 
       // Pre-fetch related records in batch to avoid N+1 queries
       const asistenciasBatch = await prisma.asistencia.findMany({
@@ -169,7 +188,8 @@ export class NominaController {
         },
         select: {
           empleadoId: true,
-          fechaHora: true
+          fechaHora: true,
+          tipo: true,
         }
       });
 
@@ -195,12 +215,15 @@ export class NominaController {
       });
 
       // Group records by employee ID for O(1) retrieval
-      const asistenciasByEmpleado = new Map<string, Date[]>();
+      const asistenciasByEmpleado = new Map<string, { fechaHora: Date; tipo: string }[]>();
       for (const a of asistenciasBatch) {
         if (!asistenciasByEmpleado.has(a.empleadoId)) {
           asistenciasByEmpleado.set(a.empleadoId, []);
         }
-        asistenciasByEmpleado.get(a.empleadoId)!.push(a.fechaHora);
+        asistenciasByEmpleado.get(a.empleadoId)!.push({
+          fechaHora: a.fechaHora,
+          tipo: a.tipo,
+        });
       }
 
       const horasExtrasByEmpleado = new Map<string, typeof horasExtrasBatch>();
@@ -233,17 +256,16 @@ export class NominaController {
 
       for (const emp of empleados) {
         const empAsistencias = asistenciasByEmpleado.get(emp.id) || [];
-        // Contar días únicos con asistencia
-        const uniqueDays = new Set(
-          empAsistencias.map(fechaHora => {
-            const d = new Date(fechaHora);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          })
-        ).size;
-
         const hasContract = emp.tieneContrato !== false;
-        const diasTrabajados = uniqueDays;
-        const defaultSueldoBruto = Number(emp.sueldoDiario) * diasTrabajados;
+        const { diasLaborados: diasTrabajados } = calcDiasLaborados(
+          empAsistencias,
+          feriados,
+          fInicioStr,
+          fFinStr,
+          hasContract,
+        );
+        const sueldoDiario = sueldoDiarioEfectivo(Number(emp.sueldoDiario));
+        const defaultSueldoBruto = sueldoDiario * diasTrabajados;
 
         const decimoCuartoVal = 0;
         const decimoTerceroVal = hasContract ? Math.round((defaultSueldoBruto / 12) * 100) / 100 : 0;
@@ -347,6 +369,7 @@ export class NominaController {
                 where: { id: existing.id },
                 data: {
                   diasLaborados: diasTrabajados,
+                  diasLaborables: diffDias,
                   ingresos: updatedIngresos,
                   egresos: updatedEgresos,
                 }
@@ -398,6 +421,102 @@ export class NominaController {
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Error al obtener registros de nómina' }
+      });
+    }
+  }
+
+  async getPeriodoConfig(req: Request, res: Response): Promise<Response> {
+    try {
+      const { fechaInicio, fechaFin } = req.query;
+      if (!fechaInicio || !fechaFin) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'fechaInicio y fechaFin son requeridos' },
+        });
+      }
+
+      const fInicio = new Date(String(fechaInicio));
+      const fFin = new Date(String(fechaFin));
+      const fInicioStr = String(fechaInicio).slice(0, 10);
+      const fFinStr = String(fechaFin).slice(0, 10);
+
+      const config = await prisma.nominaPeriodoConfig.findUnique({
+        where: {
+          fechaInicio_fechaFin: {
+            fechaInicio: fInicio,
+            fechaFin: fFin,
+          },
+        },
+      });
+
+      const feriados = normalizeFeriados(config?.feriados);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          fechaInicio: fInicioStr,
+          fechaFin: fFinStr,
+          diasLaborables: calcDiasLaborables(fInicioStr, fFinStr),
+          feriados,
+        },
+      });
+    } catch (error) {
+      console.error('[nomina/getPeriodoConfig]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al obtener configuración del período' },
+      });
+    }
+  }
+
+  async savePeriodoConfig(req: Request, res: Response): Promise<Response> {
+    try {
+      const { fechaInicio, fechaFin, feriados } = req.body;
+      if (!fechaInicio || !fechaFin) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'fechaInicio y fechaFin son requeridos' },
+        });
+      }
+
+      const fInicio = new Date(String(fechaInicio));
+      const fFin = new Date(String(fechaFin));
+      const fInicioStr = String(fechaInicio).slice(0, 10);
+      const fFinStr = String(fechaFin).slice(0, 10);
+
+      const normalized = normalizeFeriados(feriados).filter(
+        (f) => f.fecha >= fInicioStr && f.fecha <= fFinStr,
+      );
+
+      const saved = await prisma.nominaPeriodoConfig.upsert({
+        where: {
+          fechaInicio_fechaFin: {
+            fechaInicio: fInicio,
+            fechaFin: fFin,
+          },
+        },
+        update: { feriados: normalized },
+        create: {
+          fechaInicio: fInicio,
+          fechaFin: fFin,
+          feriados: normalized,
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          fechaInicio: fInicioStr,
+          fechaFin: fFinStr,
+          diasLaborables: calcDiasLaborables(fInicioStr, fFinStr),
+          feriados: normalizeFeriados(saved.feriados),
+        },
+      });
+    } catch (error) {
+      console.error('[nomina/savePeriodoConfig]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al guardar feriados del período' },
       });
     }
   }
@@ -975,7 +1094,7 @@ export class NominaController {
       // Helper para calcular la nómina a nivel de objeto para el Excel
       const mapNominaRow = (emp: any, rawNomina: any, quincenaNum: number, fInicio: Date, fFin: Date) => {
         const hasContract = emp.tieneContrato !== false;
-        const sueldo = Number(emp.sueldoDiario);
+        const sueldo = sueldoDiarioEfectivo(Number(emp.sueldoDiario));
         
         const diasT = rawNomina ? Number(rawNomina.diasLaborados) : 0;
         const totalB = rawNomina ? Number(rawNomina.totalBruto) : sueldo * diasT;

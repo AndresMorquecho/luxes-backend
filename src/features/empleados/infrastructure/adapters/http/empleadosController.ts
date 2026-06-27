@@ -147,12 +147,27 @@ export function createEmpleadosController(empleadoService: EmpleadoService): Emp
           data: { id: paramId(req) },
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Error al eliminar empleado';
-        const status = message.includes('no encontrado') ? 404 : 500;
+        const prismaCode = error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+        const isFkError = prismaCode === 'P2003' || prismaCode === 'P2014';
+        const message = isFkError
+          ? 'No se puede eliminar este colaborador porque tiene registros vinculados (órdenes de compra, tareas u otros). El usuario del portal se desactivará automáticamente al eliminar.'
+          : error instanceof Error
+            ? error.message
+            : 'Error al eliminar empleado';
+        const status = message.includes('no encontrado')
+          ? 404
+          : isFkError
+            ? 409
+            : 500;
         console.error('[empleados/remove]', error);
         return res.status(status).json({
           success: false,
-          error: { code: status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR', message },
+          error: {
+            code: status === 404 ? 'NOT_FOUND' : status === 409 ? 'CONFLICT' : 'INTERNAL_ERROR',
+            message,
+          },
         });
       }
     },
