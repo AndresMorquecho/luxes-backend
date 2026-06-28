@@ -394,7 +394,7 @@ async function main() {
 
     // Taller/Otros
     { nombre: 'Cinta doble faz 2cm',             tipo: 'consumible',  unidadMedida: 'rollos',   stockActual: 40,  stockMinimo: 10,  precioCosto: 1.8, categoria: 'Taller', estadoUso: 'BODEGA'  },
-    { nombre: 'Papel transfer para sublimación', tipo: 'consumible',  unidadMedida: 'hojas',    stockActual: 500, stockMinimo: 100, precioCosto: 0.15, categoria: 'Taller', estadoUso: 'BODEGA' },
+    { nombre: 'Papel transfer para sublimación', tipo: 'consumible',  unidadMedida: 'hojas',    stockActual: 500, stockMinimo: 100, precioCosto: 0.15, categoria: 'Impresión', estadoUso: 'BODEGA' },
     { nombre: 'Acrílico transparente 3mm',       tipo: 'consumible',  unidadMedida: 'planchas', stockActual: 25,  stockMinimo: 5,   precioCosto: 18.0, categoria: 'Taller', estadoUso: 'BODEGA' },
   ];
 

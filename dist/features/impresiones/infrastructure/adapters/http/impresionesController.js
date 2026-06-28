@@ -73,7 +73,7 @@ export class ImpresionesController {
             // Create database notifications for canonical roles only
             // (expandRoleAliases in the query handles alias expansion)
             try {
-                const rolesToNotify = ['taller', 'impresión', 'admin'];
+                const rolesToNotify = ['impresión', 'admin'];
                 for (const roleName of rolesToNotify) {
                     await prisma.notification.create({
                         data: {
@@ -93,7 +93,6 @@ export class ImpresionesController {
                     },
                 };
                 await sendPushToRole('impresión', pushPayload);
-                await sendPushToRole('taller', pushPayload);
                 await sendPushToRole('admin', pushPayload);
             }
             catch (notifErr) {

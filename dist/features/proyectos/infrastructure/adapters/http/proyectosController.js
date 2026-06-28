@@ -6,14 +6,32 @@ const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
 export async function ensureProyectoUploadsDir(proyectoId) {
     await fs.mkdir(path.join(PROYECTOS_UPLOADS_ROOT, proyectoId), { recursive: true });
 }
-/** Genera el siguiente ID con formato PROY-### */
+/** Genera el siguiente ID con formato PROY-### usando una secuencia persistente en BD */
 async function nextProyectoId() {
-    const rows = await prisma.proyecto.findMany({ select: { id: true } });
-    const max = rows.reduce((m, r) => {
-        const n = parseInt(String(r.id).replace('PROY-', ''), 10);
-        return Number.isFinite(n) && n > m ? n : m;
-    }, 0);
-    return `PROY-${String(max + 1).padStart(3, '0')}`;
+    try {
+        const result = await prisma.$queryRaw `
+      SELECT nextval('proyecto_id_seq')::text as nextval;
+    `;
+        const nextNum = parseInt(result[0].nextval, 10);
+        return `PROY-${String(nextNum).padStart(3, '0')}`;
+    }
+    catch (e) {
+        // Si la secuencia no existe, la creamos inicializada en MAX + 1
+        const rows = await prisma.proyecto.findMany({ select: { id: true } });
+        const max = rows.reduce((m, r) => {
+            const n = parseInt(String(r.id).replace('PROY-', ''), 10);
+            return Number.isFinite(n) && n > m ? n : m;
+        }, 0);
+        const startValue = max + 1;
+        await prisma.$executeRawUnsafe(`
+      CREATE SEQUENCE IF NOT EXISTS proyecto_id_seq START WITH ${startValue};
+    `);
+        const result = await prisma.$queryRaw `
+      SELECT nextval('proyecto_id_seq')::text as nextval;
+    `;
+        const nextNum = parseInt(result[0].nextval, 10);
+        return `PROY-${String(nextNum).padStart(3, '0')}`;
+    }
 }
 const toDateStr = (d) => {
     if (!d)
@@ -48,22 +66,83 @@ function parseFaseDatos(datos) {
         return {};
     }
 }
-function getPersonalEncuesta(datosInstalacion, instalacion) {
+function getPersonalEncuesta(proyecto) {
+    const faseInstalacion = proyecto.fases?.find((f) => f.fase === 'INSTALACION');
+    const datosInstalacion = faseInstalacion?.datos
+        ? (typeof faseInstalacion.datos === 'string' ? parseFaseDatos(faseInstalacion.datos) : faseInstalacion.datos)
+        : {};
+    const personalList = [];
+    // 1. Obtener Vendedor (Ventas)
+    const faseCotizacion = proyecto.fases?.find((f) => f.fase === 'COTIZACION');
+    const datosCotizacion = faseCotizacion?.datos
+        ? (typeof faseCotizacion.datos === 'string' ? parseFaseDatos(faseCotizacion.datos) : faseCotizacion.datos)
+        : {};
+    const cotizaciones = datosCotizacion.cotizacionesSeleccionadas || [];
+    const vendedores = new Set();
+    cotizaciones.forEach((c) => {
+        if (c.atiende && c.atiende.trim()) {
+            vendedores.add(c.atiende.trim());
+        }
+        else if (c.cliente && typeof c.cliente === 'object' && c.cliente.vendedor) {
+            vendedores.add(c.cliente.vendedor);
+        }
+    });
+    // Si no hay vendedor de proforma, usar el creador o responsable del proyecto
+    if (vendedores.size === 0 && proyecto.responsable && proyecto.responsable !== 'Sin responsable') {
+        vendedores.add(proyecto.responsable);
+    }
+    vendedores.forEach((vend) => {
+        personalList.push({
+            empleadoId: `vendedor-${vend.replace(/\s+/g, '-').toLowerCase()}`,
+            id: `vendedor-${vend.replace(/\s+/g, '-').toLowerCase()}`,
+            nombre: vend,
+            rol: 'Asesor de Ventas',
+        });
+    });
+    // 2. Obtener Diseñador
+    const faseDiseno = proyecto.fases?.find((f) => f.fase === 'DISEÑO');
+    const datosDiseno = faseDiseno?.datos
+        ? (typeof faseDiseno.datos === 'string' ? parseFaseDatos(faseDiseno.datos) : faseDiseno.datos)
+        : {};
+    const disenador = datosDiseno.disenadorNombre || proyecto.responsable || 'Diseñador';
+    if (disenador && disenador !== 'Sin responsable' && !vendedores.has(disenador)) {
+        personalList.push({
+            empleadoId: `disenador-${disenador.replace(/\s+/g, '-').toLowerCase()}`,
+            id: `disenador-${disenador.replace(/\s+/g, '-').toLowerCase()}`,
+            nombre: disenador,
+            rol: 'Diseño / Creativo',
+        });
+    }
+    // 3. Obtener Técnicos de Instalación
     const desdeDatos = datosInstalacion.personalAsignado;
     if (Array.isArray(desdeDatos) && desdeDatos.length > 0) {
-        return desdeDatos.map((p, index) => ({
-            empleadoId: String(p.empleadoId || p.id || `personal-${index}`),
-            id: String(p.empleadoId || p.id || `personal-${index}`),
-            nombre: String(p.nombre || ''),
-            rol: String(p.rol || 'Técnico'),
-        }));
+        desdeDatos.forEach((p, index) => {
+            const empId = String(p.empleadoId || p.id || `personal-${index}`);
+            if (!personalList.some(e => e.id === empId || e.nombre === p.nombre)) {
+                personalList.push({
+                    empleadoId: empId,
+                    id: empId,
+                    nombre: String(p.nombre || ''),
+                    rol: String(p.rol || 'Técnico de Instalación'),
+                });
+            }
+        });
     }
-    return (instalacion?.personalAsignado || []).map((p, index) => ({
-        empleadoId: p.empleadoId || `personal-${index}`,
-        id: p.empleadoId || `personal-${index}`,
-        nombre: p.empleado?.nombre || '',
-        rol: p.rol || 'Técnico',
-    }));
+    else if (proyecto.instalacion?.personalAsignado) {
+        (proyecto.instalacion.personalAsignado || []).forEach((p, index) => {
+            const empId = p.empleadoId || `personal-${index}`;
+            const nombreEmp = p.empleado?.nombre || p.nombre || '';
+            if (nombreEmp && !personalList.some(e => e.id === empId || e.nombre === nombreEmp)) {
+                personalList.push({
+                    empleadoId: empId,
+                    id: empId,
+                    nombre: nombreEmp,
+                    rol: p.rol || 'Técnico de Instalación',
+                });
+            }
+        });
+    }
+    return personalList;
 }
 function getInstalacionCompletionErrors(datos, ordenesCompra = []) {
     const faltantes = [];
@@ -487,14 +566,6 @@ export class ProyectosController {
                 ...datosInstalacionAnterior,
                 ...datos,
             };
-            if (String(fase) === 'INSTALACION' &&
-                datos.instalacionCompletada === true &&
-                datosInstalacionAnterior.instalacionCompletada === true) {
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'INVALID_STATE', message: 'La instalación ya fue completada' },
-                });
-            }
             if (String(fase) === 'INSTALACION' && datos.instalacionCompletada === true) {
                 const errores = getInstalacionCompletionErrors(datosMerged, proyecto.ordenesCompra || []);
                 if (errores.length > 0) {
@@ -832,7 +903,7 @@ export class ProyectosController {
                     instalacionCompletada,
                     encuestaCompletada: encuesta?.completada === true,
                     encuesta: encuesta?.completada === true ? encuesta : null,
-                    personal: getPersonalEncuesta(datosInstalacion, proyecto.instalacion),
+                    personal: getPersonalEncuesta(proyecto),
                 },
             });
         }
@@ -888,7 +959,7 @@ export class ProyectosController {
                     },
                 });
             }
-            const personalBase = getPersonalEncuesta(datosInstalacion, proyecto.instalacion);
+            const personalBase = getPersonalEncuesta(proyecto);
             const personalCalificado = personalBase.map((p) => {
                 const encontrado = calificacionesPersonal.find((c) => {
                     const candidatoId = String(c.empleadoId || c.id || '');
