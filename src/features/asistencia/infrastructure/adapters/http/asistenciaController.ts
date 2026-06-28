@@ -1,5 +1,10 @@
 import { Request, Response } from 'express';
 import { AsistenciaService } from '../../../application/services/AsistenciaService.js';
+import {
+  getHorarioDelDia,
+  loadHorariosLaborales,
+  saveHorariosLaborales,
+} from '../persistence/horarioLaboralStore.js';
 
 
 export class AsistenciaController {
@@ -61,7 +66,7 @@ export class AsistenciaController {
 
   async registrar(req: Request, res: Response): Promise<Response> {
     try {
-      const { empleadoId, ubicacion, omitirAlmuerzo } = req.body;
+      const { empleadoId, ubicacion, omitirAlmuerzo, tipo } = req.body;
 
       if (!empleadoId) {
         return res.status(400).json({
@@ -78,11 +83,12 @@ export class AsistenciaController {
         ubicacionLat: lat,
         ubicacionLng: lng,
         omitirAlmuerzo: omitirAlmuerzo === true,
+        tipo: tipo ? String(tipo) : undefined,
       });
 
       return res.status(201).json({
         success: true,
-        data: asistencia.toJSON(),
+        data: asistencia,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error al registrar asistencia';
@@ -130,6 +136,46 @@ export class AsistenciaController {
           code: isClientError ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR',
           message,
         },
+      });
+    }
+  }
+
+  async getHorarioDelDia(req: Request, res: Response): Promise<Response> {
+    try {
+      const fecha = String(req.query.fecha ?? new Date().toISOString().split('T')[0]);
+      const data = await getHorarioDelDia(fecha);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      console.error('[asistencia/getHorarioDelDia]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al obtener horario del día' },
+      });
+    }
+  }
+
+  async getHorarioConfig(_req: Request, res: Response): Promise<Response> {
+    try {
+      const config = await loadHorariosLaborales();
+      return res.status(200).json({ success: true, data: config });
+    } catch (error) {
+      console.error('[asistencia/getHorarioConfig]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al obtener configuración de horarios' },
+      });
+    }
+  }
+
+  async saveHorarioConfig(req: Request, res: Response): Promise<Response> {
+    try {
+      const config = await saveHorariosLaborales(req.body);
+      return res.status(200).json({ success: true, data: config });
+    } catch (error) {
+      console.error('[asistencia/saveHorarioConfig]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al guardar configuración de horarios' },
       });
     }
   }

@@ -14,6 +14,9 @@ export type EmpleadoInput = {
   banco?: string;
   tipoContrato?: string;
   tieneContrato?: boolean;
+  region?: string;
+  decimoTerceroMensualizado?: boolean;
+  decimoCuartoMensualizado?: boolean;
   sueldoDiario?: number;
   direccion?: string;
   foto?: string | null;

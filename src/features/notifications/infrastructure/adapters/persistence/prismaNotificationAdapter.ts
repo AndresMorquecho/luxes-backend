@@ -85,7 +85,7 @@ export class PrismaNotificationAdapter implements NotificationRepositoryPort {
         },
       },
     });
-    const userPermissions = user?.role?.permissions.map((rp) => rp.permission.key) || [];
+    const userPermissions = user?.role?.permissions?.map((rp) => rp.permission.key) || [];
 
     const rows = await this.prisma.notification.findMany({
       where: {
@@ -116,7 +116,7 @@ export class PrismaNotificationAdapter implements NotificationRepositoryPort {
         },
       },
     });
-    const userPermissions = user?.role?.permissions.map((rp) => rp.permission.key) || [];
+    const userPermissions = user?.role?.permissions?.map((rp) => rp.permission.key) || [];
 
     const count = await this.prisma.notification.count({
       where: {

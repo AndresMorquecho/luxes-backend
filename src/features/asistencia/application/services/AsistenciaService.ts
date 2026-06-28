@@ -4,11 +4,16 @@ import {
   SECUENCIA_MARCACIONES,
   resolveProximaMarcacion,
   resolveTipoRegistro,
-  isDiaLaboralCompleto,
+  getOpcionesMarcacion,
+  calcularHorasExtrasDesdeSalida,
+  puedeRegistrarMarcacion,
 } from '../../domain/marcacionLogic.js';
 import { prisma } from '../../../../config/prismaClient.js';
+import { notifyHorasExtrasPendiente } from '../../../../shared/services/horasExtrasNotificationService.js';
 
 export { SECUENCIA_MARCACIONES };
+
+const VALOR_HORA_EXTRA_DEFAULT = 2.5;
 
 export class AsistenciaService {
   constructor(private readonly asistenciaRepository: AsistenciaRepositoryPort) {}
@@ -25,7 +30,9 @@ export class AsistenciaService {
 
   async getProximaMarcacion(empleadoId: string) {
     const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(empleadoId);
-    return resolveProximaMarcacion(todayMarks);
+    const opciones = getOpcionesMarcacion(todayMarks);
+    const base = resolveProximaMarcacion(todayMarks);
+    return { ...base, opciones };
   }
 
   async getTodayForEmpleado(empleadoId: string): Promise<Asistencia[]> {
@@ -37,7 +44,8 @@ export class AsistenciaService {
     ubicacionLat: number | null;
     ubicacionLng: number | null;
     omitirAlmuerzo?: boolean;
-  }): Promise<Asistencia> {
+    tipo?: string;
+  }): Promise<Record<string, unknown>> {
     const empleado = await prisma.empleado.findUnique({
       where: { id: input.empleadoId },
       select: { nombre: true },
@@ -48,28 +56,79 @@ export class AsistenciaService {
     }
 
     const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(input.empleadoId);
-    if (isDiaLaboralCompleto(todayMarks)) {
+    if (!puedeRegistrarMarcacion(todayMarks)) {
       throw new Error(`El colaborador ${empleado.nombre} ya completó las marcaciones del día.`);
     }
 
+    const ahora = new Date();
     const proxima = resolveTipoRegistro(todayMarks, {
       omitirAlmuerzo: input.omitirAlmuerzo,
-      horaActual: new Date(),
+      horaActual: ahora,
+      tipo: input.tipo,
     });
 
     const asistencia = await this.asistenciaRepository.create({
       empleadoId: input.empleadoId,
       tipo: proxima.tipo,
       label: proxima.label,
-      fechaHora: new Date().toISOString(),
+      fechaHora: ahora.toISOString(),
       ubicacionLat: input.ubicacionLat,
       ubicacionLng: input.ubicacionLng,
     });
 
-    return new Asistencia({
+    let horasExtra: Record<string, unknown> | undefined;
+
+    if (proxima.tipo === 'FIN_HORAS_EXTRA') {
+      const { horas, detalleHorario } = calcularHorasExtrasDesdeSalida(todayMarks, ahora);
+      const valorPorHora = VALOR_HORA_EXTRA_DEFAULT;
+      const total = Math.round(horas * valorPorHora * 100) / 100;
+      const fechaDia = new Date(ahora);
+      fechaDia.setHours(0, 0, 0, 0);
+
+      const created = await prisma.horaExtra.create({
+        data: {
+          fecha: fechaDia,
+          colaboradorId: input.empleadoId,
+          horas,
+          detalleHorario,
+          descripcion: 'Horas extras registradas desde asistencia (pendiente validación)',
+          valorPorHora,
+          total,
+          estado: 'DEUDOR',
+          aprobacionEstado: 'PENDIENTE',
+          origen: 'ASISTENCIA',
+          asistenciaFinId: asistencia.id,
+        },
+      });
+
+      horasExtra = {
+        id: created.id,
+        horas: Number(created.horas),
+        detalleHorario: created.detalleHorario,
+        valorPorHora: Number(created.valorPorHora),
+        total: Number(created.total),
+        aprobacionEstado: created.aprobacionEstado,
+      };
+
+      void notifyHorasExtrasPendiente({
+        colaboradorNombre: empleado.nombre,
+        horas: Number(created.horas),
+        total: Number(created.total),
+        fecha: fechaDia.toISOString().split('T')[0],
+        detalleHorario: created.detalleHorario,
+        createdBy: 'Quiosco de asistencia',
+      });
+    }
+
+    const result = new Asistencia({
       ...asistencia.toJSON(),
       nombreEmpleado: empleado.nombre,
     });
+
+    return {
+      ...result.toJSON(),
+      ...(horasExtra ? { horasExtra } : {}),
+    };
   }
 
   async registrarPermiso(input: {

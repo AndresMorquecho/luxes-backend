@@ -5,10 +5,24 @@ export const SECUENCIA_MARCACIONES = [
   { tipo: 'SALIDA', label: 'Salida' },
 ] as const;
 
-export type TipoMarcacion = (typeof SECUENCIA_MARCACIONES)[number]['tipo'];
+export const MARCACION_FIN_HORAS_EXTRA = {
+  tipo: 'FIN_HORAS_EXTRA',
+  label: 'Fin Horas Extras',
+} as const;
+
+export const TIPOS_SELECCIONABLES = [
+  { tipo: 'ENTRADA', label: 'Entrada', shortLabel: 'Entrada' },
+  { tipo: 'INICIO_ALMUERZO', label: 'Salida almuerzo', shortLabel: 'Sal. almuerzo' },
+  { tipo: 'FIN_ALMUERZO', label: 'Regreso almuerzo', shortLabel: 'Reg. almuerzo' },
+  { tipo: 'SALIDA', label: 'Salida', shortLabel: 'Salida' },
+  { tipo: 'FIN_HORAS_EXTRA', label: 'Fin horas extras', shortLabel: 'Horas extras' },
+] as const;
+
+export type TipoMarcacion = (typeof SECUENCIA_MARCACIONES)[number]['tipo'] | 'FIN_HORAS_EXTRA';
 
 export interface MarcacionLike {
   tipo: string;
+  fechaHora?: Date | string;
 }
 
 export interface ProximaMarcacionResult {
@@ -23,67 +37,83 @@ function findStep(tipo: string) {
   return SECUENCIA_MARCACIONES.find((s) => s.tipo === tipo);
 }
 
+function findSelectable(tipo: string) {
+  return TIPOS_SELECCIONABLES.find((s) => s.tipo === tipo);
+}
+
 export function resolveProximaMarcacion(marks: MarcacionLike[]): ProximaMarcacionResult {
+  const opciones = getOpcionesMarcacion(marks);
+  if (opciones.length === 0) {
+    return { proxima: null, permiteOmitirAlmuerzo: false, completado: true, marcacionesRegistradas: marks.length };
+  }
   const tipos = new Set(marks.map((m) => m.tipo));
   const marcacionesRegistradas = marks.filter((m) =>
-    SECUENCIA_MARCACIONES.some((s) => s.tipo === m.tipo)
+    SECUENCIA_MARCACIONES.some((s) => s.tipo === m.tipo) || m.tipo === 'FIN_HORAS_EXTRA',
   ).length;
 
-  if (tipos.has('SALIDA') || tipos.has('PERMISO')) {
-    return { proxima: null, permiteOmitirAlmuerzo: false, completado: true, marcacionesRegistradas };
-  }
+  const proxima = opciones[0];
+  const alternativa = opciones.find((o) => o.tipo === 'SALIDA' && proxima.tipo === 'INICIO_ALMUERZO');
+  return {
+    proxima: { tipo: proxima.tipo, label: proxima.label },
+    alternativa: alternativa ? { tipo: alternativa.tipo, label: alternativa.label } : undefined,
+    permiteOmitirAlmuerzo: Boolean(alternativa),
+    completado: false,
+    marcacionesRegistradas,
+  };
+}
+
+export function getOpcionesMarcacion(marks: MarcacionLike[]) {
+  const tipos = new Set(marks.map((m) => m.tipo));
+  if (tipos.has('PERMISO')) return [] as typeof TIPOS_SELECCIONABLES[number][];
+  if (tipos.has('FIN_HORAS_EXTRA')) return [] as typeof TIPOS_SELECCIONABLES[number][];
+
+  const opciones: (typeof TIPOS_SELECCIONABLES)[number][] = [];
 
   if (!tipos.has('ENTRADA')) {
-    return {
-      proxima: SECUENCIA_MARCACIONES[0],
-      permiteOmitirAlmuerzo: false,
-      completado: false,
-      marcacionesRegistradas,
-    };
+    opciones.push(TIPOS_SELECCIONABLES[0]);
+    return opciones;
   }
 
-  if (tipos.has('INICIO_ALMUERZO') && !tipos.has('FIN_ALMUERZO')) {
-    return {
-      proxima: SECUENCIA_MARCACIONES[2],
-      permiteOmitirAlmuerzo: false,
-      completado: false,
-      marcacionesRegistradas,
-    };
+  const enAlmuerzo = tipos.has('INICIO_ALMUERZO') && !tipos.has('FIN_ALMUERZO');
+  if (enAlmuerzo) {
+    opciones.push(TIPOS_SELECCIONABLES[2]);
+    return opciones;
   }
 
-  if (tipos.has('FIN_ALMUERZO') && !tipos.has('SALIDA')) {
-    return {
-      proxima: SECUENCIA_MARCACIONES[3],
-      permiteOmitirAlmuerzo: false,
-      completado: false,
-      marcacionesRegistradas,
-    };
+  if (!tipos.has('SALIDA')) {
+    if (!tipos.has('INICIO_ALMUERZO')) {
+      opciones.push(TIPOS_SELECCIONABLES[1], TIPOS_SELECCIONABLES[3]);
+    } else if (tipos.has('FIN_ALMUERZO')) {
+      opciones.push(TIPOS_SELECCIONABLES[3]);
+    }
+    return opciones;
   }
 
-  if (
-    tipos.has('ENTRADA') &&
-    !tipos.has('INICIO_ALMUERZO') &&
-    !tipos.has('FIN_ALMUERZO') &&
-    !tipos.has('SALIDA')
-  ) {
-    return {
-      proxima: SECUENCIA_MARCACIONES[1],
-      alternativa: SECUENCIA_MARCACIONES[3],
-      permiteOmitirAlmuerzo: true,
-      completado: false,
-      marcacionesRegistradas,
-    };
+  if (tipos.has('SALIDA')) {
+    opciones.push(TIPOS_SELECCIONABLES[4]);
   }
 
-  return { proxima: null, permiteOmitirAlmuerzo: false, completado: true, marcacionesRegistradas };
+  return opciones;
+}
+
+export function validateTipoMarcacion(marks: MarcacionLike[], tipo: string): { tipo: string; label: string } {
+  const allowed = getOpcionesMarcacion(marks);
+  const match = allowed.find((o) => o.tipo === tipo);
+  if (!match) {
+    throw new Error('Ese tipo de marcación no está permitido en este momento.');
+  }
+  return { tipo: match.tipo, label: match.label };
 }
 
 export function resolveTipoRegistro(
   marks: MarcacionLike[],
-  options: { omitirAlmuerzo?: boolean; horaActual?: Date } = {}
+  options: { omitirAlmuerzo?: boolean; horaActual?: Date; tipo?: string } = {},
 ): { tipo: string; label: string } {
-  const info = resolveProximaMarcacion(marks);
+  if (options.tipo) {
+    return validateTipoMarcacion(marks, options.tipo);
+  }
 
+  const info = resolveProximaMarcacion(marks);
   if (!info.proxima) {
     throw new Error('El colaborador ya completó las marcaciones del día.');
   }
@@ -106,7 +136,37 @@ export function resolveTipoRegistro(
 
 export function isDiaLaboralCompleto(marks: MarcacionLike[]): boolean {
   const tipos = new Set(marks.map((m) => m.tipo));
-  return tipos.has('SALIDA') || tipos.has('PERMISO');
+  return tipos.has('PERMISO') || tipos.has('FIN_HORAS_EXTRA');
+}
+
+export function puedeRegistrarMarcacion(marks: MarcacionLike[]): boolean {
+  return getOpcionesMarcacion(marks).length > 0;
+}
+
+export function calcularHorasExtrasDesdeSalida(
+  marks: MarcacionLike[],
+  finHora: Date,
+): { horas: number; detalleHorario: string; salidaAt: Date } {
+  const salida = marks.find((m) => m.tipo === 'SALIDA');
+  if (!salida?.fechaHora) {
+    throw new Error('Debe registrar la salida antes de marcar horas extras.');
+  }
+  const salidaAt = new Date(salida.fechaHora);
+  if (finHora.getTime() <= salidaAt.getTime()) {
+    throw new Error('La hora de fin de horas extras debe ser posterior a la salida.');
+  }
+  const ms = finHora.getTime() - salidaAt.getTime();
+  const horas = Math.round((ms / 3600000) * 100) / 100;
+  if (horas < 0.01) {
+    throw new Error('El tiempo de horas extras es demasiado corto.');
+  }
+  const fmt = (d: Date) =>
+    d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return {
+    horas,
+    detalleHorario: `${fmt(salidaAt)} - ${fmt(finHora)}`,
+    salidaAt,
+  };
 }
 
 export function buildResumenMarcaciones(marks: MarcacionLike[]) {
@@ -117,4 +177,4 @@ export function buildResumenMarcaciones(marks: MarcacionLike[]) {
   }));
 }
 
-export { findStep };
+export { findStep, findSelectable };
