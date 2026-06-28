@@ -9,6 +9,7 @@ import {
   puedeRegistrarMarcacion,
 } from '../../domain/marcacionLogic.js';
 import { prisma } from '../../../../config/prismaClient.js';
+import { notifyHorasExtrasPendiente } from '../../../../shared/services/horasExtrasNotificationService.js';
 
 export { SECUENCIA_MARCACIONES };
 
@@ -108,6 +109,15 @@ export class AsistenciaService {
         total: Number(created.total),
         aprobacionEstado: created.aprobacionEstado,
       };
+
+      void notifyHorasExtrasPendiente({
+        colaboradorNombre: empleado.nombre,
+        horas: Number(created.horas),
+        total: Number(created.total),
+        fecha: fechaDia.toISOString().split('T')[0],
+        detalleHorario: created.detalleHorario,
+        createdBy: 'Quiosco de asistencia',
+      });
     }
 
     const result = new Asistencia({

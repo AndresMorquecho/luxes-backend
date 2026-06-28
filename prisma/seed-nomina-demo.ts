@@ -18,6 +18,7 @@ import {
   ingresosGravadosPeriodo,
   loadSbuVigente,
 } from '../src/shared/utils/decimosEcuadorHelpers.js';
+import { notifyHorasExtrasPendiente } from '../src/shared/services/horasExtrasNotificationService.js';
 
 const prisma = new PrismaClient();
 
@@ -264,7 +265,45 @@ async function main() {
     },
   });
 
-  // Andrés (EMP-001): sin horas extras en este demo
+  // Andrés (EMP-001): 3 horas extras PENDIENTES — segunda solicitud para aprobar
+  await prisma.horaExtra.create({
+    data: {
+      id: 'HE-DEMO-002',
+      fecha: new Date('2026-06-12'),
+      colaboradorId: DEMO_EMP_ASISTENCIA,
+      horas: 3,
+      detalleHorario: '18:00 - 21:00',
+      descripcion: 'Soporte en obra — 3 horas (pendiente aprobación)',
+      valorPorHora: 2.5,
+      total: 7.5,
+      estado: 'DEUDOR',
+      aprobacionEstado: 'PENDIENTE',
+      origen: 'ASISTENCIA',
+    },
+  });
+
+  const empNames = await prisma.empleado.findMany({
+    where: { id: { in: empleadosDemo } },
+    select: { id: true, nombre: true },
+  });
+  const nameById = Object.fromEntries(empNames.map((e) => [e.id, e.nombre]));
+
+  await notifyHorasExtrasPendiente({
+    colaboradorNombre: nameById[DEMO_EMP_CONTRATO] || 'María',
+    horas: 5,
+    total: 12.5,
+    fecha: '2026-06-05',
+    detalleHorario: '17:30 - 22:30',
+    createdBy: 'Demo nómina',
+  });
+  await notifyHorasExtrasPendiente({
+    colaboradorNombre: nameById[DEMO_EMP_ASISTENCIA] || 'Andrés',
+    horas: 3,
+    total: 7.5,
+    fecha: '2026-06-12',
+    detalleHorario: '18:00 - 21:00',
+    createdBy: 'Demo nómina',
+  });
 
   const resQ1Contrato = await upsertNomina(DEMO_EMP_CONTRATO, Q1_INICIO, Q1_FIN, true, 500, []);
   const resQ1Asist = await upsertNomina(DEMO_EMP_ASISTENCIA, Q1_INICIO, Q1_FIN, false, 600, []);
@@ -295,7 +334,8 @@ async function main() {
   console.log('\n📋 En el frontend: Nómina → Junio 2026 → quincena 1 o 2');
   console.log('   Columna "Días T." = días trabajados');
   console.log('   Columna "Ingresos Var." incluye horas extras (clic para detalle)');
-  console.log('   También en /nomina/horas-extras\n');
+  console.log('   También en /nomina/horas-extras');
+  console.log('   Pendientes HE: María 5h ($12.50) + Andrés 3h ($7.50) — Junio 2026\n');
 }
 
 main()
