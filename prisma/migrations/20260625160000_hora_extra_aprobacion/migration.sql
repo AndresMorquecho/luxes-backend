@@ -1,0 +1,3 @@
+ALTER TABLE "horas_extras" ADD COLUMN IF NOT EXISTS "aprobacion_estado" TEXT NOT NULL DEFAULT 'APROBADA';
+ALTER TABLE "horas_extras" ADD COLUMN IF NOT EXISTS "origen" TEXT NOT NULL DEFAULT 'MANUAL';
+ALTER TABLE "horas_extras" ADD COLUMN IF NOT EXISTS "asistencia_fin_id" TEXT;

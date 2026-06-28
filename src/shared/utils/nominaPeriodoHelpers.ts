@@ -57,9 +57,19 @@ export function feriadosEnPeriodo(
   return normalizeFeriados(feriados).filter((f) => f.fecha >= ini && f.fecha <= fin);
 }
 
-/** Días laborables del período: lunes a sábado (sin domingos). */
-export function calcDiasLaborables(fechaInicio: string, fechaFin: string): number {
-  return iterDatesInPeriod(fechaInicio, fechaFin).filter(isDiaLaboralSemana).length;
+/** Días calendario del período (quincena = 15), menos feriados registrados. */
+export function calcDiasLaborables(
+  fechaInicio: string,
+  fechaFin: string,
+  feriados: FeriadoItem[] = [],
+): number {
+  const total = diasEnPeriodo(fechaInicio, fechaFin);
+  const feriadosCount = feriadosEnPeriodo(feriados, fechaInicio, fechaFin).length;
+  return Math.max(0, total - feriadosCount);
+}
+
+function countDomingosEnPeriodo(fechaInicio: string, fechaFin: string): number {
+  return iterDatesInPeriod(fechaInicio, fechaFin).filter((d) => !isDiaLaboralSemana(d)).length;
 }
 
 function groupMarcacionesByDay(marcaciones: AsistenciaMarcacion[]): Map<string, AsistenciaMarcacion[]> {
@@ -100,6 +110,9 @@ export function calcDiasLaborados(
     isDiaLaboralSemana(f.fecha),
   );
 
+  const lunSatEnPeriodo = iterDatesInPeriod(fechaInicio, fechaFin).filter(isDiaLaboralSemana).length;
+  const diasRequeridosAsistencia = Math.max(0, lunSatEnPeriodo - feriadosDelPeriodo.length);
+
   let diasFeriado = 0;
   if (hasContract) {
     for (const f of feriadosDelPeriodo) {
@@ -109,6 +122,20 @@ export function calcDiasLaborados(
     }
   }
 
-  const diasLaborados = diasAsistencia + diasFeriado;
+  let diasLaborados = diasAsistencia + diasFeriado;
+
+  // Contrato: domingos del período cuentan si asistió todos los lun–sáb requeridos (sin feriado).
+  if (hasContract && diasAsistencia >= diasRequeridosAsistencia && diasRequeridosAsistencia > 0) {
+    diasLaborados += countDomingosEnPeriodo(fechaInicio, fechaFin);
+  }
+
+  // Por asistencia: quincena completa si marcó todos los lun–sáb del período.
+  if (!hasContract && diasAsistencia >= diasRequeridosAsistencia && diasRequeridosAsistencia > 0) {
+    diasLaborados = calcDiasLaborables(fechaInicio, fechaFin, feriados);
+  }
+
+  const diasLaborables = calcDiasLaborables(fechaInicio, fechaFin, feriados);
+  diasLaborados = Math.min(diasLaborados, diasLaborables);
+
   return { diasAsistencia, diasFeriado, diasLaborados };
 }

@@ -1,12 +1,37 @@
 import { Request, Response } from 'express';
 import ExcelJS from 'exceljs';
 import { prisma } from '../../../../../config/prismaClient.js';
-import { sueldoDiarioEfectivo } from '../../../../../shared/utils/sueldoHelpers.js';
+import {
+  calcSueldoBrutoQuincena,
+  sueldoDiarioEnQuincena,
+  sueldoQuincenaBase,
+} from '../../../../../shared/utils/sueldoHelpers.js';
 import {
   calcDiasLaborables,
   calcDiasLaborados,
   normalizeFeriados,
 } from '../../../../../shared/utils/nominaPeriodoHelpers.js';
+import {
+  computeDecimosProvisions,
+  ingresosGravadosPeriodo,
+  loadSbuVigente,
+} from '../../../../../shared/utils/decimosEcuadorHelpers.js';
+
+async function loadPeriodoFeriados(fInicio: Date, fFin: Date): Promise<ReturnType<typeof normalizeFeriados>> {
+  try {
+    const config = await (prisma as any).nominaPeriodoConfig?.findUnique?.({
+      where: {
+        fechaInicio_fechaFin: {
+          fechaInicio: fInicio,
+          fechaFin: fFin,
+        },
+      },
+    });
+    return normalizeFeriados(config?.feriados);
+  } catch {
+    return [];
+  }
+}
 
 export class NominaController {
   // ─── Horas Extras (Overtime) Endpoints ───
@@ -41,7 +66,9 @@ export class NominaController {
         descripcion: r.descripcion,
         valorPorHora: Number(r.valorPorHora),
         total: Number(r.total),
-        estado: r.estado
+        estado: r.estado,
+        aprobacionEstado: r.aprobacionEstado,
+        origen: r.origen,
       }));
 
       return res.status(200).json({
@@ -86,6 +113,8 @@ export class NominaController {
             valorPorHora: Number(r.valorPorHora),
             total: total,
             estado: r.estado || 'DEUDOR',
+            aprobacionEstado: r.aprobacionEstado || 'APROBADA',
+            origen: r.origen || 'MANUAL',
           },
           create: {
             id: recordId,
@@ -97,6 +126,8 @@ export class NominaController {
             valorPorHora: Number(r.valorPorHora),
             total: total,
             estado: r.estado || 'DEUDOR',
+            aprobacionEstado: r.aprobacionEstado || 'APROBADA',
+            origen: r.origen || 'MANUAL',
           }
         });
         receivedIds.push(upserted.id);
@@ -109,7 +140,9 @@ export class NominaController {
           descripcion: upserted.descripcion,
           valorPorHora: Number(upserted.valorPorHora),
           total: Number(upserted.total),
-          estado: upserted.estado
+          estado: upserted.estado,
+          aprobacionEstado: upserted.aprobacionEstado,
+          origen: upserted.origen,
         });
       }
 
@@ -141,6 +174,142 @@ export class NominaController {
     }
   }
 
+  async getPendingOvertime(_req: Request, res: Response): Promise<Response> {
+    try {
+      const records = await prisma.horaExtra.findMany({
+        where: { aprobacionEstado: 'PENDIENTE' },
+        orderBy: { fecha: 'desc' },
+        include: { colaborador: { select: { id: true, nombre: true } } },
+      });
+
+      const formatted = records.map((r) => ({
+        id: r.id,
+        fecha: r.fecha.toISOString().split('T')[0],
+        colaboradorId: r.colaboradorId,
+        colaboradorNombre: r.colaborador.nombre,
+        horas: Number(r.horas),
+        detalleHorario: r.detalleHorario,
+        descripcion: r.descripcion,
+        valorPorHora: Number(r.valorPorHora),
+        total: Number(r.total),
+        estado: r.estado,
+        aprobacionEstado: r.aprobacionEstado,
+        origen: r.origen,
+      }));
+
+      return res.status(200).json({ success: true, data: formatted });
+    } catch (error) {
+      console.error('[nomina/getPendingOvertime]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al obtener horas extras pendientes' },
+      });
+    }
+  }
+
+  async approveOvertime(req: Request, res: Response): Promise<Response> {
+    try {
+      const id = String(req.params.id);
+      const updated = await prisma.horaExtra.update({
+        where: { id },
+        data: { aprobacionEstado: 'APROBADA' },
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          id: updated.id,
+          aprobacionEstado: updated.aprobacionEstado,
+          horas: Number(updated.horas),
+          total: Number(updated.total),
+        },
+      });
+    } catch (error) {
+      console.error('[nomina/approveOvertime]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al aprobar horas extras' },
+      });
+    }
+  }
+
+  async rejectOvertime(req: Request, res: Response): Promise<Response> {
+    try {
+      const id = String(req.params.id);
+      const updated = await prisma.horaExtra.update({
+        where: { id },
+        data: { aprobacionEstado: 'RECHAZADA' },
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: { id: updated.id, aprobacionEstado: updated.aprobacionEstado },
+      });
+    } catch (error) {
+      console.error('[nomina/rejectOvertime]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al rechazar horas extras' },
+      });
+    }
+  }
+
+  async patchOvertime(req: Request, res: Response): Promise<Response> {
+    try {
+      const id = String(req.params.id);
+      const existing = await prisma.horaExtra.findUnique({ where: { id } });
+      if (!existing) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Registro de horas extras no encontrado' },
+        });
+      }
+
+      const horas = req.body.horas !== undefined ? Number(req.body.horas) : Number(existing.horas);
+      const valorPorHora =
+        req.body.valorPorHora !== undefined ? Number(req.body.valorPorHora) : Number(existing.valorPorHora);
+
+      if (horas <= 0 || valorPorHora < 0 || Number.isNaN(horas) || Number.isNaN(valorPorHora)) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Horas y valor por hora deben ser válidos' },
+        });
+      }
+
+      const total = Math.round(horas * valorPorHora * 100) / 100;
+
+      const updated = await prisma.horaExtra.update({
+        where: { id },
+        data: {
+          horas,
+          valorPorHora,
+          total,
+          ...(req.body.descripcion !== undefined && { descripcion: String(req.body.descripcion) }),
+          ...(req.body.detalleHorario !== undefined && { detalleHorario: String(req.body.detalleHorario) }),
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          id: updated.id,
+          fecha: updated.fecha.toISOString().split('T')[0],
+          colaboradorId: updated.colaboradorId,
+          horas: Number(updated.horas),
+          valorPorHora: Number(updated.valorPorHora),
+          total: Number(updated.total),
+          aprobacionEstado: updated.aprobacionEstado,
+        },
+      });
+    } catch (error) {
+      console.error('[nomina/patchOvertime]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al actualizar horas extras' },
+      });
+    }
+  }
+
   // ─── Nómina Endpoints ───
   
   async getPayrolls(req: Request, res: Response): Promise<Response> {
@@ -158,16 +327,8 @@ export class NominaController {
       const fInicioStr = String(fechaInicio).slice(0, 10);
       const fFinStr = String(fechaFin).slice(0, 10);
 
-      const periodoConfig = await prisma.nominaPeriodoConfig.findUnique({
-        where: {
-          fechaInicio_fechaFin: {
-            fechaInicio: fInicio,
-            fechaFin: fFin,
-          },
-        },
-      });
-      const feriados = normalizeFeriados(periodoConfig?.feriados);
-      const diasLaborablesPeriodo = calcDiasLaborables(fInicioStr, fFinStr);
+      const feriados = await loadPeriodoFeriados(fInicio, fFin);
+      const diasLaborablesPeriodo = calcDiasLaborables(fInicioStr, fFinStr, feriados);
 
       let records = await prisma.nominaRegistro.findMany({
         where: {
@@ -179,6 +340,22 @@ export class NominaController {
       const empleados = await prisma.empleado.findMany();
       const empleadoIds = empleados.map(e => e.id);
       const diffDias = diasLaborablesPeriodo;
+      const sbuVigente = await loadSbuVigente(prisma);
+      const year = fFinStr.slice(0, 4);
+
+      const nominasAnioBatch = await prisma.nominaRegistro.findMany({
+        where: {
+          empleadoId: { in: empleadoIds },
+          fechaFin: { gte: new Date(`${year}-01-01`), lte: fFin },
+        },
+        orderBy: [{ empleadoId: 'asc' }, { fechaFin: 'asc' }],
+      });
+
+      const nominasAnioByEmp = new Map<string, typeof nominasAnioBatch>();
+      for (const n of nominasAnioBatch) {
+        if (!nominasAnioByEmp.has(n.empleadoId)) nominasAnioByEmp.set(n.empleadoId, []);
+        nominasAnioByEmp.get(n.empleadoId)!.push(n);
+      }
 
       // Pre-fetch related records in batch to avoid N+1 queries
       const asistenciasBatch = await prisma.asistencia.findMany({
@@ -264,25 +441,44 @@ export class NominaController {
           fFinStr,
           hasContract,
         );
-        const sueldoDiario = sueldoDiarioEfectivo(Number(emp.sueldoDiario));
-        const defaultSueldoBruto = sueldoDiario * diasTrabajados;
+        const sueldoDiario = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diffDias);
+        const defaultSueldoBruto = hasContract
+          ? sueldoQuincenaBase(Number(emp.sueldoDiario))
+          : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasTrabajados, diffDias);
 
-        const decimoCuartoVal = 0;
-        const decimoTerceroVal = hasContract ? Math.round((defaultSueldoBruto / 12) * 100) / 100 : 0;
-        const iessVal = hasContract ? Math.round((defaultSueldoBruto * 0.0945) * 100) / 100 : 0;
-
-        const empHorasExtras = horasExtrasByEmpleado.get(emp.id) || [];
+        const empHorasExtras = (horasExtrasByEmpleado.get(emp.id) || []).filter(
+          (h) => h.aprobacionEstado === 'APROBADA',
+        );
         const horasExtrasSum = empHorasExtras.reduce((s, h) => s + Number(h.total), 0);
 
         const empIngresos = ingresosByEmpleado.get(emp.id) || [];
         let trabEmpSum = 0;
-        let otrosIngresosSum = 0;
 
         for (const i of empIngresos) {
           const mVal = Number(i.monto);
           if (i.tipo === 'TRAB_EMP') trabEmpSum += mVal;
-          else if (i.tipo === 'OTROS') otrosIngresosSum += mVal;
         }
+
+        const gravado = ingresosGravadosPeriodo(defaultSueldoBruto, horasExtrasSum, trabEmpSum);
+        const nominasPrevias = (nominasAnioByEmp.get(emp.id) || []).filter(
+          (n) => n.fechaFin.toISOString().slice(0, 10) < fFinStr,
+        );
+
+        const decimos = computeDecimosProvisions({
+          gravado,
+          sbuVigente,
+          fechaInicio: fInicioStr,
+          fechaFin: fFinStr,
+          tieneContrato: hasContract,
+          decimoTerceroMensualizado: Boolean((emp as any).decimoTerceroMensualizado),
+          decimoCuartoMensualizado: Boolean((emp as any).decimoCuartoMensualizado),
+          region: (emp as any).region === 'sierra' ? 'sierra' : 'costa',
+          nominasPreviasAnio: nominasPrevias,
+        });
+
+        const decimoCuartoVal = 0;
+        const decimoTerceroVal = 0;
+        const iessVal = hasContract ? Math.round((gravado * 0.0945) * 100) / 100 : 0;
 
         const empEgresos = egresosByEmpleado.get(emp.id) || [];
         let anticiposSum = 0;
@@ -312,6 +508,7 @@ export class NominaController {
                 ingresos: {
                   decimoCuarto: decimoCuartoVal,
                   decimoTercero: decimoTerceroVal,
+                  ...decimos,
                   horasExtras: horasExtrasSum,
                   trabajosEnEmpresa: trabEmpSum,
                   fondosReserva: 0,
@@ -344,13 +541,18 @@ export class NominaController {
             if (!hasContract) {
               updatedIngresos.decimoCuarto = 0;
               updatedIngresos.decimoTercero = 0;
+              updatedIngresos.provisionDecimo3 = 0;
+              updatedIngresos.provisionDecimo4 = 0;
+              updatedIngresos.acumuladoDecimo3 = 0;
+              updatedIngresos.acumuladoDecimo4 = 0;
+              updatedIngresos.pagoDecimo3 = 0;
+              updatedIngresos.pagoDecimo4 = 0;
               updatedIngresos.fondosReserva = 0;
               updatedEgresos.iess = 0;
             } else {
-              // Si tiene contrato, recalculamos IESS y décimo tercero para mantener coherencia
-              // con los días trabajados. El décimo cuarto NO se recalcula: es un abono manual que
-              // se ingresa de poco a poco en cualquier quincena, por lo que se preserva el valor guardado.
-              updatedIngresos.decimoTercero = decimoTerceroVal;
+              Object.assign(updatedIngresos, decimos);
+              updatedIngresos.decimoTercero = 0;
+              updatedIngresos.decimoCuarto = 0;
               updatedEgresos.iess = iessVal;
             }
 
@@ -440,23 +642,14 @@ export class NominaController {
       const fInicioStr = String(fechaInicio).slice(0, 10);
       const fFinStr = String(fechaFin).slice(0, 10);
 
-      const config = await prisma.nominaPeriodoConfig.findUnique({
-        where: {
-          fechaInicio_fechaFin: {
-            fechaInicio: fInicio,
-            fechaFin: fFin,
-          },
-        },
-      });
-
-      const feriados = normalizeFeriados(config?.feriados);
+      const feriados = await loadPeriodoFeriados(fInicio, fFin);
 
       return res.status(200).json({
         success: true,
         data: {
           fechaInicio: fInicioStr,
           fechaFin: fFinStr,
-          diasLaborables: calcDiasLaborables(fInicioStr, fFinStr),
+          diasLaborables: calcDiasLaborables(fInicioStr, fFinStr, feriados),
           feriados,
         },
       });
@@ -465,6 +658,46 @@ export class NominaController {
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Error al obtener configuración del período' },
+      });
+    }
+  }
+
+  async getNominaGlobalConfig(_req: Request, res: Response): Promise<Response> {
+    try {
+      const sbuVigente = await loadSbuVigente(prisma);
+      return res.status(200).json({ success: true, data: { sbuVigente } });
+    } catch (error) {
+      console.error('[nomina/getNominaGlobalConfig]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al obtener configuración global' },
+      });
+    }
+  }
+
+  async saveNominaGlobalConfig(req: Request, res: Response): Promise<Response> {
+    try {
+      const sbu = Number(req.body?.sbuVigente);
+      if (!sbu || sbu <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'sbuVigente debe ser mayor a 0' },
+        });
+      }
+      const saved = await (prisma as any).nominaConfigGlobal.upsert({
+        where: { id: 'default' },
+        update: { sbuVigente: sbu },
+        create: { id: 'default', sbuVigente: sbu },
+      });
+      return res.status(200).json({
+        success: true,
+        data: { sbuVigente: Number(saved.sbuVigente) },
+      });
+    } catch (error) {
+      console.error('[nomina/saveNominaGlobalConfig]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al guardar configuración global' },
       });
     }
   }
@@ -488,30 +721,42 @@ export class NominaController {
         (f) => f.fecha >= fInicioStr && f.fecha <= fFinStr,
       );
 
-      const saved = await prisma.nominaPeriodoConfig.upsert({
-        where: {
-          fechaInicio_fechaFin: {
+      try {
+        const saved = await (prisma as any).nominaPeriodoConfig.upsert({
+          where: {
+            fechaInicio_fechaFin: {
+              fechaInicio: fInicio,
+              fechaFin: fFin,
+            },
+          },
+          update: { feriados: normalized },
+          create: {
             fechaInicio: fInicio,
             fechaFin: fFin,
+            feriados: normalized,
           },
-        },
-        update: { feriados: normalized },
-        create: {
-          fechaInicio: fInicio,
-          fechaFin: fFin,
-          feriados: normalized,
-        },
-      });
+        });
 
-      return res.status(200).json({
-        success: true,
-        data: {
-          fechaInicio: fInicioStr,
-          fechaFin: fFinStr,
-          diasLaborables: calcDiasLaborables(fInicioStr, fFinStr),
-          feriados: normalizeFeriados(saved.feriados),
-        },
-      });
+        return res.status(200).json({
+          success: true,
+          data: {
+            fechaInicio: fInicioStr,
+            fechaFin: fFinStr,
+            diasLaborables: calcDiasLaborables(fInicioStr, fFinStr, normalized),
+            feriados: normalizeFeriados(saved.feriados),
+          },
+        });
+      } catch {
+        return res.status(200).json({
+          success: true,
+          data: {
+            fechaInicio: fInicioStr,
+            fechaFin: fFinStr,
+            diasLaborables: calcDiasLaborables(fInicioStr, fFinStr, normalized),
+            feriados: normalized,
+          },
+        });
+      }
     } catch (error) {
       console.error('[nomina/savePeriodoConfig]', error);
       return res.status(500).json({
@@ -1002,7 +1247,9 @@ export class NominaController {
           }
         }
       });
-      const horasExtrasSum = detailedHorasExtras.reduce((s, h) => s + Number(h.total), 0);
+      const horasExtrasSum = detailedHorasExtras
+        .filter((h) => h.aprobacionEstado === 'APROBADA')
+        .reduce((s, h) => s + Number(h.total), 0);
 
       // Obtener todos los ingresos detallados del período de esta nómina
       const detailedIngresos = await prisma.ingresoDetalle.findMany({
@@ -1094,10 +1341,18 @@ export class NominaController {
       // Helper para calcular la nómina a nivel de objeto para el Excel
       const mapNominaRow = (emp: any, rawNomina: any, quincenaNum: number, fInicio: Date, fFin: Date) => {
         const hasContract = emp.tieneContrato !== false;
-        const sueldo = sueldoDiarioEfectivo(Number(emp.sueldoDiario));
+        const diasLab = rawNomina ? Number(rawNomina.diasLaborables) : calcDiasLaborables(
+          fInicio.toISOString().slice(0, 10),
+          fFin.toISOString().slice(0, 10),
+        );
+        const sueldo = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diasLab);
         
         const diasT = rawNomina ? Number(rawNomina.diasLaborados) : 0;
-        const totalB = rawNomina ? Number(rawNomina.totalBruto) : sueldo * diasT;
+        const totalB = rawNomina
+          ? (hasContract
+            ? sueldoQuincenaBase(Number(emp.sueldoDiario))
+            : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasT, diasLab))
+          : 0;
         // Décimo cuarto: abono manual que puede registrarse en cualquier quincena. Se usa el
         // valor guardado en la nómina (más abajo); por defecto 0 si no se ha abonado nada.
         const decimoCuartoVal = 0;

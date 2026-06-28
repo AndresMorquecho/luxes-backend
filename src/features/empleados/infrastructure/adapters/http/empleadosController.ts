@@ -29,6 +29,11 @@ const parseBody = (body: Record<string, unknown>): EmpleadoInput => ({
   banco: String(body.banco ?? ''),
   tipoContrato: String(body.tipoContrato ?? 'Fijo'),
   tieneContrato: body.tieneContrato !== undefined ? Boolean(body.tieneContrato) : undefined,
+  region: body.region ? String(body.region) : undefined,
+  decimoTerceroMensualizado:
+    body.decimoTerceroMensualizado !== undefined ? Boolean(body.decimoTerceroMensualizado) : undefined,
+  decimoCuartoMensualizado:
+    body.decimoCuartoMensualizado !== undefined ? Boolean(body.decimoCuartoMensualizado) : undefined,
   sueldoDiario: Number(body.sueldoDiario) || 0,
   direccion: String(body.direccion ?? ''),
   foto: body.foto ? String(body.foto) : null,
