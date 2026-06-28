@@ -12,6 +12,8 @@ export class TareasService {
     estado?: string;
     prioridad?: string;
     search?: string;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: TareaData[]; total: number }> {
     return this.repo.findAll(options);
   }
@@ -21,6 +23,8 @@ export class TareasService {
     limit?: number;
     estado?: string;
     prioridad?: string;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: TareaData[]; total: number }> {
     return this.repo.findByUserId(userId, options);
   }

@@ -69,8 +69,19 @@ export class InventarioService {
 
   // ── Préstamos ────────────────────────────────────────────────────────────────
 
-  getPrestamos(estado?: string): Promise<PrestamoData[]> {
-    return this.repo.listPrestamos(estado);
+  getPrestamos(options?: string | {
+    estado?: string;
+    page?: number;
+    limit?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
+    searchTool?: string;
+    filterPersona?: string;
+  }): Promise<{ items: PrestamoData[]; total: number } | PrestamoData[]> {
+    if (typeof options === 'string') {
+      return this.repo.listPrestamos({ estado: options });
+    }
+    return this.repo.listPrestamos(options);
   }
 
   async registrarPrestamo(data: Omit<PrestamoData, 'id' | 'fechaSalida'>): Promise<PrestamoData> {

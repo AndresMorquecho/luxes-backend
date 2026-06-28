@@ -28,6 +28,8 @@ export interface TareasRepositoryPort {
     estado?: string;
     prioridad?: string;
     search?: string;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: TareaData[]; total: number }>;
 
   findByUserId(userId: string, options?: {
@@ -35,6 +37,8 @@ export interface TareasRepositoryPort {
     limit?: number;
     estado?: string;
     prioridad?: string;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: TareaData[]; total: number }>;
 
   findById(id: string): Promise<TareaData | null>;

@@ -103,7 +103,15 @@ export class InventarioController {
 
   async listPrestamos(req: Request, res: Response) {
     try {
-      const data = await this.service.getPrestamos(this.str(req.query.estado));
+      const estado = this.str(req.query.estado);
+      const page = req.query.page ? parseInt(String(req.query.page), 10) : undefined;
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+      const fechaInicio = this.str(req.query.fechaInicio);
+      const fechaFin = this.str(req.query.fechaFin);
+      const searchTool = this.str(req.query.searchTool);
+      const filterPersona = this.str(req.query.filterPersona);
+
+      const data = await this.service.getPrestamos({ estado, page, limit, fechaInicio, fechaFin, searchTool, filterPersona });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }

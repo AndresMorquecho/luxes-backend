@@ -34,12 +34,25 @@ export class PrismaTareasAdapter implements TareasRepositoryPort {
     estado?: string;
     prioridad?: string;
     search?: string;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: TareaData[]; total: number }> {
     const page = options?.page || 1;
-    const limit = options?.limit || 20;
+    const limit = options?.limit || 25;
     const skip = (page - 1) * limit;
 
     const where: any = {};
+    if (options?.fechaInicio || options?.fechaFin) {
+      where.fechaCreacion = {};
+      if (options.fechaInicio) {
+        where.fechaCreacion.gte = new Date(options.fechaInicio);
+      }
+      if (options.fechaFin) {
+        const end = new Date(options.fechaFin);
+        end.setHours(23, 59, 59, 999);
+        where.fechaCreacion.lte = end;
+      }
+    }
     if (options?.estado) {
       if (options.estado === 'active') {
         where.estado = { in: ['pendiente', 'en_progreso'] };
@@ -76,14 +89,27 @@ export class PrismaTareasAdapter implements TareasRepositoryPort {
     limit?: number;
     estado?: string;
     prioridad?: string;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: TareaData[]; total: number }> {
     const page = options?.page || 1;
-    const limit = options?.limit || 20;
+    const limit = options?.limit || 25;
     const skip = (page - 1) * limit;
 
     const where: any = {
       asignaciones: { some: { userId } },
     };
+    if (options?.fechaInicio || options?.fechaFin) {
+      where.fechaCreacion = {};
+      if (options.fechaInicio) {
+        where.fechaCreacion.gte = new Date(options.fechaInicio);
+      }
+      if (options.fechaFin) {
+        const end = new Date(options.fechaFin);
+        end.setHours(23, 59, 59, 999);
+        where.fechaCreacion.lte = end;
+      }
+    }
     if (options?.estado) {
       if (options.estado === 'active') {
         where.estado = { in: ['pendiente', 'en_progreso'] };

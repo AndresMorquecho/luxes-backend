@@ -69,6 +69,8 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     creadorRol?: string;
     creadorId?: string;
     pendienteRecepcion?: boolean;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: OrdenCompraData[]; total: number }> {
     const {
       page = 1,
@@ -80,6 +82,8 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       creadorRol,
       creadorId,
       pendienteRecepcion,
+      fechaInicio,
+      fechaFin,
     } = options || {};
 
     const where: any = {};
@@ -109,6 +113,18 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
         };
       }
     }
+    if (fechaInicio || fechaFin) {
+      where.fecha = {};
+      if (fechaInicio) {
+        where.fecha.gte = new Date(fechaInicio);
+      }
+      if (fechaFin) {
+        const end = new Date(fechaFin);
+        end.setHours(23, 59, 59, 999);
+        where.fecha.lte = end;
+      }
+    }
+
     if (search) {
       where.OR = [
         { numero: { contains: search, mode: 'insensitive' } },

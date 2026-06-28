@@ -127,6 +127,8 @@ export interface ComprasRepositoryPort {
     creadorRol?: string;
     creadorId?: string;
     pendienteRecepcion?: boolean;
+    fechaInicio?: string;
+    fechaFin?: string;
   }): Promise<{ items: OrdenCompraData[]; total: number }>;
 
   findOrdenById(id: string): Promise<OrdenCompraData | null>;

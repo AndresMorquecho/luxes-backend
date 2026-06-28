@@ -229,16 +229,81 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
 
   // ── Préstamos ────────────────────────────────────────────────────────────────
 
-  async listPrestamos(estado?: string): Promise<PrestamoData[]> {
-    const rows = await this.prisma.prestamo.findMany({
-      where: estado ? { estado } : undefined,
-      include: {
-        material: { select: { nombre: true, tipo: true, unidadMedida: true } },
-        responsable: { select: { nombre: true, username: true } },
-      },
-      orderBy: { fechaSalida: 'desc' },
-    });
-    return rows as unknown as PrestamoData[];
+  async listPrestamos(options?: {
+    estado?: string;
+    page?: number;
+    limit?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
+    searchTool?: string;
+    filterPersona?: string;
+  }): Promise<{ items: PrestamoData[]; total: number } | PrestamoData[]> {
+    const { estado, page, limit, fechaInicio, fechaFin, searchTool, filterPersona } = options || {};
+
+    const where: any = {};
+    if (estado) {
+      where.estado = estado;
+    }
+
+    if (searchTool) {
+      where.material = {
+        nombre: { contains: searchTool, mode: 'insensitive' }
+      };
+    }
+
+    if (filterPersona) {
+      where.responsable = {
+        nombre: filterPersona
+      };
+    }
+
+    if (fechaInicio || fechaFin) {
+      const dateField = estado === 'devuelto' ? 'fechaRetorno' : 'fechaSalida';
+      where[dateField] = {};
+      if (fechaInicio) {
+        where[dateField].gte = new Date(fechaInicio);
+      }
+      if (fechaFin) {
+        const end = new Date(fechaFin);
+        end.setHours(23, 59, 59, 999);
+        where[dateField].lte = end;
+      }
+    }
+
+    const orderBy = estado === 'devuelto'
+      ? { fechaRetorno: 'desc' as const }
+      : { fechaSalida: 'desc' as const };
+
+    if (page !== undefined && limit !== undefined) {
+      const skip = (page - 1) * limit;
+      const [rows, total] = await Promise.all([
+        this.prisma.prestamo.findMany({
+          where,
+          include: {
+            material: { select: { nombre: true, tipo: true, unidadMedida: true } },
+            responsable: { select: { nombre: true, username: true } },
+          },
+          orderBy,
+          skip,
+          take: limit,
+        }),
+        this.prisma.prestamo.count({ where }),
+      ]);
+      return {
+        items: rows as unknown as PrestamoData[],
+        total,
+      };
+    } else {
+      const rows = await this.prisma.prestamo.findMany({
+        where,
+        include: {
+          material: { select: { nombre: true, tipo: true, unidadMedida: true } },
+          responsable: { select: { nombre: true, username: true } },
+        },
+        orderBy,
+      });
+      return rows as unknown as PrestamoData[];
+    }
   }
 
   async findPrestamoById(id: string): Promise<PrestamoData | null> {

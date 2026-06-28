@@ -72,7 +72,15 @@ export interface MaterialRepositoryPort {
   createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData>;
 
   // Préstamos
-  listPrestamos(estado?: string): Promise<PrestamoData[]>;
+  listPrestamos(options?: {
+    estado?: string;
+    page?: number;
+    limit?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
+    searchTool?: string;
+    filterPersona?: string;
+  }): Promise<{ items: PrestamoData[]; total: number } | PrestamoData[]>;
   findPrestamoById(id: string): Promise<PrestamoData | null>;
   createPrestamo(data: Omit<PrestamoData, 'id' | 'fechaSalida'>): Promise<PrestamoData>;
   returnPrestamo(id: string, fechaRetorno: Date, observacionDevolucion?: string | null): Promise<PrestamoData>;
