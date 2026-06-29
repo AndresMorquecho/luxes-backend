@@ -26,6 +26,7 @@ async function bootstrap() {
             where: { username: 'asistencia' },
             update: {
                 rol: 'asistencia',
+                roleId: null,
                 passwordHash: passwordHash,
             },
             create: {
@@ -39,6 +40,28 @@ async function bootstrap() {
             },
         });
         console.log('[Bootstrap] Usuario de asistencia verificado/creado con éxito.');
+        const adminRole = await prisma.role.findFirst({
+            where: { name: { equals: 'Administrador', mode: 'insensitive' } },
+        });
+        await prisma.user.upsert({
+            where: { username: 'admin' },
+            update: {
+                rol: 'Administrador',
+                roleId: adminRole?.id ?? null,
+                estado: 'activo',
+            },
+            create: {
+                id: 'USR-001',
+                nombre: 'Andrés Israel',
+                email: 'admin@luxes.com',
+                username: 'admin',
+                rol: 'Administrador',
+                roleId: adminRole?.id ?? null,
+                passwordHash: passwordHash,
+                estado: 'activo',
+            },
+        });
+        console.log('[Bootstrap] Usuario admin verificado/corregido con éxito.');
         await prisma.user.upsert({
             where: { username: 'taller' },
             update: {

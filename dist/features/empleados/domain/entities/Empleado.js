@@ -10,6 +10,9 @@ export class Empleado {
     banco;
     tipoContrato;
     tieneContrato;
+    region;
+    decimoTerceroMensualizado;
+    decimoCuartoMensualizado;
     sueldoDiario;
     direccion;
     foto;
@@ -25,6 +28,9 @@ export class Empleado {
         this.banco = props.banco;
         this.tipoContrato = props.tipoContrato;
         this.tieneContrato = props.tieneContrato;
+        this.region = props.region ?? 'costa';
+        this.decimoTerceroMensualizado = props.decimoTerceroMensualizado ?? false;
+        this.decimoCuartoMensualizado = props.decimoCuartoMensualizado ?? false;
         this.sueldoDiario = props.sueldoDiario;
         this.direccion = props.direccion;
         this.foto = props.foto ?? null;
@@ -42,6 +48,9 @@ export class Empleado {
             banco: this.banco,
             tipoContrato: this.tipoContrato,
             tieneContrato: this.tieneContrato,
+            region: this.region,
+            decimoTerceroMensualizado: this.decimoTerceroMensualizado,
+            decimoCuartoMensualizado: this.decimoCuartoMensualizado,
             sueldoDiario: this.sueldoDiario,
             direccion: this.direccion,
             foto: this.foto ?? '',

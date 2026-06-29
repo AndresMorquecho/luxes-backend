@@ -13,6 +13,9 @@ const parseBody = (body) => ({
     banco: String(body.banco ?? ''),
     tipoContrato: String(body.tipoContrato ?? 'Fijo'),
     tieneContrato: body.tieneContrato !== undefined ? Boolean(body.tieneContrato) : undefined,
+    region: body.region ? String(body.region) : undefined,
+    decimoTerceroMensualizado: body.decimoTerceroMensualizado !== undefined ? Boolean(body.decimoTerceroMensualizado) : undefined,
+    decimoCuartoMensualizado: body.decimoCuartoMensualizado !== undefined ? Boolean(body.decimoCuartoMensualizado) : undefined,
     sueldoDiario: Number(body.sueldoDiario) || 0,
     direccion: String(body.direccion ?? ''),
     foto: body.foto ? String(body.foto) : null,
@@ -126,12 +129,27 @@ export function createEmpleadosController(empleadoService) {
                 });
             }
             catch (error) {
-                const message = error instanceof Error ? error.message : 'Error al eliminar empleado';
-                const status = message.includes('no encontrado') ? 404 : 500;
+                const prismaCode = error && typeof error === 'object' && 'code' in error
+                    ? String(error.code)
+                    : '';
+                const isFkError = prismaCode === 'P2003' || prismaCode === 'P2014';
+                const message = isFkError
+                    ? 'No se puede eliminar este colaborador porque tiene registros vinculados (órdenes de compra, tareas u otros). El usuario del portal se desactivará automáticamente al eliminar.'
+                    : error instanceof Error
+                        ? error.message
+                        : 'Error al eliminar empleado';
+                const status = message.includes('no encontrado')
+                    ? 404
+                    : isFkError
+                        ? 409
+                        : 500;
                 console.error('[empleados/remove]', error);
                 return res.status(status).json({
                     success: false,
-                    error: { code: status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR', message },
+                    error: {
+                        code: status === 404 ? 'NOT_FOUND' : status === 409 ? 'CONFLICT' : 'INTERNAL_ERROR',
+                        message,
+                    },
                 });
             }
         },

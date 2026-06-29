@@ -415,28 +415,29 @@ export class PrismaComprasAdapter {
             data: updateData,
             include: this.ordenInclude,
         });
-        // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto
+        // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto (Deshabilitado en Costeo por Consumo)
+        /*
         if (data.estado === 'aprobada' && row.proyectoId) {
-            try {
-                const provName = row.proveedor?.nombre || 'Sin proveedor específico';
-                await this.prisma.gasto.create({
-                    data: {
-                        id: `G-OC-${row.id.slice(-8)}-${Date.now()}`,
-                        concepto: `Materiales de Orden de Compra - ${row.numero}`,
-                        categoria: 'proyecto',
-                        fecha: new Date(),
-                        monto: row.total,
-                        proveedor: provName,
-                        proyectoId: row.proyectoId,
-                        notas: row.id, // Guardar el ID de la OC para recuperarla desde el frontend
-                    }
-                });
-                console.log(`[Gasto Automático] Creado gasto de $${row.total} para proyecto ${row.proyectoId} desde OC ${row.numero}`);
-            }
-            catch (err) {
-                console.error('[Gasto Automático Error] No se pudo crear el gasto para el proyecto:', err);
-            }
+          try {
+            const provName = (row as any).proveedor?.nombre || 'Sin proveedor específico';
+            await this.prisma.gasto.create({
+              data: {
+                id: `G-OC-${row.id.slice(-8)}-${Date.now()}`,
+                concepto: `Materiales de Orden de Compra - ${row.numero}`,
+                categoria: 'proyecto',
+                fecha: new Date(),
+                monto: row.total,
+                proveedor: provName,
+                proyectoId: row.proyectoId,
+                notas: row.id, // Guardar el ID de la OC para recuperarla desde el frontend
+              }
+            });
+            console.log(`[Gasto Automático] Creado gasto de $${row.total} para proyecto ${row.proyectoId} desde OC ${row.numero}`);
+          } catch (err) {
+            console.error('[Gasto Automático Error] No se pudo crear el gasto para el proyecto:', err);
+          }
         }
+        */
         // Notificar al creador solo en la transición a aprobada (con o sin proyecto)
         const pasoAAprobada = data.estado === 'aprobada' && ordenAnterior?.estado !== 'aprobada';
         if (pasoAAprobada) {

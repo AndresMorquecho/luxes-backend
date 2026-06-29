@@ -85,4 +85,7 @@ export class InventarioService {
         });
         return updated;
     }
+    async getMaterialHistorial(id) {
+        return this.repo.getMaterialHistorial(id);
+    }
 }

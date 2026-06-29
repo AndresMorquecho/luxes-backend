@@ -340,7 +340,7 @@ export class NominaController {
       const empleados = await prisma.empleado.findMany();
       const empleadoIds = empleados.map(e => e.id);
       const diffDias = diasLaborablesPeriodo;
-      const sbuVigente = await loadSbuVigente(prisma);
+      const sbuVigente = await loadSbuVigente(prisma as any);
       const year = fFinStr.slice(0, 4);
 
       const nominasAnioBatch = await prisma.nominaRegistro.findMany({
@@ -506,8 +506,6 @@ export class NominaController {
                 diasLaborados: diasTrabajados,
                 permisoHoras: 0,
                 ingresos: {
-                  decimoCuarto: decimoCuartoVal,
-                  decimoTercero: decimoTerceroVal,
                   ...decimos,
                   horasExtras: horasExtrasSum,
                   trabajosEnEmpresa: trabEmpSum,
@@ -664,7 +662,7 @@ export class NominaController {
 
   async getNominaGlobalConfig(_req: Request, res: Response): Promise<Response> {
     try {
-      const sbuVigente = await loadSbuVigente(prisma);
+      const sbuVigente = await loadSbuVigente(prisma as any);
       return res.status(200).json({ success: true, data: { sbuVigente } });
     } catch (error) {
       console.error('[nomina/getNominaGlobalConfig]', error);

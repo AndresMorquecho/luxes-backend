@@ -788,3 +788,12 @@ model CierreCaja {
   @@index([usuarioId])
   @@map("cierres_caja")
 }
+
+// ── Configuración del sitio (clave-valor) ────────────────────────────────────
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("site_settings")
+}
