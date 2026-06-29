@@ -207,9 +207,13 @@ export function createAuthController(authService) {
             }
             catch (error) {
                 console.error('[users/delete]', error);
+                let msg = error.message || 'Error al eliminar usuario';
+                if (msg.includes('Foreign key constraint violated')) {
+                    msg = 'No se puede eliminar este usuario porque tiene registros importantes vinculados (como órdenes de compra o acciones de auditoría). Por seguridad, se recomienda cambiar su estado a "Inactivo".';
+                }
                 return res.status(400).json({
                     success: false,
-                    error: { message: error.message || 'Error al eliminar usuario' },
+                    error: { message: msg },
                 });
             }
         },

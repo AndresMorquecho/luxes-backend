@@ -5,8 +5,6 @@ const mapRecord = (record) => new Empleado({
     id: record.id,
     nombre: record.nombre,
     cedula: record.cedula,
-    cargo: record.cargo,
-    departamento: record.departamento,
     telefono: record.telefono,
     correo: record.correo,
     cuentaBanco: record.cuentaBanco,
@@ -19,13 +17,12 @@ const mapRecord = (record) => new Empleado({
     sueldoDiario: Number(record.sueldoDiario),
     direccion: record.direccion,
     foto: record.foto,
+    rol: record.user?.rol,
 });
 const toDbData = (data) => {
     const record = {
         nombre: data.nombre,
         cedula: data.cedula,
-        cargo: data.cargo ?? '',
-        departamento: data.departamento ?? '',
         telefono: data.telefono ?? '',
         correo: data.correo ?? '',
         cuentaBanco: data.cuentaBanco ?? '',
@@ -47,16 +44,23 @@ const toDbData = (data) => {
 export class PrismaEmpleadoAdapter extends EmpleadoRepositoryPort {
     async findAll() {
         const records = await prisma.empleado.findMany({
+            include: { user: { select: { rol: true } } },
             orderBy: { id: 'asc' },
         });
         return records.map(mapRecord);
     }
     async findById(id) {
-        const record = await prisma.empleado.findUnique({ where: { id } });
+        const record = await prisma.empleado.findUnique({
+            where: { id },
+            include: { user: { select: { rol: true } } }
+        });
         return record ? mapRecord(record) : null;
     }
     async findByCedula(cedula) {
-        const record = await prisma.empleado.findUnique({ where: { cedula } });
+        const record = await prisma.empleado.findUnique({
+            where: { cedula },
+            include: { user: { select: { rol: true } } }
+        });
         return record ? mapRecord(record) : null;
     }
     async create(id, data) {

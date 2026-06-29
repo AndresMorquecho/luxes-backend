@@ -55,34 +55,37 @@ async function notifyRoles(roles, data) {
     }
 }
 async function notifyVentasEquipo(proforma, data) {
-    // 1. Notificación personal al creador/vendedor de la proforma
-    if (proforma.creadoPorUserId) {
-        await prisma.notification.create({
-            data: {
-                title: data.title,
-                message: data.message,
-                userId: proforma.creadoPorUserId,
-                createdBy: data.createdBy,
-            },
-        });
-    }
-    else if (proforma.atiende) {
+    let vendedorUserId = proforma.creadoPorUserId || null;
+    if (!vendedorUserId && proforma.atiende) {
         const vendedor = await prisma.user.findFirst({
             where: {
                 nombre: { equals: proforma.atiende, mode: 'insensitive' },
             },
             select: { id: true },
         });
-        if (vendedor) {
-            await prisma.notification.create({
-                data: {
-                    title: data.title,
-                    message: data.message,
-                    userId: vendedor.id,
-                    createdBy: data.createdBy,
-                },
-            });
+        vendedorUserId = vendedor?.id || null;
+    }
+    let vendedorIsVentas = false;
+    if (vendedorUserId) {
+        const u = await prisma.user.findUnique({
+            where: { id: vendedorUserId },
+            select: { rol: true },
+        });
+        const roleName = u?.rol?.toLowerCase() || '';
+        if (roleName === 'ventas' || roleName === 'diseñador' || roleName === 'disenador') {
+            vendedorIsVentas = true;
         }
+    }
+    // 1. Notificación personal al creador/vendedor de la proforma (solo si NO tiene el rol ventas para evitar duplicados)
+    if (vendedorUserId && !vendedorIsVentas) {
+        await prisma.notification.create({
+            data: {
+                title: data.title,
+                message: data.message,
+                userId: vendedorUserId,
+                createdBy: data.createdBy,
+            },
+        });
     }
     // 2. UNA sola notificación por rol para el equipo de ventas (sin aliases duplicados)
     await notifyRoles(['ventas'], {
@@ -302,7 +305,48 @@ export class ProformasController {
                 },
                 include: { items: true, metodoPago: true },
             });
-            return res.status(200).json({ success: true, data: mapProforma(updated) });
+            const mappedUpdated = mapProforma(updated);
+            // Cascade update to ProyectoFase
+            const fases = await prisma.proyectoFase.findMany({
+                where: {
+                    fase: 'COTIZACION',
+                    datos: { contains: String(id) },
+                },
+            });
+            for (const fase of fases) {
+                try {
+                    const datosParsed = JSON.parse(fase.datos);
+                    if (Array.isArray(datosParsed.cotizacionesSeleccionadas)) {
+                        let modified = false;
+                        datosParsed.cotizacionesSeleccionadas = datosParsed.cotizacionesSeleccionadas.map((c) => {
+                            if (c.id === String(id)) {
+                                modified = true;
+                                const subtotal = updated.items.reduce((acc, item) => acc + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
+                                const total = subtotal * (1 + Number(updated.iva));
+                                return {
+                                    ...c,
+                                    cliente: mappedUpdated.cliente,
+                                    fecha: mappedUpdated.fecha,
+                                    estado: mappedUpdated.estado,
+                                    total: total,
+                                    items: mappedUpdated.items
+                                };
+                            }
+                            return c;
+                        });
+                        if (modified) {
+                            await prisma.proyectoFase.update({
+                                where: { id: fase.id },
+                                data: { datos: JSON.stringify(datosParsed) },
+                            });
+                        }
+                    }
+                }
+                catch (e) {
+                    console.error(`Error actualizando fase ${fase.id}:`, e);
+                }
+            }
+            return res.status(200).json({ success: true, data: mappedUpdated });
         }
         catch (error) {
             console.error('[proformas/update]', error);
@@ -570,6 +614,32 @@ export class ProformasController {
     async remove(req, res) {
         try {
             const { id } = req.params;
+            // 1. Cascade delete in ProyectoFase
+            const fases = await prisma.proyectoFase.findMany({
+                where: {
+                    fase: 'COTIZACION',
+                    datos: { contains: String(id) },
+                },
+            });
+            for (const fase of fases) {
+                try {
+                    const datosParsed = JSON.parse(fase.datos);
+                    if (Array.isArray(datosParsed.cotizacionesSeleccionadas)) {
+                        const inicial = datosParsed.cotizacionesSeleccionadas.length;
+                        datosParsed.cotizacionesSeleccionadas = datosParsed.cotizacionesSeleccionadas.filter((c) => c.id !== String(id));
+                        if (datosParsed.cotizacionesSeleccionadas.length !== inicial) {
+                            await prisma.proyectoFase.update({
+                                where: { id: fase.id },
+                                data: { datos: JSON.stringify(datosParsed) },
+                            });
+                        }
+                    }
+                }
+                catch (e) {
+                    console.error(`Error procesando fase ${fase.id}:`, e);
+                }
+            }
+            // 2. Delete proforma
             await prisma.proforma.delete({ where: { id: String(id) } });
             return res.status(200).json({ success: true, data: { id } });
         }

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { env } from './config/env.js';
+import { auditMiddleware } from './features/auth/infrastructure/middleware/auditMiddleware.js';
 import { createAuthModule } from './features/auth/infrastructure/composition/authContainer.js';
 import { createInventarioModule } from './features/inventario/infrastructure/composition/inventarioContainer.js';
 import { createComprasModule } from './features/compras/infrastructure/composition/comprasContainer.js';
@@ -129,6 +130,8 @@ async function bootstrap() {
     app.get('/health', (_req, res) => {
         res.json({ status: 'ok', service: 'luxes-backend' });
     });
+    // Middleware de auditoría automática — registra acciones mutantes en audit_logs
+    app.use('/api', auditMiddleware);
     const { authRoutes } = await createAuthModule();
     app.use('/api/auth', authRoutes);
     const { inventarioRoutes } = await createInventarioModule();

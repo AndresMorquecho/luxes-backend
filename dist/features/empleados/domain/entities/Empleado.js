@@ -2,8 +2,6 @@ export class Empleado {
     id;
     nombre;
     cedula;
-    cargo;
-    departamento;
     telefono;
     correo;
     cuentaBanco;
@@ -16,12 +14,11 @@ export class Empleado {
     sueldoDiario;
     direccion;
     foto;
+    rol;
     constructor(props) {
         this.id = props.id;
         this.nombre = props.nombre;
         this.cedula = props.cedula;
-        this.cargo = props.cargo;
-        this.departamento = props.departamento;
         this.telefono = props.telefono;
         this.correo = props.correo;
         this.cuentaBanco = props.cuentaBanco;
@@ -34,14 +31,13 @@ export class Empleado {
         this.sueldoDiario = props.sueldoDiario;
         this.direccion = props.direccion;
         this.foto = props.foto ?? null;
+        this.rol = props.rol;
     }
     toJSON() {
         return {
             id: this.id,
             nombre: this.nombre,
             cedula: this.cedula,
-            cargo: this.cargo,
-            departamento: this.departamento,
             telefono: this.telefono,
             correo: this.correo,
             cuentaBanco: this.cuentaBanco,
@@ -54,6 +50,7 @@ export class Empleado {
             sueldoDiario: this.sueldoDiario,
             direccion: this.direccion,
             foto: this.foto ?? '',
+            rol: this.rol,
         };
     }
 }

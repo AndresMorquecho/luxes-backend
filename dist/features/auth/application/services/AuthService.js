@@ -214,9 +214,13 @@ export class AuthService {
         const result = await this.userRepository.delete(id);
         // Sync deletion with Empleado
         if (user.empleadoId) {
-            await prisma.empleado.delete({
-                where: { id: user.empleadoId }
-            }).catch(() => { });
+            try {
+                await prisma.empleadoDocumento.deleteMany({ where: { empleadoId: user.empleadoId } });
+                await prisma.empleado.delete({ where: { id: user.empleadoId } });
+            }
+            catch (err) {
+                console.error('Error cascade deleting empleado from user:', err);
+            }
         }
         // Registrar en auditoría
         if (this.auditLogRepository) {

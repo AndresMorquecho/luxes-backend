@@ -141,25 +141,29 @@ export class ImpresionesController {
             if (b.status !== undefined && b.status !== currentJob.status) {
                 const username = b.responsible || 'Operador';
                 const nowStr = new Date().toLocaleString();
+                const projSuffix = currentJob.proyectoId ? ` [PROYECTO_ID:${currentJob.proyectoId}]` : '';
                 if (b.status === 'Imprimiendo') {
                     updateData.startedPrintingAt = nowStr;
                     updateData.startTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     updateData.responsible = username;
                     const consumoMsg = b.consumoDetalle ? ` Materiales a descontar: ${b.consumoDetalle}.` : '';
                     try {
-                        await prisma.notification.create({
-                            data: {
-                                title: 'Impresión Iniciada',
-                                message: `El operador ${username} ha iniciado la impresión de "${currentJob.name}".${consumoMsg}`,
-                                rol: 'admin',
-                                createdBy: username,
-                            },
-                        });
-                        await sendPushToRole('admin', {
-                            title: '🖨️ Impresión Iniciada',
-                            body: `Se inició la impresión de "${currentJob.name}" por ${username}.${consumoMsg}`,
-                            data: { url: '/colas-impresion' },
-                        });
+                        const rolesToNotify = ['admin', 'ventas'];
+                        for (const roleName of rolesToNotify) {
+                            await prisma.notification.create({
+                                data: {
+                                    title: 'Impresión Iniciada',
+                                    message: `El operador ${username} ha iniciado la impresión de "${currentJob.name}".${consumoMsg}${projSuffix}`,
+                                    rol: roleName,
+                                    createdBy: username,
+                                },
+                            });
+                            await sendPushToRole(roleName, {
+                                title: '🖨️ Impresión Iniciada',
+                                body: `Se inició la impresión de "${currentJob.name}" por ${username}.${consumoMsg}`,
+                                data: { url: `/colas-impresion` },
+                            }).catch(() => { });
+                        }
                     }
                     catch (e) {
                         console.error(e);
@@ -168,19 +172,22 @@ export class ImpresionesController {
                 else if (b.status === 'Completado') {
                     updateData.completedAt = nowStr;
                     try {
-                        await prisma.notification.create({
-                            data: {
-                                title: 'Impresión Completada',
-                                message: `La impresión de "${currentJob.name}" ha finalizado con éxito.`,
-                                rol: 'admin',
-                                createdBy: username,
-                            },
-                        });
-                        await sendPushToRole('admin', {
-                            title: '✅ Impresión Completada',
-                            body: `La impresión de "${currentJob.name}" ha finalizado con éxito.`,
-                            data: { url: '/colas-impresion' },
-                        });
+                        const rolesToNotify = ['admin', 'ventas'];
+                        for (const roleName of rolesToNotify) {
+                            await prisma.notification.create({
+                                data: {
+                                    title: 'Impresión Completada',
+                                    message: `La impresión de "${currentJob.name}" ha finalizado con éxito.${projSuffix}`,
+                                    rol: roleName,
+                                    createdBy: username,
+                                },
+                            });
+                            await sendPushToRole(roleName, {
+                                title: '✅ Impresión Completada',
+                                body: `La impresión de "${currentJob.name}" ha finalizado con éxito.`,
+                                data: { url: `/colas-impresion` },
+                            }).catch(() => { });
+                        }
                     }
                     catch (e) {
                         console.error(e);
@@ -189,19 +196,22 @@ export class ImpresionesController {
                 else if (b.status === 'Cancelado') {
                     updateData.completedAt = nowStr;
                     try {
-                        await prisma.notification.create({
-                            data: {
-                                title: 'Impresión Cancelada',
-                                message: `Se canceló la impresión de "${currentJob.name}". Motivo: ${b.cancelReason || 'No especificado'}`,
-                                rol: 'admin',
-                                createdBy: username,
-                            },
-                        });
-                        await sendPushToRole('admin', {
-                            title: '❌ Impresión Cancelada',
-                            body: `Se canceló la impresión de "${currentJob.name}". Motivo: ${b.cancelReason || 'No especificado'}`,
-                            data: { url: '/colas-impresion' },
-                        });
+                        const rolesToNotify = ['admin', 'ventas'];
+                        for (const roleName of rolesToNotify) {
+                            await prisma.notification.create({
+                                data: {
+                                    title: 'Impresión Cancelada',
+                                    message: `Se canceló la impresión de "${currentJob.name}". Motivo: ${b.cancelReason || 'No especificado'}${projSuffix}`,
+                                    rol: roleName,
+                                    createdBy: username,
+                                },
+                            });
+                            await sendPushToRole(roleName, {
+                                title: '❌ Impresión Cancelada',
+                                body: `Se canceló la impresión de "${currentJob.name}". Motivo: ${b.cancelReason || 'No especificado'}`,
+                                data: { url: `/colas-impresion` },
+                            }).catch(() => { });
+                        }
                     }
                     catch (e) {
                         console.error(e);

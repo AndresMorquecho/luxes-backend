@@ -120,27 +120,7 @@ async function getPersonalEncuesta(
       }
     }
 
-    // 3. Ventas (de las proformas vinculadas al proyecto)
-    const dbProformas = await prisma.proforma.findMany({
-      where: { proyectoId: String(proyectoId) },
-    });
-    dbProformas.forEach((p) => {
-      if (p.atiende) {
-        const existeVentas = personalList.some(
-          (pa) => pa.nombre.toLowerCase() === p.atiende.toLowerCase()
-        );
-        if (!existeVentas) {
-          personalList.push({
-            empleadoId: `ventas-${p.id}`,
-            id: `ventas-${p.id}`,
-            nombre: p.atiende,
-            rol: 'Asesor de Ventas',
-          });
-        }
-      }
-    });
-
-    // También buscar en la fase COTIZACION por si acaso no tiene proyectoId guardado en DB pero sí en JSON
+    // 3. Ventas (de las proformas vinculadas al proyecto desde la fase COTIZACION)
     const faseCotizacion = await prisma.proyectoFase.findUnique({
       where: {
         proyectoId_fase: {

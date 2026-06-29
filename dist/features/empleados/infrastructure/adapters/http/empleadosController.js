@@ -3,8 +3,6 @@ import { prisma } from '../../../../../config/prismaClient.js';
 const parseBody = (body) => ({
     nombre: String(body.nombre ?? ''),
     cedula: String(body.cedula ?? ''),
-    cargo: String(body.cargo ?? ''),
-    departamento: String(body.departamento ?? ''),
     telefono: String(body.telefono ?? ''),
     correo: String(body.correo ?? ''),
     username: body.username ? String(body.username) : undefined,

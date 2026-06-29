@@ -7,8 +7,6 @@ const mapRecord = (record: {
   id: string;
   nombre: string;
   cedula: string;
-  cargo: string;
-  departamento: string;
   telefono: string;
   correo: string;
   cuentaBanco: string;
@@ -21,6 +19,7 @@ const mapRecord = (record: {
   sueldoDiario: Prisma.Decimal;
   direccion: string;
   foto: string | null;
+  passwordHash?: string;
   user?: { rol: string } | null;
 }): Empleado =>
   new Empleado({
