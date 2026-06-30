@@ -3,14 +3,6 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-function generateUsername(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return '';
-  const firstWord = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
-  const nextInitial = parts[1] ? parts[1].charAt(0).toUpperCase() : '';
-  return `${firstWord}${nextInitial}`;
-}
-
 async function main() {
   console.log('=== Iniciando limpieza total de la base de datos ===');
 
@@ -144,21 +136,22 @@ async function main() {
   const passwordHash = await bcrypt.hash('123456', 10);
 
   const rawPeople = [
-    { name: 'MORQUECHO IVETTE', roleName: 'Administrador', roleId: adminRole.id },
-    { name: 'CRISTOFER SUAREZ', roleName: 'Taller', roleId: tallerRole.id },
-    { name: 'CHRISTHIAN PAREDES', roleName: 'Taller', roleId: tallerRole.id },
-    { name: 'PAOLA CARRANZA', roleName: 'Ventas', roleId: ventasRole.id },
-    { name: 'EDINSON MONCADA', roleName: 'Impresión', roleId: impresionRole.id },
-    { name: 'JOSE ANDRES TAMAYO', roleName: 'Diseñador', roleId: disenadorRole.id },
-    { name: 'JULEYSI OLVERA', roleName: 'Diseñador', roleId: disenadorRole.id },
-    { name: 'NARCISA REINA', roleName: 'Ventas', roleId: ventasRole.id },
-    { name: 'MAYBE ORELLANA', roleName: 'Ventas', roleId: ventasRole.id },
-    { name: 'JIMMY EVANGELISTA', roleName: 'Administrador', roleId: adminRole.id }
+    { name: 'MORQUECHO IVETTE', roleName: 'Administrador', roleId: adminRole.id, username: 'MorquechoI' },
+    { name: 'JEFFERSON DELGADO', roleName: 'Administrador', roleId: adminRole.id, username: 'jeffersond' },
+    { name: 'JIMMY EVANGELISTA', roleName: 'Taller', roleId: tallerRole.id, username: 'JimmyE' },
+    { name: 'EDINSON MONCADA', roleName: 'Taller', roleId: tallerRole.id, username: 'EdinsonM' },
+    { name: 'CHRISTHIAN PAREDES', roleName: 'Taller', roleId: tallerRole.id, username: 'ChristhianP' },
+    { name: 'CRISTOFER SUAREZ', roleName: 'Impresión', roleId: impresionRole.id, username: 'CristoferS' },
+    { name: 'MAYBE ORELLANA', roleName: 'Ventas', roleId: ventasRole.id, username: 'MaybeO' },
+    { name: 'NARCISA REINA', roleName: 'Ventas', roleId: ventasRole.id, username: 'NarcisaR' },
+    { name: 'JULEYSI OLVERA', roleName: 'Ventas', roleId: ventasRole.id, username: 'JuleysiO' },
+    { name: 'PAOLA CARRANZA', roleName: 'Ventas', roleId: ventasRole.id, username: 'PaolaC' },
+    { name: 'JOSE ANDRES TAMAYO', roleName: 'Diseñador', roleId: disenadorRole.id, username: 'JoseA' }
   ];
 
   for (let i = 0; i < rawPeople.length; i++) {
     const person = rawPeople[i];
-    const username = generateUsername(person.name);
+    const username = person.username;
     const idNum = (i + 1).toString().padStart(3, '0');
     const empId = `EMP-${idNum}`;
     const usrId = `USR-${idNum}`;
@@ -246,6 +239,58 @@ async function main() {
   for (const proveedor of mockProveedores) {
     await prisma.proveedor.create({
       data: proveedor
+    });
+  }
+
+  // 8. Sembrar Unidades de Medida
+  console.log('Sembrando unidades de medida...');
+  const unidades = [
+    { id: 'UM-001', nombre: 'Unidad', abreviacion: 'und' },
+    { id: 'UM-002', nombre: 'Metro', abreviacion: 'm' },
+    { id: 'UM-003', nombre: 'Rollo', abreviacion: 'roll' },
+    { id: 'UM-004', nombre: 'Litro', abreviacion: 'L' }
+  ];
+  for (const u of unidades) {
+    await prisma.unidadMedida.create({ data: u });
+  }
+
+  // 9. Sembrar Métodos de Pago
+  console.log('Sembrando 4 métodos de pago ficticios...');
+  const metodosPago = [
+    { id: 'MP-001', nombre: 'Efectivo Caja Chica', descripcion: 'Efectivo en caja física', activo: true, tipo: 'EFECTIVO' },
+    { id: 'MP-002', nombre: 'Banco Pichincha Corriente', descripcion: 'Cuenta corriente Banco Pichincha', activo: true, tipo: 'BANCO' },
+    { id: 'MP-003', nombre: 'Banco Guayaquil Ahorros', descripcion: 'Cuenta de ahorros Banco Guayaquil', activo: true, tipo: 'BANCO' },
+    { id: 'MP-004', nombre: 'Tarjeta de Crédito / Datafast', descripcion: 'Cobros con tarjeta de crédito/débito', activo: true, tipo: 'EFECTIVO' }
+  ];
+  for (const mp of metodosPago) {
+    await prisma.metodoPago.create({ data: mp });
+  }
+
+  // 10. Sembrar Materiales de Inventario (Taller e Impresión)
+  console.log('Sembrando materiales de inventario (Taller e Impresión)...');
+  const mockMateriales = [
+    // Taller - Herramientas (con responsables)
+    { id: 'MAT-001', nombre: 'Taladro Percutor Dewalt', tipo: 'herramienta', unidadMedidaId: 'UM-001', stockActual: 2, stockMinimo: 1, precioCosto: 120.00, categoria: 'Taller', estadoUso: 'EN USO', aCargo: 'ChristhianP' },
+    { id: 'MAT-002', nombre: 'Sierra Circular Makita', tipo: 'herramienta', unidadMedidaId: 'UM-001', stockActual: 1, stockMinimo: 1, precioCosto: 180.00, categoria: 'Taller', estadoUso: 'EN USO', aCargo: 'JimmyE' },
+    { id: 'MAT-003', nombre: 'Amoladora Bosch 4 1/2', tipo: 'herramienta', unidadMedidaId: 'UM-001', stockActual: 3, stockMinimo: 1, precioCosto: 85.00, categoria: 'Taller', estadoUso: 'BODEGA' },
+    
+    // Taller - Consumibles
+    { id: 'MAT-004', nombre: 'Tornillos Autoperforantes 1 1/2 (Caja x100)', tipo: 'consumible', unidadMedidaId: 'UM-001', stockActual: 15, stockMinimo: 3, precioCosto: 4.50, categoria: 'Taller', estadoUso: 'BODEGA' },
+    { id: 'MAT-005', nombre: 'Cola de Madera PVA 1L', tipo: 'consumible', unidadMedidaId: 'UM-004', stockActual: 10, stockMinimo: 2, precioCosto: 6.20, categoria: 'Taller', estadoUso: 'BODEGA' },
+    
+    // Impresión - Herramientas (con responsables)
+    { id: 'MAT-006', nombre: 'Plotter de Corte Mimaki', tipo: 'herramienta', unidadMedidaId: 'UM-001', stockActual: 1, stockMinimo: 1, precioCosto: 2400.00, categoria: 'Impresión', estadoUso: 'EN USO', aCargo: 'CristoferS' },
+    { id: 'MAT-007', nombre: 'Pistola de Calor Dewalt', tipo: 'herramienta', unidadMedidaId: 'UM-001', stockActual: 4, stockMinimo: 1, precioCosto: 75.00, categoria: 'Impresión', estadoUso: 'EN USO', aCargo: 'CristoferS' },
+    
+    // Impresión - Consumibles
+    { id: 'MAT-008', nombre: 'Rollo Vinilo Adhesivo Blanco Brillo 1.52m', tipo: 'consumible', unidadMedidaId: 'UM-003', stockActual: 6, stockMinimo: 2, precioCosto: 48.00, categoria: 'Impresión', estadoUso: 'BODEGA' },
+    { id: 'MAT-009', nombre: 'Lona para Banner 13oz 3.20m', tipo: 'consumible', unidadMedidaId: 'UM-003', stockActual: 3, stockMinimo: 1, precioCosto: 72.50, categoria: 'Impresión', estadoUso: 'BODEGA' },
+    { id: 'MAT-010', nombre: 'Tinta Solvente Cyan 1L', tipo: 'consumible', unidadMedidaId: 'UM-004', stockActual: 12, stockMinimo: 4, precioCosto: 22.00, categoria: 'Impresión', estadoUso: 'BODEGA' }
+  ];
+
+  for (const material of mockMateriales) {
+    await prisma.material.create({
+      data: material
     });
   }
 
