@@ -21,6 +21,38 @@ import { createLandingRoutes } from './features/landing/infrastructure/routes/la
 
 
 async function bootstrap() {
+  // Usuario de kiosco: siempre debe existir en producción (sin resetear contraseña si ya existe)
+  try {
+    const { prisma } = await import('./config/prismaClient.js');
+    const bcrypt = await import('bcryptjs');
+    const existing = await prisma.user.findUnique({ where: { username: 'asistencia' } });
+
+    if (existing) {
+      await prisma.user.update({
+        where: { username: 'asistencia' },
+        data: { rol: 'asistencia', roleId: null, estado: 'activo' },
+      });
+      console.log('[Bootstrap] Usuario asistencia verificado.');
+    } else {
+      const passwordHash = await bcrypt.default.hash('123456', 10);
+      await prisma.user.create({
+        data: {
+          id: 'USR-ASIS-001',
+          nombre: 'Asistencia Kiosco',
+          email: 'asistencia@luxes.com',
+          username: 'asistencia',
+          rol: 'asistencia',
+          roleId: null,
+          estado: 'activo',
+          passwordHash,
+        },
+      });
+      console.log('[Bootstrap] Usuario asistencia creado (asistencia / 123456).');
+    }
+  } catch (error) {
+    console.error('[Bootstrap] Error al asegurar usuario asistencia:', error);
+  }
+
   // Asegurar usuarios del sistema (activos + contraseña dev conocida) solo si la tabla está vacía
   try {
     const { prisma } = await import('./config/prismaClient.js');

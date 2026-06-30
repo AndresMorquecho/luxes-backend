@@ -16,6 +16,7 @@
     "db:seed-ejemplo-instalacion": "tsx prisma/seed-ejemplo-instalacion.ts",
     "db:seed-nomina-demo": "tsx prisma/seed-nomina-demo.ts",
     "db:ensure-role-users": "tsx prisma/ensure-role-users.ts",
+    "db:ensure-asistencia": "tsx prisma/ensure-asistencia-user.ts",
     "db:fix-inventory-categories": "tsx prisma/fix-inventory-categories.ts",
     "db:setup": "prisma migrate deploy && tsx prisma/seed.ts"
   },
