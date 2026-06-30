@@ -190,6 +190,21 @@ async function main() {
     });
   }
 
+  // Usuario de kiosco para registro de asistencia (sin empleado vinculado)
+  console.log('- Creando Usuario: asistencia | Contraseña: 123456 (Rol: asistencia)');
+  await prisma.user.create({
+    data: {
+      id: 'USR-ASIS-001',
+      nombre: 'Asistencia Kiosco',
+      email: 'asistencia@luxes.com',
+      username: 'asistencia',
+      rol: 'asistencia',
+      roleId: null,
+      estado: 'activo',
+      passwordHash: passwordHash,
+    },
+  });
+
   // 6. Sembrar Clientes
   console.log('Sembrando 20 clientes ficticios...');
   const mockClientes = [
