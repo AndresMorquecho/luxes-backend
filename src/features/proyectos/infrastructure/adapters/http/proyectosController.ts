@@ -340,7 +340,7 @@ export class ProyectosController {
       } = req.query;
 
       const pageNum = Math.max(1, parseInt(String(page), 10));
-      const limitNum = Math.max(1, Math.min(100, parseInt(String(limit), 10)));
+      const limitNum = Math.max(1, Math.min(1000, parseInt(String(limit), 10)));
       const skip = (pageNum - 1) * limitNum;
 
       const where: any = {};
