@@ -4,8 +4,12 @@
  */
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const prisma = new PrismaClient();
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 
 type MigrationRow = {
   migration_name: string;
@@ -13,51 +17,94 @@ type MigrationRow = {
   rolled_back_at: Date | null;
 };
 
-/** Migraciones que fallaron a medias: SQL idempotente + migrate resolve --applied */
-const REPAIRS: Record<
-  string,
-  { label: string; sql: string[] }
-> = {
-  '20260625140000_add_nomina_periodo_config': {
-    label: 'nomina_periodo_config',
-    sql: [
-      `CREATE TABLE IF NOT EXISTS "nomina_periodo_config" (
-        "id" TEXT NOT NULL,
-        "fecha_inicio" DATE NOT NULL,
-        "fecha_fin" DATE NOT NULL,
-        "feriados" JSONB NOT NULL DEFAULT '[]',
-        "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT "nomina_periodo_config_pkey" PRIMARY KEY ("id")
-      )`,
-      `CREATE UNIQUE INDEX IF NOT EXISTS "nomina_periodo_config_fecha_inicio_fecha_fin_key"
-        ON "nomina_periodo_config"("fecha_inicio", "fecha_fin")`,
-    ],
-  },
+/** SQL idempotente por migración (tiene prioridad sobre migration.sql) */
+const REPAIRS: Record<string, string[]> = {
+  '20260625140000_add_nomina_periodo_config': [
+    `CREATE TABLE IF NOT EXISTS "nomina_periodo_config" (
+      "id" TEXT NOT NULL,
+      "fecha_inicio" DATE NOT NULL,
+      "fecha_fin" DATE NOT NULL,
+      "feriados" JSONB NOT NULL DEFAULT '[]',
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "nomina_periodo_config_pkey" PRIMARY KEY ("id")
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "nomina_periodo_config_fecha_inicio_fecha_fin_key"
+      ON "nomina_periodo_config"("fecha_inicio", "fecha_fin")`,
+  ],
+  '20260625150000_add_horarios_laborales': [
+    `ALTER TABLE "configuracion" ADD COLUMN IF NOT EXISTS "horarios_laborales" JSONB`,
+  ],
+  '20260625160000_hora_extra_aprobacion': [
+    `ALTER TABLE "horas_extras" ADD COLUMN IF NOT EXISTS "aprobacion_estado" TEXT NOT NULL DEFAULT 'APROBADA'`,
+    `ALTER TABLE "horas_extras" ADD COLUMN IF NOT EXISTS "origen" TEXT NOT NULL DEFAULT 'MANUAL'`,
+    `ALTER TABLE "horas_extras" ADD COLUMN IF NOT EXISTS "asistencia_fin_id" TEXT`,
+  ],
+  '20260625180000_decimos_provisiones': [
+    `ALTER TABLE "empleados" ADD COLUMN IF NOT EXISTS "region" TEXT NOT NULL DEFAULT 'costa'`,
+    `ALTER TABLE "empleados" ADD COLUMN IF NOT EXISTS "decimo_tercero_mensualizado" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "empleados" ADD COLUMN IF NOT EXISTS "decimo_cuarto_mensualizado" BOOLEAN NOT NULL DEFAULT false`,
+    `CREATE TABLE IF NOT EXISTS "nomina_config_global" (
+      "id" TEXT NOT NULL DEFAULT 'default',
+      "sbu_vigente" DECIMAL(10,2) NOT NULL DEFAULT 470,
+      "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "nomina_config_global_pkey" PRIMARY KEY ("id")
+    )`,
+    `INSERT INTO "nomina_config_global" ("id", "sbu_vigente", "updated_at")
+      VALUES ('default', 470, CURRENT_TIMESTAMP)
+      ON CONFLICT ("id") DO NOTHING`,
+  ],
 };
 
+function loadStatementsFromFile(migrationName: string): string[] {
+  const filePath = path.join(MIGRATIONS_DIR, migrationName, 'migration.sql');
+  if (!fs.existsSync(filePath)) return [];
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  return content
+    .split(';')
+    .map((s) => s.replace(/^--[^\n]*\n?/gm, '').trim())
+    .filter(Boolean);
+}
+
+function getStatements(migrationName: string): string[] {
+  if (REPAIRS[migrationName]?.length) return REPAIRS[migrationName];
+  return loadStatementsFromFile(migrationName);
+}
+
 async function getPendingFailedMigrations(): Promise<MigrationRow[]> {
-  const rows = await prisma.$queryRaw<MigrationRow[]>`
+  return prisma.$queryRaw<MigrationRow[]>`
     SELECT migration_name, finished_at, rolled_back_at
     FROM "_prisma_migrations"
     WHERE finished_at IS NULL
       AND rolled_back_at IS NULL
     ORDER BY started_at ASC
   `;
-  return rows.filter((r) => REPAIRS[r.migration_name]);
 }
 
 async function main() {
   const failed = await getPendingFailedMigrations();
+
   if (failed.length === 0) {
-    console.log('[Migrations] No hay migraciones fallidas conocidas que reparar.');
+    console.log('[Migrations] No hay migraciones fallidas pendientes.');
     return;
   }
 
-  for (const row of failed) {
-    const repair = REPAIRS[row.migration_name];
-    console.log(`[Migrations] Reparando migración fallida: ${row.migration_name} (${repair.label})`);
+  console.log(
+    `[Migrations] Migraciones fallidas detectadas: ${failed.map((f) => f.migration_name).join(', ')}`,
+  );
 
-    for (const statement of repair.sql) {
+  for (const row of failed) {
+    const statements = getStatements(row.migration_name);
+    if (statements.length === 0) {
+      throw new Error(
+        `[Migrations] Sin SQL de reparación para "${row.migration_name}". ` +
+          'Agrega la migración en prisma/fix-failed-migrations.ts',
+      );
+    }
+
+    console.log(`[Migrations] Reparando: ${row.migration_name}`);
+
+    for (const statement of statements) {
       await prisma.$executeRawUnsafe(statement);
     }
 

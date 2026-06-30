@@ -9,6 +9,6 @@ CREATE TABLE IF NOT EXISTS "nomina_config_global" (
     CONSTRAINT "nomina_config_global_pkey" PRIMARY KEY ("id")
 );
 
-INSERT INTO "nomina_config_global" ("id", "sbu_vigente")
-VALUES ('default', 470)
+INSERT INTO "nomina_config_global" ("id", "sbu_vigente", "updated_at")
+VALUES ('default', 470, CURRENT_TIMESTAMP)
 ON CONFLICT ("id") DO NOTHING;
