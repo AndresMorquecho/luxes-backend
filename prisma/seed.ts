@@ -197,6 +197,58 @@ async function main() {
     });
   }
 
+  // 6. Sembrar Clientes
+  console.log('Sembrando 20 clientes ficticios...');
+  const mockClientes = [
+    { id: 'CLI-001', nombre: 'Juan Pérez', cedulaRuc: '0928374615', telefono: '0981234567', email: 'juan.perez@example.com', direccion: 'Av. 9 de Octubre 123, Guayaquil', tipo: 'Persona', notas: 'Cliente recurrente e interesado en proformas de mobiliario.' },
+    { id: 'CLI-002', nombre: 'María Rodríguez', cedulaRuc: '1738495061', telefono: '0982345678', email: 'maria.rod@example.com', direccion: 'Av. Amazonas N24-10, Quito', tipo: 'Persona', notas: 'Contacto principal para proyectos de iluminación.' },
+    { id: 'CLI-003', nombre: 'Corporación Noboa S.A.', cedulaRuc: '0991234567001', telefono: '042202020', email: 'compras@noboa.com', direccion: 'Km 5.5 Vía a Daule, Guayaquil', tipo: 'Empresa', notas: 'Cliente corporativo VIP.' },
+    { id: 'CLI-004', nombre: 'Carlos Mendoza', cedulaRuc: '1309876543', telefono: '0983456789', email: 'carlos.men@example.com', direccion: 'Calle 13 y Av. 24, Manta', tipo: 'Persona', notas: 'Solicita cotización de proformas de taller.' },
+    { id: 'CLI-005', nombre: 'Ana María Silva', cedulaRuc: '0104728394', telefono: '0984567890', email: 'ana.silva@example.com', direccion: 'Gran Colombia 4-56, Cuenca', tipo: 'Persona', notas: 'Cliente residencial para acabados de lujo.' },
+    { id: 'CLI-006', nombre: 'Constructora del Pacífico', cedulaRuc: '1792345678001', telefono: '022505050', email: 'proyectos@conpacifico.com', direccion: 'Av. 12 de Octubre, Quito', tipo: 'Empresa', notas: 'Proyectos de gran escala, pagos a 30 días.' },
+    { id: 'CLI-007', nombre: 'David Chango', cedulaRuc: '1802938475', telefono: '0985678901', email: 'david.chango@example.com', direccion: 'Av. Cevallos y Montalvo, Ambato', tipo: 'Persona', notas: 'Interesado en señalización y gigantografías.' },
+    { id: 'CLI-008', nombre: 'Sofía Larrea', cedulaRuc: '1728374950', telefono: '0986789012', email: 'sofia.lar@example.com', direccion: 'Cumbayá, San Juan s/n, Quito', tipo: 'Persona', notas: 'Proyectos de diseño de interiores.' },
+    { id: 'CLI-009', nombre: 'Hotel Oro Verde', cedulaRuc: '0990876543001', telefono: '042327999', email: 'mantenimiento@oroverde.com.ec', direccion: 'Av. 9 de Octubre y García Moreno, Guayaquil', tipo: 'Empresa', notas: 'Mantenimientos y adecuaciones frecuentes.' },
+    { id: 'CLI-010', nombre: 'Luis Fernando Castro', cedulaRuc: '0912345678', telefono: '0987890123', email: 'luis.castro@example.com', direccion: 'Urdesa Central, Calle Ilanes, Guayaquil', tipo: 'Persona', notas: 'Entrega en oficina central.' },
+    { id: 'CLI-011', nombre: 'Inmobiliaria Novatec', cedulaRuc: '1798765432001', telefono: '022998877', email: 'info@novatec.ec', direccion: 'Av. Eloy Alfaro y Shyris, Quito', tipo: 'Empresa', notas: 'Proyectos residenciales nuevos.' },
+    { id: 'CLI-012', nombre: 'Gabriela Ponce', cedulaRuc: '0919283746', telefono: '0988901234', email: 'gabriela.p@example.com', direccion: 'Samanes 6, Mz. 102 V. 5, Guayaquil', tipo: 'Persona', notas: 'Consumo mensual de impresiones y vinilos.' },
+    { id: 'CLI-013', nombre: 'Supermercados La Favorita', cedulaRuc: '1790016919001', telefono: '022997700', email: 'proveedores@favorita.com.ec', direccion: 'Av. General Enríquez, Sangolquí', tipo: 'Empresa', notas: 'Cliente corporativo premium.' },
+    { id: 'CLI-014', nombre: 'Andrés Vera', cedulaRuc: '1319283746', telefono: '0989012345', email: 'andres.vera@example.com', direccion: 'Av. Flavio Reyes, Manta', tipo: 'Persona', notas: 'Instalaciones publicitarias.' },
+    { id: 'CLI-015', nombre: 'Patricia Espinoza', cedulaRuc: '1102938475', telefono: '0980123456', email: 'patty.es@example.com', direccion: 'Calle Bolívar y 10 de Agosto, Loja', tipo: 'Persona', notas: 'Cliente particular.' },
+    { id: 'CLI-016', nombre: 'Almacenes Estuardo Sánchez', cedulaRuc: '0990012345001', telefono: '042594500', email: 'compras@estuardo.com.ec', direccion: 'Luque y Chimborazo, Guayaquil', tipo: 'Empresa', notas: 'Instalaciones de letreros en locales a nivel nacional.' },
+    { id: 'CLI-017', nombre: 'Roberto Gómez', cedulaRuc: '0921029384', telefono: '0981230987', email: 'roberto.gomez@example.com', direccion: 'Samborondón Km 2.5, Guayaquil', tipo: 'Persona', notas: 'Pedidos especiales de carpintería y metalmecánica.' },
+    { id: 'CLI-018', nombre: 'Boutique Glamour', cedulaRuc: '0928374650001', telefono: '0982341234', email: 'admin@glamourboutique.com', direccion: 'Mall del Sol Local 45, Guayaquil', tipo: 'Empresa', notas: 'Diseño e impresión de publicidad estacional.' },
+    { id: 'CLI-019', nombre: 'Javier Ceballos', cedulaRuc: '1710293847', telefono: '0983452345', email: 'javier.ceb@example.com', direccion: 'La Carolina, Av. República, Quito', tipo: 'Persona', notas: 'Cliente de proyectos especiales.' },
+    { id: 'CLI-020', nombre: 'Clínica Kennedy', cedulaRuc: '0990123456001', telefono: '042289666', email: 'logistica@kennedy.com.ec', direccion: 'Av. San Jorge, Guayaquil', tipo: 'Empresa', notas: 'Señalética interna de consultorios.' }
+  ];
+
+  for (const cliente of mockClientes) {
+    await prisma.cliente.create({
+      data: cliente
+    });
+  }
+
+  // 7. Sembrar Proveedores
+  console.log('Sembrando 10 proveedores ficticios...');
+  const mockProveedores = [
+    { id: 'PRV-001', nombre: 'Importadora Alvarado', ruc: '1890123456001', tipo: 'Empresa', direccion: 'Av. de las Américas, Ambato', telefono: '032824500', email: 'ventas@alvarado.com', contacto: 'Santiago Alvarado', notas: 'Proveedor principal de perfiles de aluminio y herrajes.', estado: 'activo' },
+    { id: 'PRV-002', nombre: 'Distribuidora Ferretera del Sur', ruc: '0190123456001', tipo: 'Empresa', direccion: 'Av. Remigio Crespo, Cuenca', telefono: '072814300', email: 'pedidos@ferresur.com', contacto: 'Patricia Muñoz', notas: 'Tornillería, herramientas manuales y consumibles de taller.', estado: 'activo' },
+    { id: 'PRV-003', nombre: 'Plásticos Industriales Ecuatorianos', ruc: '1790123456001', tipo: 'Empresa', direccion: 'Vía Chillo Jijón, Sangolquí', telefono: '022330900', email: 'ventas@plasticosec.com', contacto: 'Ing. Carlos Ortiz', notas: 'Láminas de acrílico, policarbonato y PVC espumado.', estado: 'activo' },
+    { id: 'PRV-004', nombre: 'Pinturas Cóndor', ruc: '1790012345001', tipo: 'Empresa', direccion: 'Panamericana Norte Km 11.5, Quito', telefono: '022485000', email: 'distribucion@condor.com.ec', contacto: 'Jorge Maldonado', notas: 'Pinturas automotrices, esmaltes y solventes.', estado: 'activo' },
+    { id: 'PRV-005', nombre: 'Madera y Tableros Novopan', ruc: '1790111222001', tipo: 'Empresa', direccion: 'Km 12 Vía Aloag, Mejía', telefono: '022380100', email: 'ventas@novopan.com.ec', contacto: 'Andrea Ramos', notas: 'Planchas de MDF, MDP y melamina de varios espesores y diseños.', estado: 'activo' },
+    { id: 'PRV-006', nombre: 'Vidriería Nacional Vidriocar', ruc: '0990123456001', tipo: 'Empresa', direccion: 'Av. Juan Tanca Marengo, Guayaquil', telefono: '042658900', email: 'despacho@vidriocar.com.ec', contacto: 'Esteban Falconí', notas: 'Vidrios templados, flotados y espejos a medida.', estado: 'activo' },
+    { id: 'PRV-007', nombre: 'MegaMetales S.A.', ruc: '0990888999001', tipo: 'Empresa', direccion: 'Km 10.5 Vía a Daule, Guayaquil', telefono: '042112233', email: 'info@megametales.com', contacto: 'Luis Villacís', notas: 'Tuberías de acero, planchas de hierro negro y galvanizado.', estado: 'activo' },
+    { id: 'PRV-008', nombre: 'Suministros Gráficos Ecuagráficos', ruc: '1791222333001', tipo: 'Empresa', direccion: 'Av. de la Prensa, Quito', telefono: '022445566', email: 'ventas@ecuagraficos.ec', contacto: 'Diana Ruiz', notas: 'Vinilos adhesivos, lonas para banner y tintas de impresión.', estado: 'activo' },
+    { id: 'PRV-009', nombre: 'Leds & Luces del Ecuador', ruc: '0928374651001', tipo: 'Persona', direccion: 'Bahía, Calle Chimborazo, Guayaquil', telefono: '0998877665', email: 'leds.luces@gmail.com', contacto: 'Manuel Coello', notas: 'Módulos LED, cintas LED, fuentes de poder y controladores.', estado: 'activo' },
+    { id: 'PRV-010', nombre: 'Seguridad Industrial Ecuatoriana', ruc: '1791888222001', tipo: 'Empresa', direccion: 'Av. 10 de Agosto, Quito', telefono: '022556677', email: 'equipos@seguridadec.com', contacto: 'Marta Solís', notas: 'Cascos, guantes, arneses y botas de seguridad para los instaladores.', estado: 'activo' }
+  ];
+
+  for (const proveedor of mockProveedores) {
+    await prisma.proveedor.create({
+      data: proveedor
+    });
+  }
+
   console.log('=== Sembrado finalizado con éxito ===');
 }
 
