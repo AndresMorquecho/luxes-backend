@@ -998,11 +998,13 @@ export class ProyectosController {
         });
       }
 
-      const faseInstalacion = proyecto.fases?.find((f) => f.fase === 'INSTALACION');
-      const datosInstalacion = parseFaseDatos(faseInstalacion?.datos) as InstalacionDatos;
-      const encuesta = datosInstalacion.encuestaSatisfaccion as Record<string, unknown> | undefined;
-      const instalacionCompletada =
-        datosInstalacion.instalacionCompletada === true
+      const requiereInstalacion = proyecto.requiereInstalacion === true;
+      const targetFaseName = requiereInstalacion ? 'INSTALACION' : 'COMPLETADO';
+      const faseTarget = proyecto.fases?.find((f) => f.fase === targetFaseName);
+      const datosTarget = parseFaseDatos(faseTarget?.datos) || {};
+      const encuesta = datosTarget.encuestaSatisfaccion as Record<string, unknown> | undefined;
+      const instalacionCompletada = !requiereInstalacion
+        || datosTarget.instalacionCompletada === true
         || proyecto.instalacion?.instalacionCompletada === true;
 
       return res.status(200).json({
@@ -1014,7 +1016,7 @@ export class ProyectosController {
           instalacionCompletada,
           encuestaCompletada: encuesta?.completada === true,
           encuesta: encuesta?.completada === true ? encuesta : null,
-          personal: await getPersonalEncuesta(proyecto.id, datosInstalacion, proyecto.instalacion),
+          personal: await getPersonalEncuesta(proyecto.id, datosTarget, proyecto.instalacion),
         },
       });
     } catch (error) {
@@ -1054,9 +1056,12 @@ export class ProyectosController {
         });
       }
 
-      const faseInstalacion = proyecto.fases?.find((f) => f.fase === 'INSTALACION');
-      const datosInstalacion = parseFaseDatos(faseInstalacion?.datos) as InstalacionDatos;
-      const encuestaAnterior = datosInstalacion.encuestaSatisfaccion as Record<string, unknown> | undefined;
+      const requiereInstalacion = proyecto.requiereInstalacion === true;
+      const targetFaseName = requiereInstalacion ? 'INSTALACION' : 'COMPLETADO';
+
+      const faseTarget = proyecto.fases?.find((f) => f.fase === targetFaseName);
+      const datosTarget = parseFaseDatos(faseTarget?.datos) || {};
+      const encuestaAnterior = datosTarget.encuestaSatisfaccion as Record<string, unknown> | undefined;
 
       if (encuestaAnterior?.completada === true) {
         return res.status(400).json({
@@ -1065,8 +1070,8 @@ export class ProyectosController {
         });
       }
 
-      const instalacionCompletada =
-        datosInstalacion.instalacionCompletada === true
+      const instalacionCompletada = !requiereInstalacion
+        || datosTarget.instalacionCompletada === true
         || proyecto.instalacion?.instalacionCompletada === true;
 
       if (!instalacionCompletada) {
@@ -1079,7 +1084,7 @@ export class ProyectosController {
         });
       }
 
-      const personalBase = await getPersonalEncuesta(proyecto.id, datosInstalacion, proyecto.instalacion);
+      const personalBase = await getPersonalEncuesta(proyecto.id, datosTarget, proyecto.instalacion);
       const personalCalificado = personalBase.map((p) => {
         const encontrado = calificacionesPersonal.find(
           (c: Record<string, unknown>) => {
@@ -1111,8 +1116,8 @@ export class ProyectosController {
         personal: personalCalificado,
       };
 
-      const datosActualizados: InstalacionDatos = {
-        ...datosInstalacion,
+      const datosActualizados = {
+        ...datosTarget,
         encuestaSatisfaccion,
       };
 
@@ -1120,7 +1125,7 @@ export class ProyectosController {
         where: {
           proyectoId_fase: {
             proyectoId: String(id),
-            fase: 'INSTALACION',
+            fase: targetFaseName,
           },
         },
         update: {
@@ -1128,7 +1133,7 @@ export class ProyectosController {
         },
         create: {
           proyectoId: String(id),
-          fase: 'INSTALACION',
+          fase: targetFaseName,
           completada: true,
           fechaCompletada: new Date(),
           datos: JSON.stringify(datosActualizados),
