@@ -7,6 +7,7 @@ import type {
   AbonoCompraData,
   CuentaPorPagarData,
   DetalleCompraInput,
+  DetalleCompraData,
 } from '../../../domain/ports/ComprasRepositoryPort.js';
 import webpush from 'web-push';
 import { env } from '../../../../../config/env.js';
@@ -53,7 +54,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     usuario: { select: { id: true, nombre: true, email: true, rol: true } },
     aprobadoPor: { select: { id: true, nombre: true, email: true, rol: true } },
     recibidoPor: { select: { id: true, nombre: true, email: true, rol: true } },
-    detalles: true,
+    detalles: { orderBy: { id: 'asc' as const } },
     abonos: { include: { metodoPago: true }, orderBy: { fecha: 'desc' as const } },
     cuentaPorPagar: true,
     proyecto: { select: { id: true, nombre: true } },
@@ -148,7 +149,26 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       where: { id },
       include: this.ordenInclude,
     });
-    return row as unknown as OrdenCompraData | null;
+    if (!row) return null;
+
+    // Carga explícita de detalles para garantizar que siempre lleguen al frontend
+    const detalles = await this.prisma.detalleCompra.findMany({
+      where: { ordenCompraId: id },
+      orderBy: { id: 'asc' },
+    });
+
+    return {
+      ...row,
+      detalles,
+    } as unknown as OrdenCompraData;
+  }
+
+  async findDetallesByOrdenId(ordenId: string): Promise<DetalleCompraData[]> {
+    const rows = await this.prisma.detalleCompra.findMany({
+      where: { ordenCompraId: ordenId },
+      orderBy: { id: 'asc' },
+    });
+    return rows as unknown as DetalleCompraData[];
   }
 
   async getNextOrdenNumero(): Promise<string> {
@@ -370,6 +390,9 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     let detailsChanged = false;
 
     if (data.detalles) {
+      if (data.detalles.length === 0) {
+        throw new Error('La orden debe conservar al menos un item.');
+      }
       detailsChanged = true;
       // Recalculate totals
       const detallesData = data.detalles.map(d => ({

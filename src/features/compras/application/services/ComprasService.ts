@@ -6,6 +6,7 @@ import type {
   AbonoCompraData,
   CuentaPorPagarData,
   DetalleCompraInput,
+  DetalleCompraData,
 } from '../../domain/ports/ComprasRepositoryPort.js';
 
 export class ComprasService {
@@ -71,6 +72,10 @@ export class ComprasService {
     return this.repo.findOrdenById(id);
   }
 
+  getOrdenDetalles(ordenId: string): Promise<DetalleCompraData[]> {
+    return this.repo.findDetallesByOrdenId(ordenId);
+  }
+
   async createOrden(data: {
     proveedorId?: string;
     usuarioId: string;
@@ -111,6 +116,9 @@ export class ComprasService {
   }): Promise<OrdenCompraData> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) throw new Error('Orden de compra no encontrada.');
+    if (data.detalles && data.detalles.length === 0) {
+      throw new Error('La orden debe conservar al menos un item.');
+    }
     return this.repo.updateOrden(id, data);
   }
 

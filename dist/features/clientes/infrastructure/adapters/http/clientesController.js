@@ -1,4 +1,29 @@
 import { prisma } from '../../../../../config/prismaClient.js';
+async function sincronizarClienteEnProyectosYProformas(cliente) {
+    const dataProyecto = {
+        clienteNombre: cliente.nombre,
+        clienteTelefono: cliente.telefono,
+        clienteEmail: cliente.email,
+        clienteDireccion: cliente.direccion,
+    };
+    if (cliente.tipo === 'Empresa') {
+        dataProyecto.clienteEmpresa = cliente.nombre;
+    }
+    await prisma.$transaction([
+        prisma.proyecto.updateMany({
+            where: { clienteId: cliente.id },
+            data: dataProyecto,
+        }),
+        prisma.proforma.updateMany({
+            where: { clienteId: cliente.id },
+            data: {
+                clienteNombre: cliente.nombre,
+                telefono: cliente.telefono,
+                email: cliente.email,
+            },
+        }),
+    ]);
+}
 /** Genera el siguiente ID con formato PREFIJO-### (ej. CLI-001) */
 async function nextClienteId() {
     const rows = await prisma.cliente.findMany({ select: { id: true } });
@@ -61,6 +86,7 @@ export class ClientesController {
                     notas: b.notas,
                 },
             });
+            await sincronizarClienteEnProyectosYProformas(cliente);
             return res.status(200).json({ success: true, data: cliente });
         }
         catch (error) {

@@ -33,7 +33,7 @@ export class PrismaComprasAdapter {
         usuario: { select: { id: true, nombre: true, email: true, rol: true } },
         aprobadoPor: { select: { id: true, nombre: true, email: true, rol: true } },
         recibidoPor: { select: { id: true, nombre: true, email: true, rol: true } },
-        detalles: true,
+        detalles: { orderBy: { id: 'asc' } },
         abonos: { include: { metodoPago: true }, orderBy: { fecha: 'desc' } },
         cuentaPorPagar: true,
         proyecto: { select: { id: true, nombre: true } },
@@ -107,7 +107,24 @@ export class PrismaComprasAdapter {
             where: { id },
             include: this.ordenInclude,
         });
-        return row;
+        if (!row)
+            return null;
+        // Carga explícita de detalles para garantizar que siempre lleguen al frontend
+        const detalles = await this.prisma.detalleCompra.findMany({
+            where: { ordenCompraId: id },
+            orderBy: { id: 'asc' },
+        });
+        return {
+            ...row,
+            detalles,
+        };
+    }
+    async findDetallesByOrdenId(ordenId) {
+        const rows = await this.prisma.detalleCompra.findMany({
+            where: { ordenCompraId: ordenId },
+            orderBy: { id: 'asc' },
+        });
+        return rows;
     }
     async getNextOrdenNumero() {
         const year = new Date().getFullYear();
@@ -291,6 +308,9 @@ export class PrismaComprasAdapter {
         let total = 0;
         let detailsChanged = false;
         if (data.detalles) {
+            if (data.detalles.length === 0) {
+                throw new Error('La orden debe conservar al menos un item.');
+            }
             detailsChanged = true;
             // Recalculate totals
             const detallesData = data.detalles.map(d => ({

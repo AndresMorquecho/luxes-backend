@@ -26,6 +26,9 @@ export class ComprasService {
     getOrdenById(id) {
         return this.repo.findOrdenById(id);
     }
+    getOrdenDetalles(ordenId) {
+        return this.repo.findDetallesByOrdenId(ordenId);
+    }
     async createOrden(data) {
         if (!data.detalles || data.detalles.length === 0) {
             throw new Error('La orden debe tener al menos un item de detalle.');
@@ -42,6 +45,9 @@ export class ComprasService {
         const orden = await this.repo.findOrdenById(id);
         if (!orden)
             throw new Error('Orden de compra no encontrada.');
+        if (data.detalles && data.detalles.length === 0) {
+            throw new Error('La orden debe conservar al menos un item.');
+        }
         return this.repo.updateOrden(id, data);
     }
     async deleteOrden(id) {

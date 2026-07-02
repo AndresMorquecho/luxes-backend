@@ -30,6 +30,7 @@ export function createComprasRoutes(ctrl: ComprasController): Router {
   // ── Órdenes de Compra ──────────────────────────────────────────────────────
   router.get('/',                          (req, res) => ctrl.listOrdenes(req, res));
   router.post('/',                         (req, res) => ctrl.createOrden(req, res));
+  router.get('/:id/detalles',              (req, res) => ctrl.getOrdenDetalles(req, res));
   router.get('/:id',                       (req, res) => ctrl.getOrdenById(req, res));
   router.put('/:id',                       requirePermissions(['aprobacion_ordenes_compra']), (req, res) => ctrl.updateOrden(req, res));
   router.delete('/:id',                    (req, res) => ctrl.deleteOrden(req, res));

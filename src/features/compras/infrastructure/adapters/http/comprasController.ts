@@ -87,6 +87,13 @@ export class ComprasController {
     } catch (e) { return this.fail(res, e); }
   }
 
+  async getOrdenDetalles(req: Request, res: Response) {
+    try {
+      const data = await this.service.getOrdenDetalles(String(req.params.id));
+      return this.ok(res, data);
+    } catch (e) { return this.fail(res, e); }
+  }
+
   async createOrden(req: Request, res: Response) {
     try {
       const userId = (req as any).user?.id;

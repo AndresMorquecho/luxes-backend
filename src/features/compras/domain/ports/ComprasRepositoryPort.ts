@@ -131,6 +131,8 @@ export interface ComprasRepositoryPort {
 
   findOrdenById(id: string): Promise<OrdenCompraData | null>;
 
+  findDetallesByOrdenId(ordenId: string): Promise<DetalleCompraData[]>;
+
   createOrden(data: {
     proveedorId?: string;
     usuarioId: string;
