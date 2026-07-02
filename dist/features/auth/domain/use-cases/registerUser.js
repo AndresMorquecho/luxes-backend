@@ -28,6 +28,9 @@ export async function registerUser({ nombre, email, username, password, rol }, {
         throw new ValidationError('El correo electrónico es requerido');
     if (!username?.trim())
         throw new ValidationError('El nombre de usuario es requerido');
+    if (username.trim().toLowerCase() === 'asistencia') {
+        throw new ValidationError('El nombre de usuario "asistencia" está reservado para el kiosco del sistema');
+    }
     if (!password || password.length < 6) {
         throw new ValidationError('La contraseña es requerida y debe tener al menos 6 caracteres');
     }

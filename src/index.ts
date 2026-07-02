@@ -21,16 +21,37 @@ import { createLandingRoutes } from './features/landing/infrastructure/routes/la
 
 
 async function bootstrap() {
+  // Limpieza de rol "asistencia" residual en base de datos si existiera
+  try {
+    const { prisma } = await import('./config/prismaClient.js');
+    const dbRole = await prisma.role.findFirst({
+      where: { name: { equals: 'asistencia', mode: 'insensitive' } },
+    });
+    if (dbRole) {
+      console.log(`[Bootstrap] Eliminando rol residual no deseado: ${dbRole.name}`);
+      await prisma.role.delete({ where: { id: dbRole.id } });
+    }
+  } catch (error) {
+    console.error('[Bootstrap] Error al limpiar rol asistencia:', error);
+  }
+
   // Usuario de kiosco: siempre debe existir en producción (sin resetear contraseña si ya existe)
   try {
     const { prisma } = await import('./config/prismaClient.js');
     const bcrypt = await import('bcryptjs');
-    const existing = await prisma.user.findUnique({ where: { username: 'asistencia' } });
+    const existing = await prisma.user.findFirst({
+      where: { username: { equals: 'asistencia', mode: 'insensitive' } }
+    });
 
     if (existing) {
       await prisma.user.update({
-        where: { username: 'asistencia' },
-        data: { rol: 'asistencia', roleId: null, estado: 'activo' },
+        where: { id: existing.id },
+        data: {
+          username: 'asistencia',
+          rol: 'asistencia',
+          roleId: null,
+          estado: 'activo'
+        },
       });
       console.log('[Bootstrap] Usuario asistencia verificado.');
     } else {
