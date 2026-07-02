@@ -133,6 +133,8 @@ export interface ComprasRepositoryPort {
 
   findDetallesByOrdenId(ordenId: string): Promise<DetalleCompraData[]>;
 
+  restoreDetallesIfEmpty(ordenId: string, detalles: DetalleCompraInput[]): Promise<OrdenCompraData>;
+
   createOrden(data: {
     proveedorId?: string;
     usuarioId: string;

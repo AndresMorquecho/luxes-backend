@@ -97,10 +97,37 @@ export class PrismaComprasAdapter {
             }),
             this.prisma.ordenCompra.count({ where }),
         ]);
+        const items = await this.attachDetallesToOrdenes(rows);
         return {
-            items: rows,
+            items: items,
             total,
         };
+    }
+    async loadDetallesForOrdenIds(ordenIds) {
+        if (!ordenIds.length)
+            return new Map();
+        const detalles = await this.prisma.detalleCompra.findMany({
+            where: { ordenCompraId: { in: ordenIds } },
+            include: {
+                material: { select: { id: true, nombre: true, codigo: true } },
+            },
+            orderBy: { id: 'asc' },
+        });
+        const byOrden = new Map();
+        for (const detalle of detalles) {
+            const ordenId = detalle.ordenCompraId;
+            const list = byOrden.get(ordenId) || [];
+            list.push(detalle);
+            byOrden.set(ordenId, list);
+        }
+        return byOrden;
+    }
+    async attachDetallesToOrdenes(rows) {
+        const byOrden = await this.loadDetallesForOrdenIds(rows.map((r) => r.id));
+        return rows.map((row) => ({
+            ...row,
+            detalles: byOrden.get(row.id) || [],
+        }));
     }
     async findOrdenById(id) {
         const row = await this.prisma.ordenCompra.findUnique({
@@ -109,22 +136,60 @@ export class PrismaComprasAdapter {
         });
         if (!row)
             return null;
-        // Carga explícita de detalles para garantizar que siempre lleguen al frontend
-        const detalles = await this.prisma.detalleCompra.findMany({
-            where: { ordenCompraId: id },
-            orderBy: { id: 'asc' },
-        });
+        const byOrden = await this.loadDetallesForOrdenIds([id]);
+        const detalles = byOrden.get(id) || [];
         return {
             ...row,
             detalles,
         };
     }
     async findDetallesByOrdenId(ordenId) {
-        const rows = await this.prisma.detalleCompra.findMany({
+        const byOrden = await this.loadDetallesForOrdenIds([ordenId]);
+        return byOrden.get(ordenId) || [];
+    }
+    async restoreDetallesIfEmpty(ordenId, detalles) {
+        const existing = await this.prisma.detalleCompra.count({
             where: { ordenCompraId: ordenId },
-            orderBy: { id: 'asc' },
         });
-        return rows;
+        if (existing > 0) {
+            const orden = await this.findOrdenById(ordenId);
+            if (!orden)
+                throw new Error('Orden de compra no encontrada.');
+            return orden;
+        }
+        if (!detalles?.length) {
+            throw new Error('No hay detalles para restaurar.');
+        }
+        const detallesRows = detalles.map((d) => {
+            const precioUnitario = d.precioUnitario ?? 0;
+            const cantidad = d.cantidad;
+            return {
+                ordenCompraId: ordenId,
+                descripcion: d.descripcion,
+                cantidad,
+                precioUnitario,
+                subtotal: cantidad * precioUnitario,
+                materialId: d.materialId || null,
+            };
+        });
+        await this.prisma.detalleCompra.createMany({ data: detallesRows });
+        const subtotal = detallesRows.reduce((sum, d) => sum + d.subtotal, 0);
+        const ordenActual = await this.prisma.ordenCompra.findUnique({
+            where: { id: ordenId },
+            select: { impuesto: true },
+        });
+        const impuesto = ordenActual?.impuesto ?? 0;
+        await this.prisma.ordenCompra.update({
+            where: { id: ordenId },
+            data: {
+                subtotal,
+                total: subtotal + impuesto,
+            },
+        });
+        const restored = await this.findOrdenById(ordenId);
+        if (!restored)
+            throw new Error('Orden de compra no encontrada.');
+        return restored;
     }
     async getNextOrdenNumero() {
         const year = new Date().getFullYear();

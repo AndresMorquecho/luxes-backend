@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
-import { requirePermissions } from '../../../auth/infrastructure/middleware/roleMiddleware.js';
 export function createComprasRoutes(ctrl) {
     const router = Router();
     // Todos los endpoints de compras requieren autenticación
@@ -23,8 +22,9 @@ export function createComprasRoutes(ctrl) {
     router.get('/', (req, res) => ctrl.listOrdenes(req, res));
     router.post('/', (req, res) => ctrl.createOrden(req, res));
     router.get('/:id/detalles', (req, res) => ctrl.getOrdenDetalles(req, res));
+    router.post('/:id/restaurar-detalles', (req, res) => ctrl.restoreOrdenDetalles(req, res));
     router.get('/:id', (req, res) => ctrl.getOrdenById(req, res));
-    router.put('/:id', requirePermissions(['aprobacion_ordenes_compra']), (req, res) => ctrl.updateOrden(req, res));
+    router.put('/:id', (req, res) => ctrl.updateOrden(req, res));
     router.delete('/:id', (req, res) => ctrl.deleteOrden(req, res));
     // ── Abonos por Orden ───────────────────────────────────────────────────────
     router.get('/:id/abonos', (req, res) => ctrl.listAbonos(req, res));

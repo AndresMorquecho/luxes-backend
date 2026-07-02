@@ -76,6 +76,17 @@ export class ComprasService {
     return this.repo.findDetallesByOrdenId(ordenId);
   }
 
+  restoreOrdenDetalles(ordenId: string, detalles: DetalleCompraInput[]): Promise<OrdenCompraData> {
+    if (!detalles?.length) {
+      throw new Error('Debe indicar al menos un detalle para restaurar.');
+    }
+    for (const d of detalles) {
+      if (!d.descripcion?.trim()) throw new Error('Cada detalle debe tener descripción.');
+      if (d.cantidad <= 0) throw new Error('La cantidad debe ser mayor a 0.');
+    }
+    return this.repo.restoreDetallesIfEmpty(ordenId, detalles);
+  }
+
   async createOrden(data: {
     proveedorId?: string;
     usuarioId: string;

@@ -138,10 +138,39 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       this.prisma.ordenCompra.count({ where }),
     ]);
 
+    const items = await this.attachDetallesToOrdenes(rows);
+
     return {
-      items: rows as unknown as OrdenCompraData[],
+      items: items as unknown as OrdenCompraData[],
       total,
     };
+  }
+
+  private async loadDetallesForOrdenIds(ordenIds: string[]) {
+    if (!ordenIds.length) return new Map<string, DetalleCompraData[]>();
+    const detalles = await this.prisma.detalleCompra.findMany({
+      where: { ordenCompraId: { in: ordenIds } },
+      include: {
+        material: { select: { id: true, nombre: true, codigo: true } },
+      },
+      orderBy: { id: 'asc' },
+    });
+    const byOrden = new Map<string, DetalleCompraData[]>();
+    for (const detalle of detalles) {
+      const ordenId = detalle.ordenCompraId;
+      const list = byOrden.get(ordenId) || [];
+      list.push(detalle as unknown as DetalleCompraData);
+      byOrden.set(ordenId, list);
+    }
+    return byOrden;
+  }
+
+  private async attachDetallesToOrdenes<T extends { id: string }>(rows: T[]): Promise<(T & { detalles: DetalleCompraData[] })[]> {
+    const byOrden = await this.loadDetallesForOrdenIds(rows.map((r) => r.id));
+    return rows.map((row) => ({
+      ...row,
+      detalles: byOrden.get(row.id) || [],
+    }));
   }
 
   async findOrdenById(id: string): Promise<OrdenCompraData | null> {
@@ -151,11 +180,8 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     });
     if (!row) return null;
 
-    // Carga explícita de detalles para garantizar que siempre lleguen al frontend
-    const detalles = await this.prisma.detalleCompra.findMany({
-      where: { ordenCompraId: id },
-      orderBy: { id: 'asc' },
-    });
+    const byOrden = await this.loadDetallesForOrdenIds([id]);
+    const detalles = byOrden.get(id) || [];
 
     return {
       ...row,
@@ -164,11 +190,60 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
   }
 
   async findDetallesByOrdenId(ordenId: string): Promise<DetalleCompraData[]> {
-    const rows = await this.prisma.detalleCompra.findMany({
+    const byOrden = await this.loadDetallesForOrdenIds([ordenId]);
+    return byOrden.get(ordenId) || [];
+  }
+
+  async restoreDetallesIfEmpty(
+    ordenId: string,
+    detalles: DetalleCompraInput[],
+  ): Promise<OrdenCompraData> {
+    const existing = await this.prisma.detalleCompra.count({
       where: { ordenCompraId: ordenId },
-      orderBy: { id: 'asc' },
     });
-    return rows as unknown as DetalleCompraData[];
+    if (existing > 0) {
+      const orden = await this.findOrdenById(ordenId);
+      if (!orden) throw new Error('Orden de compra no encontrada.');
+      return orden;
+    }
+
+    if (!detalles?.length) {
+      throw new Error('No hay detalles para restaurar.');
+    }
+
+    const detallesRows = detalles.map((d) => {
+      const precioUnitario = d.precioUnitario ?? 0;
+      const cantidad = d.cantidad;
+      return {
+        ordenCompraId: ordenId,
+        descripcion: d.descripcion,
+        cantidad,
+        precioUnitario,
+        subtotal: cantidad * precioUnitario,
+        materialId: d.materialId || null,
+      };
+    });
+
+    await this.prisma.detalleCompra.createMany({ data: detallesRows });
+
+    const subtotal = detallesRows.reduce((sum, d) => sum + d.subtotal, 0);
+    const ordenActual = await this.prisma.ordenCompra.findUnique({
+      where: { id: ordenId },
+      select: { impuesto: true },
+    });
+    const impuesto = ordenActual?.impuesto ?? 0;
+
+    await this.prisma.ordenCompra.update({
+      where: { id: ordenId },
+      data: {
+        subtotal,
+        total: subtotal + impuesto,
+      },
+    });
+
+    const restored = await this.findOrdenById(ordenId);
+    if (!restored) throw new Error('Orden de compra no encontrada.');
+    return restored;
   }
 
   async getNextOrdenNumero(): Promise<string> {

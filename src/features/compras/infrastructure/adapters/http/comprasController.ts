@@ -110,15 +110,80 @@ export class ComprasController {
 
   async updateOrden(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.id;
+      const user = (req as any).user;
+      const userId = user?.id;
+      const id = String(req.params.id);
+      const orden = await this.service.getOrdenById(id);
+      if (!orden) {
+        return res.status(404).json({ success: false, error: { message: 'Orden no encontrada.' } });
+      }
+
+      const rol = (user?.rol || '').toLowerCase();
+      const isAdmin = rol === 'admin' || rol === 'administrador';
+      const hasAprobacion = isAdmin || user?.permissions?.includes('aprobacion_ordenes_compra');
+      const isCreatorPending =
+        orden.usuarioId === userId && orden.estado === 'pendiente_aprobacion';
+
       const updateData = { ...req.body };
-      
-      // Si se está aprobando la orden, agregar el usuario que aprueba
+      const isApprovalAction =
+        updateData.estado === 'aprobada' || updateData.estado === 'rechazada';
+
+      if (isApprovalAction && !hasAprobacion) {
+        return res.status(403).json({
+          success: false,
+          error: { message: 'No tienes permiso para aprobar o rechazar órdenes.' },
+        });
+      }
+
+      if (!hasAprobacion && !isCreatorPending) {
+        return res.status(403).json({
+          success: false,
+          error: { message: 'No tienes permiso para modificar esta orden.' },
+        });
+      }
+
+      if (!hasAprobacion && isCreatorPending) {
+        delete updateData.estado;
+        delete updateData.aprobadoPorId;
+        delete updateData.abonoMonto;
+        delete updateData.metodoPagoId;
+        delete updateData.abonoReferencia;
+      }
+
       if (updateData.estado === 'aprobada' && userId) {
         updateData.aprobadoPorId = userId;
       }
-      
-      const data = await this.service.updateOrden(String(req.params.id), updateData);
+
+      const data = await this.service.updateOrden(id, updateData);
+      return this.ok(res, data);
+    } catch (e) { return this.fail(res, e, 400); }
+  }
+
+  async restoreOrdenDetalles(req: Request, res: Response) {
+    try {
+      const user = (req as any).user;
+      const userId = user?.id;
+      const id = String(req.params.id);
+      const orden = await this.service.getOrdenById(id);
+      if (!orden) {
+        return res.status(404).json({ success: false, error: { message: 'Orden no encontrada.' } });
+      }
+
+      const rol = (user?.rol || '').toLowerCase();
+      const isAdmin = rol === 'admin' || rol === 'administrador';
+      const hasAprobacion = isAdmin || user?.permissions?.includes('aprobacion_ordenes_compra');
+      const isCreatorPending =
+        orden.usuarioId === userId && orden.estado === 'pendiente_aprobacion';
+
+      if (!hasAprobacion && !isCreatorPending) {
+        return res.status(403).json({
+          success: false,
+          error: { message: 'No tienes permiso para restaurar detalles de esta orden.' },
+        });
+      }
+
+      const detalles = Array.isArray(req.body?.detalles) ? req.body.detalles : [];
+      const data = await this.service.restoreOrdenDetalles(id, detalles);
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }
   }
