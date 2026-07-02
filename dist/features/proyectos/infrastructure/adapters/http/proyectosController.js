@@ -172,6 +172,7 @@ const PROGRESO_POR_FASE = {
     COMPLETADO: 100,
 };
 const proyectoInclude = {
+    cliente: true,
     fases: true,
     instalacion: {
         include: {
@@ -188,18 +189,32 @@ const proyectoInclude = {
         include: { detalles: true, proveedor: true }
     }
 };
+function mapClienteProyecto(p) {
+    const live = p.cliente;
+    if (live) {
+        const esEmpresa = live.tipo === 'Empresa';
+        return {
+            nombre: live.nombre || p.clienteNombre || '',
+            empresa: esEmpresa ? live.nombre : (p.clienteEmpresa || ''),
+            telefono: live.telefono ?? p.clienteTelefono ?? '',
+            email: live.email ?? p.clienteEmail ?? '',
+            direccion: live.direccion ?? p.clienteDireccion ?? '',
+        };
+    }
+    return {
+        nombre: p.clienteNombre,
+        empresa: p.clienteEmpresa,
+        telefono: p.clienteTelefono,
+        email: p.clienteEmail,
+        direccion: p.clienteDireccion,
+    };
+}
 function mapProyecto(p) {
     return {
         id: p.id,
         nombre: p.nombre,
         clienteId: p.clienteId,
-        cliente: {
-            nombre: p.clienteNombre,
-            empresa: p.clienteEmpresa,
-            telefono: p.clienteTelefono,
-            email: p.clienteEmail,
-            direccion: p.clienteDireccion,
-        },
+        cliente: mapClienteProyecto(p),
         responsable: p.responsable,
         requiereInstalacion: p.requiereInstalacion,
         faseActual: p.faseActual,
@@ -281,7 +296,7 @@ export class ProyectosController {
         try {
             const { page = '1', limit = '20', search = '', estado = '', faseActual = '', prioridad = '', } = req.query;
             const pageNum = Math.max(1, parseInt(String(page), 10));
-            const limitNum = Math.max(1, Math.min(100, parseInt(String(limit), 10)));
+            const limitNum = Math.max(1, Math.min(1000, parseInt(String(limit), 10)));
             const skip = (pageNum - 1) * limitNum;
             const where = {};
             if (estado && String(estado).trim()) {
@@ -562,6 +577,16 @@ export class ProyectosController {
                 ...datosInstalacionAnterior,
                 ...datos,
             };
+            const faseAnterior = proyecto.fases?.find((f) => f.fase === String(fase));
+            let datosFaseAnterior = {};
+            if (faseAnterior?.datos) {
+                try {
+                    datosFaseAnterior = JSON.parse(faseAnterior.datos);
+                }
+                catch (e) {
+                    console.error(e);
+                }
+            }
             if (String(fase) === 'INSTALACION' && datos.instalacionCompletada === true) {
                 const errores = getInstalacionCompletionErrors(datosMerged, proyecto.ordenesCompra || []);
                 if (errores.length > 0) {
@@ -575,8 +600,10 @@ export class ProyectosController {
                     });
                 }
             }
-            // Actualizar o crear la fase
-            const datosAGuardar = String(fase) === 'INSTALACION' ? datosMerged : datos;
+            // Actualizar o crear la fase (merge con datos previos para no perder archivos u otros campos)
+            const datosAGuardar = String(fase) === 'INSTALACION'
+                ? datosMerged
+                : { ...datosFaseAnterior, ...datos };
             await prisma.proyectoFase.upsert({
                 where: {
                     proyectoId_fase: {

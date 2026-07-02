@@ -156,8 +156,21 @@ export class ProformasController {
             const skip = (pageNum - 1) * limitNum;
             // Construir filtros dinámicos
             const where = {};
+            const andFilters = [];
+            // Incluir proformas vinculadas por clienteId o por nombre (legacy sin FK)
             if (clienteId && String(clienteId).trim()) {
-                where.clienteId = String(clienteId).trim();
+                const cid = String(clienteId).trim();
+                const cliente = await prisma.cliente.findUnique({
+                    where: { id: cid },
+                    select: { nombre: true },
+                });
+                const clienteOr = [{ clienteId: cid }];
+                if (cliente?.nombre) {
+                    clienteOr.push({
+                        clienteNombre: { equals: cliente.nombre, mode: 'insensitive' },
+                    });
+                }
+                andFilters.push({ OR: clienteOr });
             }
             // Excluir rechazadas por defecto a menos que se busque específicamente
             if (estado && String(estado).trim()) {
@@ -178,12 +191,17 @@ export class ProformasController {
             // Búsqueda por texto (cliente, ID, teléfono, email)
             if (search && String(search).trim()) {
                 const searchTerm = String(search).trim();
-                where.OR = [
-                    { clienteNombre: { contains: searchTerm, mode: 'insensitive' } },
-                    { id: { contains: searchTerm, mode: 'insensitive' } },
-                    { telefono: { contains: searchTerm } },
-                    { email: { contains: searchTerm, mode: 'insensitive' } },
-                ];
+                andFilters.push({
+                    OR: [
+                        { clienteNombre: { contains: searchTerm, mode: 'insensitive' } },
+                        { id: { contains: searchTerm, mode: 'insensitive' } },
+                        { telefono: { contains: searchTerm } },
+                        { email: { contains: searchTerm, mode: 'insensitive' } },
+                    ],
+                });
+            }
+            if (andFilters.length > 0) {
+                where.AND = andFilters;
             }
             // Filtro por rango de fechas
             if (fechaDesde || fechaHasta) {

@@ -49,6 +49,9 @@ export class AuthService {
         return users.map((u) => u.toPublic());
     }
     async createUser(data, adminUser) {
+        if (data.username && data.username.toLowerCase() === 'asistencia') {
+            throw new Error('El nombre de usuario "asistencia" está reservado para el kiosco del sistema.');
+        }
         const user = await registerUser({
             nombre: data.nombre,
             email: data.email,
@@ -111,6 +114,12 @@ export class AuthService {
         const user = await this.userRepository.findById(id);
         if (!user)
             throw new Error('Usuario no encontrado');
+        if (user.username.toLowerCase() === 'asistencia') {
+            throw new Error('El usuario de asistencia no se puede editar, únicamente cambiar su contraseña.');
+        }
+        if (data.username && data.username.toLowerCase() === 'asistencia') {
+            throw new Error('El nombre de usuario "asistencia" está reservado para el kiosco del sistema.');
+        }
         user.nombre = data.nombre ?? user.nombre;
         user.email = data.email ?? user.email;
         user.username = data.username ?? user.username;
@@ -173,6 +182,9 @@ export class AuthService {
         const user = await this.userRepository.findById(id);
         if (!user)
             throw new Error('Usuario no encontrado');
+        if (user.username.toLowerCase() === 'asistencia') {
+            throw new Error('El usuario de asistencia no se puede desactivar.');
+        }
         user.estado = user.estado === 'activo' ? 'inactivo' : 'activo';
         const updated = await this.userRepository.update(user);
         // Registrar en auditoría
@@ -211,6 +223,9 @@ export class AuthService {
         const user = await this.userRepository.findById(id);
         if (!user)
             throw new Error('Usuario no encontrado');
+        if (user.username.toLowerCase() === 'asistencia') {
+            throw new Error('El usuario de asistencia no se puede eliminar.');
+        }
         const result = await this.userRepository.delete(id);
         // Sync deletion with Empleado
         if (user.empleadoId) {
