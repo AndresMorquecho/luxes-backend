@@ -1,151 +1,251 @@
+/**
+ * Inserta notificaciones de prueba para todos los roles.
+ * No borra notificaciones existentes (append-only).
+ *
+ * Uso: npm run db:seed-notifications
+ * Borrar previas de prueba y recrear: npm run db:seed-notifications -- --fresh
+ */
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const fresh = process.argv.includes('--fresh');
+const SEED_MARKER = '[seed-prueba]';
 
-const notificationsData = [
-  {
-    title: 'Nueva Orden de Compra',
-    message: 'Se ha generado la orden de compra OC-2026-0042 por un valor de $1,250.00 pendiente de aprobación.',
-    rol: 'admin',
-    permission: 'aprobacion_ordenes_compra',
-    createdBy: 'María Fernanda Torres',
-    createdAt: new Date('2026-06-24T09:15:00'),
-    isRead: false,
-  },
-  {
-    title: 'Nueva Orden de Compra',
-    message: 'Se ha generado la orden de compra OC-2026-0043 por un valor de $890.50 pendiente de aprobación.',
-    rol: 'administrador',
-    permission: 'aprobacion_ordenes_compra',
-    createdBy: 'Taller Técnico',
-    createdAt: new Date('2026-06-24T11:30:00'),
-    isRead: false,
-  },
-  {
-    title: 'Orden de Compra Aprobada',
-    message: 'La orden de compra OC-2026-0038 ha sido aprobada.',
-    rol: 'taller',
-    createdBy: 'Andrés Israel',
-    createdAt: new Date('2026-06-24T14:00:00'),
-    isRead: false,
-  },
-  {
-    title: 'Tarea Iniciada',
-    message: 'María Fernanda Torres empezó con la tarea "Revisar diseño stand feria" el 24/06/2026 08:45.',
-    rol: 'admin',
-    createdBy: 'María Fernanda Torres',
-    createdAt: new Date('2026-06-24T08:45:00'),
-    isRead: false,
-  },
-  {
-    title: 'Tarea Finalizada',
-    message: 'Impresor Principal terminó la tarea "Imprimir vinilos proyecto Acme" el 24/06/2026 16:20.',
-    rol: 'administrador',
-    createdBy: 'Impresor Principal',
-    createdAt: new Date('2026-06-24T16:20:00'),
-    isRead: false,
-  },
-  {
-    title: 'Nueva Tarea Asignada',
-    message: 'Se te ha asignado la tarea "Preparar materiales instalación" con prioridad alta.',
-    rol: 'taller',
-    createdBy: 'Andrés Israel',
-    createdAt: new Date('2026-06-25T07:00:00'),
-    isRead: false,
-  },
-  {
-    title: 'Nuevo Trabajo de Impresión',
-    message: 'Se ha enviado el documento "Banner 3x2m - Feria Comercial" para Cliente Global S.A. a la cola de impresión.',
-    rol: 'impresion',
-    createdBy: 'Diseñador Creativo',
-    createdAt: new Date('2026-06-25T08:30:00'),
-    isRead: false,
-  },
-  {
-    title: 'Nuevo Trabajo de Impresión',
-    message: 'Se ha enviado el documento "Lona publicitaria 4x6m" para Restaurante El Buen Sabor a la cola de impresión.',
-    rol: 'taller',
-    createdBy: 'María Fernanda Torres',
-    createdAt: new Date('2026-06-25T09:45:00'),
-    isRead: false,
-  },
-  {
-    title: 'Diseño Aprobado',
-    message: 'El cliente aprobó el diseño del proyecto "Stand Expo 2026". Listo para producción.',
-    rol: 'impresion',
-    createdBy: 'María Fernanda Torres',
-    createdAt: new Date('2026-06-23T15:10:00'),
-    isRead: false,
-  },
-  {
-    title: 'Solicitud de Materiales',
-    message: 'El taller solicita 15 planchas de acrílico 3mm para el proyecto INST-2026-012.',
-    rol: 'admin',
-    createdBy: 'Taller Técnico',
-    createdAt: new Date('2026-06-23T10:00:00'),
-    isRead: false,
-  },
-  {
-    title: 'Recepción de Insumos Pendiente',
-    message: 'La orden de compra OC-2026-0035 fue aprobada. Pendiente recepción en bodega.',
-    rol: 'taller',
-    createdBy: 'Administración',
-    createdAt: new Date('2026-06-22T13:30:00'),
-    isRead: false,
-  },
-  {
-    title: 'Proforma Aprobada',
-    message: 'La proforma PF-2026-0089 del cliente Constructora Andina fue aprobada por el cliente.',
-    rol: 'administrador',
-    createdBy: 'María Fernanda Torres',
-    createdAt: new Date('2026-06-22T09:00:00'),
-    isRead: false,
-  },
-];
+type NotifInput = {
+  title: string;
+  message: string;
+  rol?: string;
+  permission?: string;
+  userId?: string;
+  createdBy?: string;
+  createdAt?: Date;
+  isRead?: boolean;
+};
+
+function hoursAgo(h: number): Date {
+  return new Date(Date.now() - h * 60 * 60 * 1000);
+}
 
 async function main() {
-  await prisma.notification.deleteMany({});
-
   const admin = await prisma.user.findFirst({
-    where: { OR: [{ username: 'admin' }, { rol: { in: ['admin', 'Administrador', 'administrador'] } }] },
+    where: {
+      OR: [
+        { username: 'MorquechoI' },
+        { username: 'admin' },
+        { rol: { in: ['Administrador', 'admin', 'administrador'] } },
+      ],
+    },
+    orderBy: { username: 'asc' },
   });
-  const taller = await prisma.user.findFirst({ where: { username: 'taller' } });
+  const taller = await prisma.user.findFirst({
+    where: { OR: [{ username: 'taller' }, { rol: 'Taller' }] },
+  });
+  const impresion = await prisma.user.findFirst({
+    where: { OR: [{ username: 'impresion' }, { rol: 'Impresión' }] },
+  });
+  const ventas = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { username: 'ventas' },
+        { username: 'MaybeO' },
+        { rol: 'Ventas' },
+      ],
+    },
+  });
+  const disenador = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { username: 'disenador' },
+        { username: 'JoseA' },
+        { rol: { in: ['Diseñador', 'Ventas / Diseñador'] } },
+      ],
+    },
+  });
 
-  const userSpecific = admin
-    ? [
-        {
-          title: 'Recordatorio de Cierre',
-          message: 'Recuerda revisar las órdenes de compra pendientes de aprobación antes del cierre del día.',
-          userId: admin.id,
-          createdBy: 'Sistema Luxes',
-          createdAt: new Date('2026-06-25T06:00:00'),
-          isRead: false,
-        },
-      ]
-    : [];
+  if (fresh) {
+    const deleted = await prisma.notification.deleteMany({
+      where: { message: { contains: SEED_MARKER } },
+    });
+    console.log(`Eliminadas ${deleted.count} notificaciones de prueba anteriores.`);
+  }
 
-  const tallerSpecific = taller
-    ? [
-        {
-          title: 'Instalación Programada',
-          message: 'Instalación confirmada para mañana 26/06 a las 09:00 en Centro Comercial Mall del Sol.',
-          userId: taller.id,
-          createdBy: 'María Fernanda Torres',
-          createdAt: new Date('2026-06-25T10:15:00'),
-          isRead: false,
-        },
-      ]
-    : [];
+  const roleNotifications: NotifInput[] = [
+    {
+      title: 'Nueva Orden de Compra',
+      message: `${SEED_MARKER} Se ha generado la orden ORC-2026-042 por $1,250.00 pendiente de aprobación.`,
+      rol: 'admin',
+      permission: 'aprobacion_ordenes_compra',
+      createdBy: 'JimmyE',
+      createdAt: hoursAgo(2),
+    },
+    {
+      title: 'Nuevo Proyecto con Instalación',
+      message: `${SEED_MARKER} Se ha generado el nuevo proyecto "letrero" (PROY-006) con instalación en sitio.`,
+      rol: 'administrador',
+      createdBy: admin?.nombre || 'MORQUECHO IVETTE',
+      createdAt: hoursAgo(4),
+    },
+    {
+      title: 'Proforma Aprobada',
+      message: `${SEED_MARKER} La proforma PRO-2026-015 del cliente Constructora Andina fue aprobada.`,
+      rol: 'admin',
+      createdBy: 'MaybeO',
+      createdAt: hoursAgo(8),
+    },
+    {
+      title: 'Instalación Iniciada',
+      message: `${SEED_MARKER} El equipo técnico inició la instalación del proyecto PROY-006 en La Carolina, Quito.`,
+      rol: 'administrador',
+      createdBy: 'Taller Técnico',
+      createdAt: hoursAgo(12),
+    },
+    {
+      title: 'Horas Extras Pendientes',
+      message: `${SEED_MARKER} Hay 3 registros de horas extras pendientes de aprobación en nómina.`,
+      rol: 'admin',
+      createdBy: 'Sistema Luxes',
+      createdAt: hoursAgo(20),
+    },
+    {
+      title: 'Orden de Compra Aprobada',
+      message: `${SEED_MARKER} La orden ORC-2026-038 ha sido aprobada. Puedes retirar materiales en bodega.`,
+      rol: 'taller',
+      createdBy: admin?.nombre || 'Administración',
+      createdAt: hoursAgo(1),
+    },
+    {
+      title: 'Nueva Tarea Asignada',
+      message: `${SEED_MARKER} Se te asignó la tarea "Montaje letrero PROY-006" con prioridad alta.`,
+      rol: 'taller',
+      createdBy: 'MORQUECHO IVETTE',
+      createdAt: hoursAgo(3),
+    },
+    {
+      title: 'Instalación Programada',
+      message: `${SEED_MARKER} Instalación confirmada para mañana 09:00 en Av. República, Quito (PROY-006).`,
+      rol: 'taller',
+      createdBy: 'MaybeO',
+      createdAt: hoursAgo(6),
+    },
+    {
+      title: 'Recepción de Insumos Pendiente',
+      message: `${SEED_MARKER} La orden ORC-2026-035 fue aprobada. Pendiente recepción en bodega.`,
+      rol: 'taller',
+      createdBy: 'Administración',
+      createdAt: hoursAgo(10),
+    },
+    {
+      title: 'Nuevo Trabajo de Impresión',
+      message: `${SEED_MARKER} Documento "Banner 3x2m - Feria" enviado a cola. [PROYECTO_ID:PROY-006]`,
+      rol: 'impresion',
+      createdBy: 'JoseA',
+      createdAt: hoursAgo(1.5),
+    },
+    {
+      title: 'Diseño Aprobado - Listo para Impresión',
+      message: `${SEED_MARKER} El diseño del proyecto PROY-006 fue aprobado por el cliente.`,
+      rol: 'impresion',
+      createdBy: admin?.nombre || 'Ventas',
+      createdAt: hoursAgo(5),
+    },
+    {
+      title: 'Impresión en Cola',
+      message: `${SEED_MARKER} Lona publicitaria 4x6m agregada a la cola de impresión.`,
+      rol: 'impresion',
+      createdBy: 'CristoferS',
+      createdAt: hoursAgo(9),
+    },
+    {
+      title: 'Proforma Rechazada',
+      message: `${SEED_MARKER} El cliente rechazó la proforma PRO-2026-011. Revisar cotización.`,
+      rol: 'ventas',
+      createdBy: 'Cliente',
+      createdAt: hoursAgo(2.5),
+    },
+    {
+      title: 'Proyecto Avanzó a Diseño',
+      message: `${SEED_MARKER} El proyecto PROY-006 pasó a fase de Diseño. Revisar arte pendiente.`,
+      rol: 'ventas',
+      createdBy: 'Sistema Luxes',
+      createdAt: hoursAgo(7),
+    },
+    {
+      title: 'Arte Pendiente de Aprobación',
+      message: `${SEED_MARKER} El proyecto PROY-006 tiene diseño listo. Falta fecha de aprobación del cliente.`,
+      rol: 'disenador',
+      createdBy: 'MaybeO',
+      createdAt: hoursAgo(4.5),
+    },
+    {
+      title: 'Nuevo Proyecto Asignado',
+      message: `${SEED_MARKER} Proyecto "letrero" (PROY-006) asignado para diseño e impresión.`,
+      rol: 'disenador',
+      createdBy: admin?.nombre || 'Ventas',
+      createdAt: hoursAgo(11),
+    },
+  ];
 
-  const allNotifications = [...notificationsData, ...userSpecific, ...tallerSpecific];
+  const userSpecific: NotifInput[] = [];
 
+  if (admin) {
+    userSpecific.push(
+      {
+        title: 'Recordatorio de Cierre',
+        message: `${SEED_MARKER} Revisa órdenes de compra y aprobaciones pendientes antes del cierre del día.`,
+        userId: admin.id,
+        createdBy: 'Sistema Luxes',
+        createdAt: hoursAgo(0.5),
+      },
+      {
+        title: 'Instalación Completada',
+        message: `${SEED_MARKER} Taller reportó instalación completada en PROY-006. Pendiente encuesta al cliente.`,
+        userId: admin.id,
+        createdBy: 'Taller Técnico',
+        createdAt: hoursAgo(3.5),
+      },
+    );
+  }
+
+  if (taller) {
+    userSpecific.push({
+      title: 'Solicitud de Materiales',
+      message: `${SEED_MARKER} Bodega confirmó disponibilidad de vinilo para PROY-006.`,
+      userId: taller.id,
+      createdBy: 'Bodega',
+      createdAt: hoursAgo(2.2),
+    });
+  }
+
+  const all = [...roleNotifications, ...userSpecific];
   let created = 0;
-  for (const notif of allNotifications) {
-    await prisma.notification.create({ data: notif });
+
+  for (const notif of all) {
+    await prisma.notification.create({
+      data: {
+        title: notif.title,
+        message: notif.message,
+        rol: notif.rol?.toLowerCase() ?? null,
+        permission: notif.permission ?? null,
+        userId: notif.userId ?? null,
+        createdBy: notif.createdBy ?? 'Sistema Luxes',
+        createdAt: notif.createdAt ?? new Date(),
+        isRead: notif.isRead ?? false,
+      },
+    });
     created++;
   }
 
-  console.log(`✓ ${created} notificaciones de ejemplo creadas correctamente.`);
+  console.log(`\n✓ ${created} notificaciones de prueba creadas.`);
+  console.log('  Marcador en mensaje:', SEED_MARKER);
+  console.log('  Admin objetivo:', admin ? `${admin.username} (${admin.nombre})` : 'no encontrado');
+  console.log('  Taller:', taller?.username ?? '—');
+  console.log('  Impresión:', impresion?.username ?? '—');
+  console.log('  Ventas:', ventas?.username ?? '—');
+  console.log('  Diseñador:', disenador?.username ?? '—');
+  console.log('\nRecarga /notificaciones en el frontend para verlas.');
+  if (!fresh) {
+    console.log('Para reemplazar pruebas anteriores: npm run db:seed-notifications -- --fresh\n');
+  }
 }
 
 main()

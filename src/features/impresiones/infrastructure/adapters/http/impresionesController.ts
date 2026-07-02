@@ -52,6 +52,25 @@ export class ImpresionesController {
   async create(req: Request, res: Response): Promise<Response> {
     try {
       const b = req.body || {};
+
+      if (b.proyectoId) {
+        const existing = await prisma.impresionJob.findFirst({
+          where: {
+            proyectoId: String(b.proyectoId),
+            status: { not: 'Cancelado' },
+          },
+        });
+        if (existing) {
+          return res.status(409).json({
+            success: false,
+            error: {
+              code: 'ALREADY_SENT',
+              message:
+                'Este proyecto ya fue enviado a impresión. Solo se permite un envío; sigue el avance en la cola de impresión.',
+            },
+          });
+        }
+      }
       
       const maxPosition = await prisma.impresionJob.aggregate({
         _max: { position: true },

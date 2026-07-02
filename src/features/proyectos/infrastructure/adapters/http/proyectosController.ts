@@ -633,7 +633,15 @@ export class ProyectosController {
         ...(datos as InstalacionDatos),
       };
 
-
+      const faseAnterior = proyecto.fases?.find((f) => f.fase === String(fase));
+      let datosFaseAnterior: Record<string, unknown> = {};
+      if (faseAnterior?.datos) {
+        try {
+          datosFaseAnterior = JSON.parse(faseAnterior.datos);
+        } catch (e) {
+          console.error(e);
+        }
+      }
 
       if (String(fase) === 'INSTALACION' && datos.instalacionCompletada === true) {
         const errores = getInstalacionCompletionErrors(
@@ -652,8 +660,11 @@ export class ProyectosController {
         }
       }
 
-      // Actualizar o crear la fase
-      const datosAGuardar = String(fase) === 'INSTALACION' ? datosMerged : datos;
+      // Actualizar o crear la fase (merge con datos previos para no perder archivos u otros campos)
+      const datosAGuardar =
+        String(fase) === 'INSTALACION'
+          ? datosMerged
+          : { ...datosFaseAnterior, ...(datos as Record<string, unknown>) };
 
       await prisma.proyectoFase.upsert({
         where: {
