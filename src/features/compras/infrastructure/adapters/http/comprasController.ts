@@ -63,6 +63,7 @@ export class ComprasController {
       const creadorRol = this.str(req.query.creadorRol);
       const creadorId = this.str(req.query.creadorId);
       const pendienteRecepcion = req.query.pendienteRecepcion === 'true' || req.query.pendienteRecepcion === '1';
+      const proyectoId = this.str(req.query.proyectoId);
 
       const data = await this.service.getOrdenes({
         page,
@@ -74,6 +75,7 @@ export class ComprasController {
         creadorRol,
         creadorId,
         pendienteRecepcion,
+        proyectoId,
       });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }

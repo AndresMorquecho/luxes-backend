@@ -303,6 +303,7 @@ function mapProyecto(p: any) {
     ordenesCompra: (p.ordenesCompra || []).map((oc: any) => ({
       id: oc.id,
       numero: oc.numero,
+      proyectoId: oc.proyectoId || p.id,
       fecha: toDateStr(oc.fecha),
       subtotal: Number(oc.subtotal),
       impuesto: Number(oc.impuesto),

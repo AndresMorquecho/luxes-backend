@@ -65,6 +65,7 @@ export class ComprasService {
     creadorRol?: string;
     creadorId?: string;
     pendienteRecepcion?: boolean;
+    proyectoId?: string;
   }): Promise<{ items: OrdenCompraData[]; total: number }> {
     return this.repo.findAllOrdenes(options);
   }

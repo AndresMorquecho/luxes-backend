@@ -70,6 +70,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     creadorRol?: string;
     creadorId?: string;
     pendienteRecepcion?: boolean;
+    proyectoId?: string;
   }): Promise<{ items: OrdenCompraData[]; total: number }> {
     const {
       page = 1,
@@ -81,9 +82,13 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       creadorRol,
       creadorId,
       pendienteRecepcion,
+      proyectoId,
     } = options || {};
 
     const where: any = {};
+    if (proyectoId) {
+      where.proyectoId = proyectoId;
+    }
     if (pendienteRecepcion) {
       where.estado = { in: ['aprobada', 'parcialmente_recibida'] };
     } else if (estados?.length) {

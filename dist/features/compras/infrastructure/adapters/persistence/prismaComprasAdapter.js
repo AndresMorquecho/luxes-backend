@@ -39,8 +39,11 @@ export class PrismaComprasAdapter {
         proyecto: { select: { id: true, nombre: true } },
     };
     async findAllOrdenes(options) {
-        const { page = 1, limit = 10, search, estado, estados, estadoPago, creadorRol, creadorId, pendienteRecepcion, } = options || {};
+        const { page = 1, limit = 10, search, estado, estados, estadoPago, creadorRol, creadorId, pendienteRecepcion, proyectoId, } = options || {};
         const where = {};
+        if (proyectoId) {
+            where.proyectoId = proyectoId;
+        }
         if (pendienteRecepcion) {
             where.estado = { in: ['aprobada', 'parcialmente_recibida'] };
         }
