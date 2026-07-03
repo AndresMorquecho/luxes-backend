@@ -40,6 +40,10 @@ export class PrismaMaterialAdapter {
                 nombre: row.unidadMedida.nombre,
                 abreviacion: row.unidadMedida.abreviacion
             } : { nombre: 'unidades', abreviacion: 'unid' },
+            aCargoEmpleado: row.aCargoEmpleado ? {
+                id: row.aCargoEmpleado.id,
+                nombre: row.aCargoEmpleado.nombre
+            } : null,
         };
     }
     async findAll(options) {
@@ -66,6 +70,7 @@ export class PrismaMaterialAdapter {
                     where,
                     include: {
                         unidadMedida: true,
+                        aCargoEmpleado: { select: { id: true, nombre: true } },
                         detallesCompra: { include: { ordenCompra: true } }
                     },
                     orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
@@ -92,6 +97,7 @@ export class PrismaMaterialAdapter {
                 where,
                 include: {
                     unidadMedida: true,
+                    aCargoEmpleado: { select: { id: true, nombre: true } },
                     detallesCompra: { include: { ordenCompra: true } }
                 },
                 orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
@@ -104,6 +110,7 @@ export class PrismaMaterialAdapter {
             where: { id },
             include: {
                 unidadMedida: true,
+                aCargoEmpleado: { select: { id: true, nombre: true } },
                 detallesCompra: { include: { ordenCompra: true } }
             },
         });
@@ -126,7 +133,10 @@ export class PrismaMaterialAdapter {
                 ...rest,
                 unidadMedidaId,
             },
-            include: { unidadMedida: true }
+            include: {
+                unidadMedida: true,
+                aCargoEmpleado: { select: { id: true, nombre: true } },
+            }
         });
         return this.mapRow(row);
     }
@@ -148,7 +158,10 @@ export class PrismaMaterialAdapter {
                 ...rest,
                 ...(unidadMedidaId ? { unidadMedidaId } : {}),
             },
-            include: { unidadMedida: true }
+            include: {
+                unidadMedida: true,
+                aCargoEmpleado: { select: { id: true, nombre: true } },
+            }
         });
         return this.mapRow(row);
     }
