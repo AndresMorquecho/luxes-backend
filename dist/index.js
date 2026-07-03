@@ -209,7 +209,7 @@ async function bootstrap() {
     }
     const app = express();
     app.use(cors({ origin: env.corsOrigin }));
-    app.use(express.json({ limit: '10mb' }));
+    app.use(express.json({ limit: '50mb' }));
     app.use('/uploads', express.static(path.resolve('uploads')));
     // Middleware para registrar las peticiones HTTP (ocultando contraseñas)
     app.use((req, _res, next) => {

@@ -3,6 +3,20 @@ import path from 'path';
 import fs from 'fs/promises';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
+async function buildImagePreviewDataUrl(filePath, mimetype, maxBytes = 1_500_000) {
+    if (!mimetype.startsWith('image/'))
+        return undefined;
+    try {
+        const stat = await fs.stat(filePath);
+        if (stat.size > maxBytes)
+            return undefined;
+        const buf = await fs.readFile(filePath);
+        return `data:${mimetype};base64,${buf.toString('base64')}`;
+    }
+    catch {
+        return undefined;
+    }
+}
 export async function ensureProyectoUploadsDir(proyectoId) {
     await fs.mkdir(path.join(PROYECTOS_UPLOADS_ROOT, proyectoId), { recursive: true });
 }
@@ -230,10 +244,28 @@ function mapProyecto(p) {
         etiquetas: p.etiquetas ? p.etiquetas.split(',').map((t) => t.trim()).filter(Boolean) : [],
         notas: p.notas,
         fases: (p.fases || []).reduce((acc, f) => {
+            let datos = f.datos ? JSON.parse(f.datos) : {};
+            if (f.fase === 'INSTALACION' &&
+                datos.instalacionCompletada &&
+                datos.fechaFin &&
+                !datos.horaFin &&
+                f.fechaCompletada) {
+                const d = new Date(f.fechaCompletada);
+                datos = {
+                    ...datos,
+                    horaFin: d.toLocaleTimeString('es-EC', {
+                        timeZone: 'America/Guayaquil',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                    }),
+                };
+            }
             acc[f.fase] = {
                 completada: f.completada,
                 fechaCompletada: toDateStr(f.fechaCompletada),
-                datos: f.datos ? JSON.parse(f.datos) : {},
+                fechaCompletadaAt: f.fechaCompletada ? new Date(f.fechaCompletada).toISOString() : '',
+                datos,
             };
             return acc;
         }, {}),
@@ -869,11 +901,13 @@ export class ProyectosController {
                 },
             });
             const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
+            const previewDataUrl = await buildImagePreviewDataUrl(file.path, file.mimetype);
             const nuevoArchivo = {
                 name: file.originalname,
                 size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
                 type: file.mimetype,
                 url: archivoUrl,
+                ...(previewDataUrl ? { previewDataUrl } : {}),
             };
             // Obtener arreglo de archivos actuales
             let archivosArte = [];
@@ -913,10 +947,11 @@ export class ProyectosController {
             return res.status(200).json({
                 success: true,
                 data: {
-                    name: file.originalname,
-                    size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-                    type: file.mimetype,
-                    url: archivoUrl,
+                    name: nuevoArchivo.name,
+                    size: nuevoArchivo.size,
+                    type: nuevoArchivo.type,
+                    url: nuevoArchivo.url,
+                    ...(previewDataUrl ? { previewDataUrl } : {}),
                 },
             });
         }
@@ -925,6 +960,107 @@ export class ProyectosController {
             return res.status(500).json({
                 success: false,
                 error: { code: 'INTERNAL_ERROR', message: 'Error al subir archivo' },
+            });
+        }
+    }
+    /** Sirve archivos de proyecto (diseño / evidencias) vía API — accesible sin JWT. */
+    async serveArchivoProyecto(req, res) {
+        try {
+            const proyectoId = String(req.params.id);
+            const safeName = path.basename(String(req.params.filename || ''));
+            if (!safeName || safeName === '.' || safeName === '..') {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_INPUT', message: 'Nombre de archivo inválido' },
+                });
+            }
+            const allowedDir = path.resolve(path.join(PROYECTOS_UPLOADS_ROOT, proyectoId));
+            const filePath = path.resolve(path.join(allowedDir, safeName));
+            if (!filePath.startsWith(allowedDir + path.sep) && filePath !== allowedDir) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Ruta no permitida' },
+                });
+            }
+            await fs.access(filePath);
+            return res.sendFile(filePath);
+        }
+        catch {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Archivo no encontrado' },
+            });
+        }
+    }
+    /** Sube evidencia fotográfica de instalación (archivo en disco + referencia en fase). */
+    async uploadEvidenciaInstalacion(req, res) {
+        try {
+            const { id } = req.params;
+            const file = req.file;
+            if (!file) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'NO_FILE', message: 'No se proporcionó imagen' },
+                });
+            }
+            const proyecto = await prisma.proyecto.findUnique({ where: { id: String(id) } });
+            if (!proyecto) {
+                await fs.unlink(file.path).catch(() => { });
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' },
+                });
+            }
+            const archivoUrl = `/uploads/proyectos/${id}/${file.filename}`;
+            const previewDataUrl = await buildImagePreviewDataUrl(file.path, file.mimetype);
+            const evidencia = {
+                url: archivoUrl,
+                name: file.originalname,
+                type: file.mimetype,
+                ...(previewDataUrl ? { previewDataUrl } : {}),
+            };
+            const faseInst = await prisma.proyectoFase.findUnique({
+                where: {
+                    proyectoId_fase: { proyectoId: String(id), fase: 'INSTALACION' },
+                },
+            });
+            const datosPrevios = parseFaseDatos(faseInst?.datos);
+            const evidenciasPrevias = Array.isArray(datosPrevios.evidencias) ? [...datosPrevios.evidencias] : [];
+            evidenciasPrevias.push(evidencia);
+            const datosActualizados = {
+                ...datosPrevios,
+                evidencias: evidenciasPrevias,
+            };
+            await prisma.proyectoFase.upsert({
+                where: {
+                    proyectoId_fase: { proyectoId: String(id), fase: 'INSTALACION' },
+                },
+                update: { datos: JSON.stringify(datosActualizados) },
+                create: {
+                    proyectoId: String(id),
+                    fase: 'INSTALACION',
+                    completada: false,
+                    datos: JSON.stringify(datosActualizados),
+                },
+            });
+            const proyectoActualizado = await prisma.proyecto.findUnique({
+                where: { id: String(id) },
+                include: proyectoInclude,
+            });
+            return res.status(200).json({
+                success: true,
+                data: {
+                    evidencia,
+                    evidencias: evidenciasPrevias,
+                    proyecto: mapProyecto(proyectoActualizado),
+                },
+            });
+        }
+        catch (error) {
+            console.error('[proyectos/uploadEvidenciaInstalacion]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al subir evidencia' },
             });
         }
     }
