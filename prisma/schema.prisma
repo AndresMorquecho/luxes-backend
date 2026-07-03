@@ -94,7 +94,10 @@ model Material {
   marca         String?
   modelo        String?
   serie         String?
-  categoria     String?                @default("Taller") // "Taller" o "Oficina"
+  categoria     String?                @default("Taller") // "Taller", "Oficina" o "Impresión"
+  subtipo       String?                @default("consumible_descargable") // "herramienta", "consumible_descargable", "consumible_registro", "activo_fijo"
+  descargaStock Boolean                @default(true) @map("descarga_stock") // true = se descuenta del inventario al usar/vender
+  esPrestable   Boolean                @default(false) @map("es_prestable") // true = puede entrar al módulo de préstamos/devoluciones
   estadoUso     String?                @default("BODEGA") @map("estado_uso") // "BODEGA", "EN USO", "NO SIRVE", "EN REPARACION"
   aCargo        String?                @map("a_cargo")
   ancho         Float?

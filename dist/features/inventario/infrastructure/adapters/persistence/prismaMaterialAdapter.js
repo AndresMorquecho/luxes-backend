@@ -97,7 +97,7 @@ export class PrismaMaterialAdapter {
         return this.mapRow(row);
     }
     async create(data) {
-        const { unidadMedida, ...rest } = data;
+        const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data;
         let unidadMedidaId = data.unidadMedidaId;
         const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
         if (!unidadMedidaId && unitName) {
@@ -118,7 +118,7 @@ export class PrismaMaterialAdapter {
         return this.mapRow(row);
     }
     async update(id, data) {
-        const { unidadMedida, ...rest } = data;
+        const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data;
         let unidadMedidaId = data.unidadMedidaId;
         const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
         if (!unidadMedidaId && unitName) {

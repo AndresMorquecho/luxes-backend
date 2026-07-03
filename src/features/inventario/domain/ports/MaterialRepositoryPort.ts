@@ -12,6 +12,9 @@ export interface MaterialData {
   modelo?: string | null;
   serie?: string | null;
   categoria?: string | null;
+  subtipo?: string | null;
+  descargaStock: boolean;
+  esPrestable: boolean;
   estadoUso?: string | null;
   aCargo?: string | null;
   costoPromedioPonderado?: number;

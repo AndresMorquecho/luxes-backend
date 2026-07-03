@@ -119,7 +119,7 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   }
 
   async create(data: Omit<MaterialData, 'id' | 'fechaCreacion'>): Promise<MaterialData> {
-    const { unidadMedida, ...rest } = data as any;
+    const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
     const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
@@ -143,7 +143,7 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   }
 
   async update(id: string, data: Partial<Omit<MaterialData, 'id' | 'fechaCreacion'>>): Promise<MaterialData> {
-    const { unidadMedida, ...rest } = data as any;
+    const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
     const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;

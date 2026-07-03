@@ -33,11 +33,33 @@ export class InventarioService {
   }
 
   createMaterial(data: Omit<MaterialData, 'id' | 'fechaCreacion'>): Promise<MaterialData> {
-    return this.repo.create(data);
+    // Auto-calculate descargaStock and esPrestable from subtipo if not explicitly set
+    const enriched = this.enrichMaterialDefaults(data);
+    return this.repo.create(enriched);
+  }
+
+  /** Auto-calculate descargaStock/esPrestable from subtipo */
+  private enrichMaterialDefaults(data: any): any {
+    const subtipo = data.subtipo || 'consumible_descargable';
+    const defaults: Record<string, { descargaStock: boolean; esPrestable: boolean; tipo: string }> = {
+      herramienta:            { descargaStock: false, esPrestable: true,  tipo: 'herramienta' },
+      consumible_descargable: { descargaStock: true,  esPrestable: false, tipo: 'consumible' },
+      consumible_registro:    { descargaStock: false, esPrestable: false, tipo: 'consumible' },
+      activo_fijo:            { descargaStock: false, esPrestable: false, tipo: 'consumible' },
+    };
+    const d = defaults[subtipo] || defaults.consumible_descargable;
+    return {
+      ...data,
+      subtipo,
+      descargaStock: data.descargaStock ?? d.descargaStock,
+      esPrestable:   data.esPrestable   ?? d.esPrestable,
+      tipo:          data.tipo          || d.tipo,
+    };
   }
 
   updateMaterial(id: string, data: Partial<Omit<MaterialData, 'id' | 'fechaCreacion'>>): Promise<MaterialData> {
-    return this.repo.update(id, data);
+    const enriched = data.subtipo ? this.enrichMaterialDefaults(data) : data;
+    return this.repo.update(id, enriched);
   }
 
   async deleteMaterial(id: string): Promise<void> {
@@ -56,15 +78,22 @@ export class InventarioService {
     const mat = await this.repo.findById(data.materialId);
     if (!mat) throw new Error('Material no encontrado.');
 
-    const delta = data.tipo === 'entrada' ? data.cantidad : -data.cantidad;
     const unitLabel = typeof mat.unidadMedida === 'string' ? mat.unidadMedida : (mat.unidadMedida?.abreviacion || mat.unidadMedida?.nombre || 'unid');
-    if (data.tipo === 'salida' && mat.stockActual + delta < 0) {
-      throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${unitLabel}.`);
-    }
 
-    const mov = await this.repo.createMovimiento(data);
-    await this.repo.adjustStock(data.materialId, delta);
-    return mov;
+    // Solo ajustar stock si el material es descargable del inventario
+    if (mat.descargaStock) {
+      const delta = data.tipo === 'entrada' ? data.cantidad : -data.cantidad;
+      if (data.tipo === 'salida' && mat.stockActual + delta < 0) {
+        throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${unitLabel}.`);
+      }
+      const mov = await this.repo.createMovimiento(data);
+      await this.repo.adjustStock(data.materialId, delta);
+      return mov;
+    } else {
+      // Material de solo registro: guardar el movimiento como log pero NO ajustar stock
+      const mov = await this.repo.createMovimiento(data);
+      return mov;
+    }
   }
 
   // ── Préstamos ────────────────────────────────────────────────────────────────
@@ -76,8 +105,8 @@ export class InventarioService {
   async registrarPrestamo(data: Omit<PrestamoData, 'id' | 'fechaSalida'>): Promise<PrestamoData> {
     const mat = await this.repo.findById(data.materialId);
     if (!mat) throw new Error('Material no encontrado.');
-    if (mat.tipo !== 'herramienta') {
-      throw new Error('Solo se pueden prestar herramientas. Use movimientos para consumibles.');
+    if (!mat.esPrestable) {
+      throw new Error('Este material no es prestable. Solo herramientas marcadas como prestables pueden asignarse.');
     }
     if (mat.stockActual < data.cantidad) {
       throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} unidad(es).`);
