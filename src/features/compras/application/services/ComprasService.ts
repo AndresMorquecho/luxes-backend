@@ -8,6 +8,7 @@ import type {
   DetalleCompraInput,
   DetalleCompraData,
 } from '../../domain/ports/ComprasRepositoryPort.js';
+import { parseDateOnly, formatDateOnly } from '../../../../shared/utils/dateOnly.js';
 
 export class ComprasService {
   constructor(private readonly repo: ComprasRepositoryPort) {}
@@ -281,9 +282,9 @@ export class ComprasService {
       }
 
       const fechaItem = item.fechaRecepcion
-        ? new Date(item.fechaRecepcion)
+        ? parseDateOnly(item.fechaRecepcion) || new Date()
         : payload.fechaRecepcion
-          ? new Date(payload.fechaRecepcion)
+          ? parseDateOnly(payload.fechaRecepcion) || new Date()
           : new Date();
 
       const descargable = item.descargableInventario === true;
@@ -313,11 +314,12 @@ export class ComprasService {
     const todosRecibidos = detalles.length > 0 && detalles.every((d) => (d.cantidadRecibida ?? 0) > 0);
     const algunoRecibido = detalles.some((d) => (d.cantidadRecibida ?? 0) > 0);
 
-    const fechas = detalles
-      .map((d) => d.fechaRecepcion)
-      .filter((f): f is Date => !!f)
-      .map((f) => new Date(f).getTime());
-    const ultimaFecha = fechas.length ? new Date(Math.max(...fechas)) : new Date();
+    const fechasIso = detalles
+      .map((d) => formatDateOnly(d.fechaRecepcion))
+      .filter((f): f is string => !!f)
+      .sort()
+      .reverse();
+    const ultimaFecha = fechasIso.length ? (parseDateOnly(fechasIso[0]) || new Date()) : new Date();
 
     const nuevoEstado = todosRecibidos
       ? 'recibida'

@@ -5,6 +5,9 @@ import type {
   MovimientoData,
   PrestamoData,
 } from '../../../domain/ports/MaterialRepositoryPort.js';
+import { formatDateOnly } from '../../../../../shared/utils/dateOnly.js';
+
+const ESTADOS_COMPRA_VALIDOS = new Set(['aprobada', 'recibida', 'parcialmente_recibida']);
 
 export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   constructor(private readonly prisma: PrismaClient) {}
@@ -16,9 +19,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     const { unidadMedida, detallesCompra, ...rest } = row;
 
     const purchases = detallesCompra || [];
-    const approvedPurchases = purchases.filter((d: any) => 
-      d.ordenCompra && (d.ordenCompra.estado === 'APROBADA' || d.ordenCompra.estado === 'RECIBIDA')
-    );
+    const approvedPurchases = purchases.filter((d: any) => {
+      const estado = String(d.ordenCompra?.estado || '').toLowerCase();
+      return ESTADOS_COMPRA_VALIDOS.has(estado);
+    });
 
     let cpp = row.precioCosto || 0;
     let ultimaFechaCompra: string | null = null;
@@ -30,11 +34,11 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
       }
 
       const fechasCompra = approvedPurchases
-        .map((d: any) => d.ordenCompra?.fechaRecepcion || d.ordenCompra?.fecha)
-        .filter(Boolean)
-        .map((f: Date) => new Date(f).getTime());
+        .map((d: any) => d.fechaRecepcion || d.ordenCompra?.fechaRecepcion || d.ordenCompra?.fechaAprobacion || d.ordenCompra?.fecha)
+        .map((f: Date | string | null | undefined) => formatDateOnly(f))
+        .filter((f: string | null): f is string => !!f);
       if (fechasCompra.length > 0) {
-        ultimaFechaCompra = new Date(Math.max(...fechasCompra)).toISOString().split('T')[0];
+        ultimaFechaCompra = fechasCompra.sort().reverse()[0];
       }
     }
 
@@ -85,13 +89,20 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
             detallesCompra: { include: { ordenCompra: true } }
           },
           orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
-          skip,
-          take: limit,
         }),
         this.prisma.material.count({ where }),
       ]);
+      const mapped = rows.map(r => this.mapRow(r));
+      if (tipo === 'consumible') {
+        mapped.sort((a, b) => {
+          const da = a.ultimaFechaCompra || '';
+          const db = b.ultimaFechaCompra || '';
+          if (db !== da) return db.localeCompare(da);
+          return (a.nombre || '').localeCompare(b.nombre || '', 'es');
+        });
+      }
       return {
-        items: rows.map(r => this.mapRow(r)),
+        items: mapped.slice(skip, skip + limit),
         total,
       };
     } else {
@@ -325,8 +336,8 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
       id: d.id,
       ordenId: d.ordenCompraId,
       numero: d.ordenCompra.numero,
-      fecha: d.ordenCompra.fecha ? new Date(d.ordenCompra.fecha).toISOString().split('T')[0] : '',
-      fechaRecepcion: d.fechaRecepcion ? new Date(d.fechaRecepcion).toISOString().split('T')[0] : (d.ordenCompra.fechaRecepcion ? new Date(d.ordenCompra.fechaRecepcion).toISOString().split('T')[0] : ''),
+      fecha: d.ordenCompra.fecha ? formatDateOnly(d.ordenCompra.fecha) || '' : '',
+      fechaRecepcion: formatDateOnly(d.fechaRecepcion || d.ordenCompra.fechaRecepcion) || '',
       proveedor: d.ordenCompra.proveedor?.nombre || 'Sin proveedor',
       cantidad: d.cantidad,
       cantidadRecibida: d.cantidadRecibida,

@@ -18,6 +18,7 @@ export interface MaterialData {
   estadoUso?: string | null;
   aCargo?: string | null;
   costoPromedioPonderado?: number;
+  ultimaFechaCompra?: string | null;
 }
 
 export interface MovimientoData {
