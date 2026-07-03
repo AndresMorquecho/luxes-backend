@@ -688,6 +688,36 @@ export class ProyectosController {
         },
       });
 
+      if (String(fase) === 'INSTALACION') {
+        let instalacionRow = await prisma.proyectoInstalacion.findUnique({
+          where: { proyectoId: String(id) },
+        });
+        if (!instalacionRow) {
+          instalacionRow = await prisma.proyectoInstalacion.create({
+            data: { proyectoId: String(id) },
+          });
+        }
+        const instUpdate: Record<string, unknown> = {};
+        if (datosMerged.fechaInstalacion) {
+          instUpdate.fechaInstalacion = new Date(String(datosMerged.fechaInstalacion));
+        }
+        if (datosMerged.direccionInstalacion !== undefined) {
+          instUpdate.direccionInstalacion = String(datosMerged.direccionInstalacion || '');
+        }
+        if (datosMerged.instalacionCompletada !== undefined) {
+          instUpdate.instalacionCompletada = Boolean(datosMerged.instalacionCompletada);
+        }
+        if (datosMerged.notasCierre !== undefined) {
+          instUpdate.notasCierre = String(datosMerged.notasCierre || '');
+        }
+        if (Object.keys(instUpdate).length > 0) {
+          await prisma.proyectoInstalacion.update({
+            where: { id: instalacionRow.id },
+            data: instUpdate,
+          });
+        }
+      }
+
       // Actualizar fase actual del proyecto y su progreso
       await prisma.proyecto.update({
         where: { id: String(id) },
