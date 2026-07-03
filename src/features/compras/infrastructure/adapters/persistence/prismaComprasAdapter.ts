@@ -635,6 +635,16 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
 
         const aprobadorNombre = aprobador?.nombre || 'Administración';
 
+        // Obtener el creador para conocer su rol
+        const creador = await this.prisma.user.findUnique({
+          where: { id: row.usuarioId },
+          select: { id: true, nombre: true, rol: true },
+        });
+
+        const creadorRol = creador?.rol || '';
+        const creadorRolLower = creadorRol.toLowerCase();
+
+        // 1. Notificación directa al usuario creador
         const notif = await this.prisma.notification.create({
           data: {
             title: 'Orden de Compra Aprobada',
@@ -644,13 +654,38 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
           },
         });
 
-        console.log(`[Notification] Aprobación OC ${row.numero} → usuario ${row.usuarioId}`);
+        // 2. Notificación al ROL del creador (para que su departamento se entere)
+        if (creadorRol && creadorRolLower !== 'admin' && creadorRolLower !== 'administrador') {
+          await this.prisma.notification.create({
+            data: {
+              title: 'Orden de Compra Aprobada',
+              message: `La orden de compra ${row.numero} (solicitada por ${creador?.nombre || 'usuario'}) ha sido aprobada por ${aprobadorNombre}.`,
+              userId: null,
+              rol: creadorRol,
+              createdBy: aprobadorNombre,
+            },
+          });
+        }
+
+        console.log(`[Notification] Aprobación OC ${row.numero} → usuario ${row.usuarioId} y rol ${creadorRol}`);
+
+        // 3. Web Push Notifications
+        const rolesForPush = [];
+        if (creadorRol) rolesForPush.push(creadorRol);
+        
+        if (creadorRolLower === 'impresión' || creadorRolLower === 'impresion') {
+           rolesForPush.push('impresión', 'impresion', 'IMPRESIÓN', 'IMPRESION');
+        } else if (creadorRolLower === 'taller') {
+           rolesForPush.push('taller', 'Taller', 'TALLER');
+        } else if (creadorRolLower === 'ventas' || creadorRolLower === 'diseñador' || creadorRolLower === 'disenador') {
+           rolesForPush.push('ventas', 'Ventas', 'diseñador', 'Diseñador', 'DISEÑADOR');
+        }
 
         const usersToNotify = await this.prisma.user.findMany({
           where: {
             OR: [
               { id: row.usuarioId },
-              { rol: { in: ['taller', 'Taller'] } },
+              rolesForPush.length > 0 ? { rol: { in: rolesForPush } } : { id: 'no-match' },
             ],
           },
           include: { pushSubscriptions: true },
