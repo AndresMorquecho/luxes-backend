@@ -51,6 +51,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
         nombre: row.unidadMedida.nombre,
         abreviacion: row.unidadMedida.abreviacion
       } : { nombre: 'unidades', abreviacion: 'unid' },
+      aCargoEmpleado: row.aCargoEmpleado ? {
+        id: row.aCargoEmpleado.id,
+        nombre: row.aCargoEmpleado.nombre
+      } : null,
     } as unknown as MaterialData;
   }
 
@@ -86,6 +90,7 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
           where,
           include: { 
             unidadMedida: true,
+            aCargoEmpleado: { select: { id: true, nombre: true } },
             detallesCompra: { include: { ordenCompra: true } }
           },
           orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
@@ -110,6 +115,7 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
         where,
         include: { 
           unidadMedida: true,
+          aCargoEmpleado: { select: { id: true, nombre: true } },
           detallesCompra: { include: { ordenCompra: true } }
         },
         orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
@@ -123,6 +129,7 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
       where: { id },
       include: { 
         unidadMedida: true,
+        aCargoEmpleado: { select: { id: true, nombre: true } },
         detallesCompra: { include: { ordenCompra: true } }
       },
     });
@@ -148,7 +155,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
         ...rest,
         unidadMedidaId,
       },
-      include: { unidadMedida: true }
+      include: { 
+        unidadMedida: true,
+        aCargoEmpleado: { select: { id: true, nombre: true } },
+      }
     });
     return this.mapRow(row);
   }
@@ -173,7 +183,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
         ...rest,
         ...(unidadMedidaId ? { unidadMedidaId } : {}),
       },
-      include: { unidadMedida: true }
+      include: { 
+        unidadMedida: true,
+        aCargoEmpleado: { select: { id: true, nombre: true } },
+      }
     });
     return this.mapRow(row);
   }

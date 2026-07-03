@@ -17,6 +17,8 @@ export interface MaterialData {
   esPrestable: boolean;
   estadoUso?: string | null;
   aCargo?: string | null;
+  aCargoId?: string | null;
+  aCargoEmpleado?: { id: string; nombre: string } | null;
   costoPromedioPonderado?: number;
   ultimaFechaCompra?: string | null;
 }

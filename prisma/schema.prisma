@@ -100,6 +100,8 @@ model Material {
   esPrestable   Boolean                @default(false) @map("es_prestable") // true = puede entrar al módulo de préstamos/devoluciones
   estadoUso     String?                @default("BODEGA") @map("estado_uso") // "BODEGA", "EN USO", "NO SIRVE", "EN REPARACION"
   aCargo        String?                @map("a_cargo")
+  aCargoId      String?                @map("a_cargo_id")
+  aCargoEmpleado Empleado?             @relation("MaterialACargo", fields: [aCargoId], references: [id], onDelete: SetNull)
   ancho         Float?
   movimientos   MovimientoInventario[]
   prestamos     Prestamo[]
@@ -356,6 +358,7 @@ model Empleado {
   ingresosDetalles IngresoDetalle[]
   instalaciones ProyectoInstalacionPersonal[]
   user         User?
+  materialesACargo Material[] @relation("MaterialACargo")
 
   @@map("empleados")
 }
