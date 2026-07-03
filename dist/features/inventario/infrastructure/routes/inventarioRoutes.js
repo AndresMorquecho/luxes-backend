@@ -1,9 +1,26 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        if (/\.(xlsx|xls|csv)$/i.test(file.originalname)) {
+            cb(null, true);
+        }
+        else {
+            cb(new Error('Solo se permiten archivos Excel (.xlsx, .xls, .csv).'));
+        }
+    },
+});
 export function createInventarioRoutes(ctrl) {
     const router = Router();
     // Todos los endpoints de inventario requieren autenticación
     router.use(authMiddleware);
+    // ── Importación Excel (antes de rutas /:id) ───────────────────────────────
+    router.get('/importar/plantilla', (req, res) => ctrl.downloadImportTemplate(req, res));
+    router.post('/importar', (req, res) => ctrl.importMateriales(req, res));
+    router.post('/importar/archivo', upload.single('archivo'), (req, res) => ctrl.importMaterialesFromFile(req, res));
     // ── Materiales ────────────────────────────────────────────────────────────
     // GET  /api/inventario/unidades-medida
     router.get('/unidades-medida', (req, res) => ctrl.listUnidadesMedida(req, res));

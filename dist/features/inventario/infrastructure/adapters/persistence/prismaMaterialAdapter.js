@@ -1,3 +1,5 @@
+import { formatDateOnly } from '../../../../../shared/utils/dateOnly.js';
+const ESTADOS_COMPRA_VALIDOS = new Set(['aprobada', 'recibida', 'parcialmente_recibida']);
 export class PrismaMaterialAdapter {
     prisma;
     constructor(prisma) {
@@ -9,7 +11,10 @@ export class PrismaMaterialAdapter {
             return null;
         const { unidadMedida, detallesCompra, ...rest } = row;
         const purchases = detallesCompra || [];
-        const approvedPurchases = purchases.filter((d) => d.ordenCompra && (d.ordenCompra.estado === 'APROBADA' || d.ordenCompra.estado === 'RECIBIDA'));
+        const approvedPurchases = purchases.filter((d) => {
+            const estado = String(d.ordenCompra?.estado || '').toLowerCase();
+            return ESTADOS_COMPRA_VALIDOS.has(estado);
+        });
         let cpp = row.precioCosto || 0;
         let ultimaFechaCompra = null;
         if (approvedPurchases.length > 0) {
@@ -19,11 +24,11 @@ export class PrismaMaterialAdapter {
                 cpp = totalCost / totalQty;
             }
             const fechasCompra = approvedPurchases
-                .map((d) => d.ordenCompra?.fechaRecepcion || d.ordenCompra?.fecha)
-                .filter(Boolean)
-                .map((f) => new Date(f).getTime());
+                .map((d) => d.fechaRecepcion || d.ordenCompra?.fechaRecepcion || d.ordenCompra?.fechaAprobacion || d.ordenCompra?.fecha)
+                .map((f) => formatDateOnly(f))
+                .filter((f) => !!f);
             if (fechasCompra.length > 0) {
-                ultimaFechaCompra = new Date(Math.max(...fechasCompra)).toISOString().split('T')[0];
+                ultimaFechaCompra = fechasCompra.sort().reverse()[0];
             }
         }
         return {
@@ -64,13 +69,21 @@ export class PrismaMaterialAdapter {
                         detallesCompra: { include: { ordenCompra: true } }
                     },
                     orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
-                    skip,
-                    take: limit,
                 }),
                 this.prisma.material.count({ where }),
             ]);
+            const mapped = rows.map(r => this.mapRow(r));
+            if (tipo === 'consumible') {
+                mapped.sort((a, b) => {
+                    const da = a.ultimaFechaCompra || '';
+                    const db = b.ultimaFechaCompra || '';
+                    if (db !== da)
+                        return db.localeCompare(da);
+                    return (a.nombre || '').localeCompare(b.nombre || '', 'es');
+                });
+            }
             return {
-                items: rows.map(r => this.mapRow(r)),
+                items: mapped.slice(skip, skip + limit),
                 total,
             };
         }
@@ -276,8 +289,8 @@ export class PrismaMaterialAdapter {
             id: d.id,
             ordenId: d.ordenCompraId,
             numero: d.ordenCompra.numero,
-            fecha: d.ordenCompra.fecha ? new Date(d.ordenCompra.fecha).toISOString().split('T')[0] : '',
-            fechaRecepcion: d.fechaRecepcion ? new Date(d.fechaRecepcion).toISOString().split('T')[0] : (d.ordenCompra.fechaRecepcion ? new Date(d.ordenCompra.fechaRecepcion).toISOString().split('T')[0] : ''),
+            fecha: d.ordenCompra.fecha ? formatDateOnly(d.ordenCompra.fecha) || '' : '',
+            fechaRecepcion: formatDateOnly(d.fechaRecepcion || d.ordenCompra.fechaRecepcion) || '',
             proveedor: d.ordenCompra.proveedor?.nombre || 'Sin proveedor',
             cantidad: d.cantidad,
             cantidadRecibida: d.cantidadRecibida,

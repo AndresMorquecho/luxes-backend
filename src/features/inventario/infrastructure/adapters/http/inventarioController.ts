@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type { InventarioService } from '../../../application/services/InventarioService.js';
-import { resolveInventarioCategoria } from '../../utils/inventarioCategoriaPorRol.js';
+import { resolveInventarioCategoria, getInventarioCategoriaPorRol } from '../../utils/inventarioCategoriaPorRol.js';
+import { isCategoriaValida } from '../../../application/utils/inventarioImportUtils.js';
 
 export class InventarioController {
   constructor(private readonly service: InventarioService) {}
@@ -61,6 +62,59 @@ export class InventarioController {
       const data = await this.service.createMaterial(body);
       return res.status(201).json({ success: true, data });
     } catch (e) { return this.fail(res, e); }
+  }
+
+  async downloadImportTemplate(req: Request, res: Response) {
+    try {
+      const categoriaQuery = this.str(req.query.categoria) || 'Taller';
+      const categoriaRol = getInventarioCategoriaPorRol(this.userRol(req));
+      const categoria = categoriaRol || categoriaQuery;
+
+      if (!isCategoriaValida(categoria)) {
+        return this.fail(res, new Error('Categoría inválida. Use: Taller, Oficina o Impresión.'), 400);
+      }
+
+      const { buffer, filename } = await this.service.generateImportTemplate(categoria);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(buffer);
+    } catch (e) { return this.fail(res, e, 400); }
+  }
+
+  async importMateriales(req: Request, res: Response) {
+    try {
+      const body = req.body as { categoria?: string; items?: unknown[] };
+      const categoriaRol = getInventarioCategoriaPorRol(this.userRol(req));
+      const categoria = categoriaRol || body.categoria;
+
+      if (!categoria || !isCategoriaValida(categoria)) {
+        return this.fail(res, new Error('Categoría inválida o no especificada.'), 400);
+      }
+
+      const items = Array.isArray(body.items) ? body.items : [];
+      const result = await this.service.importMateriales(categoria, items as Parameters<InventarioService['importMateriales']>[1]);
+      return res.status(201).json({ success: true, data: result });
+    } catch (e) { return this.fail(res, e, 400); }
+  }
+
+  async importMaterialesFromFile(req: Request, res: Response) {
+    try {
+      const file = (req as any).file as Express.Multer.File | undefined;
+      if (!file?.buffer) {
+        return this.fail(res, new Error('Debe adjuntar un archivo Excel (.xlsx).'), 400);
+      }
+
+      const categoriaBody = typeof req.body?.categoria === 'string' ? req.body.categoria : undefined;
+      const categoriaRol = getInventarioCategoriaPorRol(this.userRol(req));
+      const categoria = categoriaRol || categoriaBody;
+
+      if (!categoria || !isCategoriaValida(categoria)) {
+        return this.fail(res, new Error('Categoría inválida o no especificada.'), 400);
+      }
+
+      const result = await this.service.parseAndImportFromExcel(file.buffer, categoria);
+      return res.status(201).json({ success: true, data: result });
+    } catch (e) { return this.fail(res, e, 400); }
   }
 
   async updateMaterial(req: Request, res: Response) {

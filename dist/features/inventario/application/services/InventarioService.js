@@ -1,3 +1,4 @@
+import { buildImportTemplateBuffer, isCategoriaValida, parseImportExcelBuffer, templateFilename, validateImportItem, } from '../utils/inventarioImportUtils.js';
 export class InventarioService {
     repo;
     constructor(repo) {
@@ -116,5 +117,77 @@ export class InventarioService {
     }
     async getMaterialHistorial(id) {
         return this.repo.getMaterialHistorial(id);
+    }
+    // ── Importación masiva ───────────────────────────────────────────────────────
+    async importMateriales(categoria, items) {
+        if (!isCategoriaValida(categoria)) {
+            throw new Error('Categoría inválida. Use: Taller, Oficina o Impresión.');
+        }
+        if (!items.length) {
+            throw new Error('No hay productos para importar.');
+        }
+        if (items.length > 500) {
+            throw new Error('Máximo 500 productos por importación.');
+        }
+        const unidades = await this.repo.findAllUnidades();
+        const created = [];
+        const failed = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const line = item.line ?? i + 2;
+            const nombreRef = item.nombre ?? item.payload?.nombre ?? '(sin nombre)';
+            try {
+                const source = item.payload ?? item;
+                const result = validateImportItem(source, line, categoria, unidades);
+                if (!result.ok) {
+                    failed.push({ line, nombre: nombreRef, message: result.error.messages.join(', ') });
+                    continue;
+                }
+                const material = await this.createMaterial(result.row.payload);
+                created.push(material);
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : 'Error al crear material';
+                failed.push({ line, nombre: nombreRef, message });
+            }
+        }
+        return { created, failed };
+    }
+    async generateImportTemplate(categoria) {
+        if (!isCategoriaValida(categoria)) {
+            throw new Error('Categoría inválida. Use: Taller, Oficina o Impresión.');
+        }
+        const buffer = await buildImportTemplateBuffer(categoria);
+        return { buffer, filename: templateFilename(categoria) };
+    }
+    async parseAndImportFromExcel(buffer, categoria) {
+        if (!isCategoriaValida(categoria)) {
+            throw new Error('Categoría inválida. Use: Taller, Oficina o Impresión.');
+        }
+        const unidades = await this.repo.findAllUnidades();
+        const { rows, errors: previewErrors } = await parseImportExcelBuffer(buffer, categoria, unidades);
+        if (!rows.length) {
+            if (previewErrors.length) {
+                throw new Error(`Ningún producto válido. ${previewErrors.length} fila(s) con errores.`);
+            }
+            throw new Error('El archivo no contiene productos para importar.');
+        }
+        const created = [];
+        const failed = [...previewErrors.map(e => ({
+                line: e.line,
+                nombre: e.nombre,
+                message: e.messages.join(', '),
+            }))];
+        for (const row of rows) {
+            try {
+                const material = await this.createMaterial(row.payload);
+                created.push(material);
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : 'Error al crear material';
+                failed.push({ line: row.line, nombre: row.nombre, message });
+            }
+        }
+        return { created, failed, previewErrors };
     }
 }

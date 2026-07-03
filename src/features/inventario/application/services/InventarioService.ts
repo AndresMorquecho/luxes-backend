@@ -1,4 +1,13 @@
 import type { MaterialRepositoryPort, MaterialData, MovimientoData, PrestamoData } from '../../domain/ports/MaterialRepositoryPort.js';
+import {
+  buildImportTemplateBuffer,
+  isCategoriaValida,
+  parseImportExcelBuffer,
+  templateFilename,
+  validateImportItem,
+  type ImportRowPayload,
+  type ParseImportError,
+} from '../utils/inventarioImportUtils.js';
 
 export class InventarioService {
   constructor(private readonly repo: MaterialRepositoryPort) {}
@@ -146,5 +155,109 @@ export class InventarioService {
 
   async getMaterialHistorial(id: string): Promise<any> {
     return this.repo.getMaterialHistorial(id);
+  }
+
+  // ── Importación masiva ───────────────────────────────────────────────────────
+
+  async importMateriales(
+    categoria: string,
+    items: Array<{ line?: number; nombre?: string; payload?: ImportRowPayload } & Partial<ImportRowPayload>>,
+  ): Promise<{
+    created: MaterialData[];
+    failed: Array<{ line: number; nombre: string; message: string }>;
+  }> {
+    if (!isCategoriaValida(categoria)) {
+      throw new Error('Categoría inválida. Use: Taller, Oficina o Impresión.');
+    }
+
+    if (!items.length) {
+      throw new Error('No hay productos para importar.');
+    }
+    if (items.length > 500) {
+      throw new Error('Máximo 500 productos por importación.');
+    }
+
+    const unidades = await this.repo.findAllUnidades();
+    const created: MaterialData[] = [];
+    const failed: Array<{ line: number; nombre: string; message: string }> = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const line = item.line ?? i + 2;
+      const nombreRef = item.nombre ?? item.payload?.nombre ?? '(sin nombre)';
+
+      try {
+        const source = item.payload ?? item;
+        const result = validateImportItem(
+          source as Record<string, unknown>,
+          line,
+          categoria,
+          unidades,
+        );
+
+        if (!result.ok) {
+          failed.push({ line, nombre: nombreRef, message: result.error.messages.join(', ') });
+          continue;
+        }
+
+        const material = await this.createMaterial(result.row.payload);
+        created.push(material);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Error al crear material';
+        failed.push({ line, nombre: nombreRef, message });
+      }
+    }
+
+    return { created, failed };
+  }
+
+  async generateImportTemplate(categoria: string): Promise<{ buffer: Buffer; filename: string }> {
+    if (!isCategoriaValida(categoria)) {
+      throw new Error('Categoría inválida. Use: Taller, Oficina o Impresión.');
+    }
+    const buffer = await buildImportTemplateBuffer(categoria);
+    return { buffer, filename: templateFilename(categoria) };
+  }
+
+  async parseAndImportFromExcel(
+    buffer: Buffer | ArrayBuffer,
+    categoria: string,
+  ): Promise<{
+    created: MaterialData[];
+    failed: Array<{ line: number; nombre: string; message: string }>;
+    previewErrors: ParseImportError[];
+  }> {
+    if (!isCategoriaValida(categoria)) {
+      throw new Error('Categoría inválida. Use: Taller, Oficina o Impresión.');
+    }
+
+    const unidades = await this.repo.findAllUnidades();
+    const { rows, errors: previewErrors } = await parseImportExcelBuffer(buffer, categoria, unidades);
+
+    if (!rows.length) {
+      if (previewErrors.length) {
+        throw new Error(`Ningún producto válido. ${previewErrors.length} fila(s) con errores.`);
+      }
+      throw new Error('El archivo no contiene productos para importar.');
+    }
+
+    const created: MaterialData[] = [];
+    const failed: Array<{ line: number; nombre: string; message: string }> = [...previewErrors.map(e => ({
+      line: e.line,
+      nombre: e.nombre,
+      message: e.messages.join(', '),
+    }))];
+
+    for (const row of rows) {
+      try {
+        const material = await this.createMaterial(row.payload);
+        created.push(material);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Error al crear material';
+        failed.push({ line: row.line, nombre: row.nombre, message });
+      }
+    }
+
+    return { created, failed, previewErrors };
   }
 }
