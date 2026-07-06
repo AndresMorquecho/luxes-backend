@@ -35,6 +35,9 @@ export class GastosController {
             ordenCompra: {
               include: {
                 proveedor: { select: { nombre: true } },
+                cuentaPorPagar: {
+                  select: { montoTotal: true, montoPagado: true, saldo: true },
+                },
               },
             },
           },
@@ -58,23 +61,34 @@ export class GastosController {
         referencia: '',
       }));
 
-      const pagosCompra = abonosCompra.map((ab) => ({
-        id: ab.id,
-        concepto: `Pago OC ${ab.ordenCompra?.numero || ''}`.trim(),
-        categoria: 'compras',
-        fecha: ab.fecha,
-        monto: Number(ab.monto),
-        proveedor: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
-        notas: ab.referencia || '',
-        metodoPagoId: ab.metodoPagoId,
-        metodoPago: ab.metodoPago,
-        registradoPor: ab.registradoPor,
-        origen: 'orden_compra' as const,
-        readonly: true,
-        referencia: ab.referencia || '',
-        ordenCompraId: ab.ordenCompraId,
-        ordenNumero: ab.ordenCompra?.numero || null,
-      }));
+      const pagosCompra = abonosCompra.map((ab) => {
+        const ref = ab.referencia || '';
+        const esPagoAjuste = /ajuste por edición/i.test(ref);
+        const cxp = ab.ordenCompra?.cuentaPorPagar;
+        return {
+          id: ab.id,
+          concepto: esPagoAjuste
+            ? `Pago ajuste OC ${ab.ordenCompra?.numero || ''}`.trim()
+            : `Pago OC ${ab.ordenCompra?.numero || ''}`.trim(),
+          categoria: 'compras',
+          fecha: ab.fecha,
+          monto: Number(ab.monto),
+          proveedor: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
+          notas: ref,
+          metodoPagoId: ab.metodoPagoId,
+          metodoPago: ab.metodoPago,
+          registradoPor: ab.registradoPor,
+          origen: 'orden_compra' as const,
+          readonly: true,
+          referencia: ref,
+          ordenCompraId: ab.ordenCompraId,
+          ordenNumero: ab.ordenCompra?.numero || null,
+          ordenTotal: cxp ? Number(cxp.montoTotal) : null,
+          ordenPagado: cxp ? Number(cxp.montoPagado) : null,
+          ordenSaldo: cxp ? Number(cxp.saldo) : null,
+          esPagoAjuste,
+        };
+      });
 
       const data = [...gastosManual, ...pagosCompra].sort(
         (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
@@ -459,6 +473,9 @@ export class GastosController {
             ordenCompra: {
               include: {
                 proveedor: { select: { nombre: true } },
+                cuentaPorPagar: {
+                  select: { montoTotal: true, montoPagado: true, saldo: true },
+                },
               },
             },
           },
@@ -466,20 +483,27 @@ export class GastosController {
         });
 
         for (const ab of abonosCompra) {
+          const ref = ab.referencia || '';
+          const esPagoAjuste = /ajuste por edición/i.test(ref);
+          const cxp = ab.ordenCompra?.cuentaPorPagar;
+          const baseDesc = esPagoAjuste
+            ? `Pago ajuste OC ${ab.ordenCompra?.numero || ''}`
+            : `Pago OC ${ab.ordenCompra?.numero || ''}`;
           movimientos.push({
             id: ab.id,
             tipo: 'egreso',
             origen: 'orden_compra',
             fecha: ab.fecha,
             monto: Number(ab.monto),
-            descripcion: ab.referencia
-              ? `Pago OC ${ab.ordenCompra?.numero || ''} — ${ab.referencia}`.trim()
-              : `Pago OC ${ab.ordenCompra?.numero || ''}`,
-            referencia: ab.referencia || '',
+            descripcion: ref ? `${baseDesc} — ${ref}`.trim() : baseDesc,
+            referencia: ref,
             metodoPago: ab.metodoPago?.nombre || 'No especificado',
             metodoPagoId: ab.metodoPagoId,
             entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
             usuario: ab.registradoPor?.nombre || '—',
+            ordenTotal: cxp ? Number(cxp.montoTotal) : null,
+            ordenSaldo: cxp ? Number(cxp.saldo) : null,
+            esPagoAjuste,
           });
         }
       }
@@ -862,7 +886,14 @@ export class GastosController {
         include: {
           metodoPago: true,
           registradoPor: { select: { nombre: true } },
-          ordenCompra: { include: { proveedor: true } },
+          ordenCompra: {
+            include: {
+              proveedor: true,
+              cuentaPorPagar: {
+                select: { montoTotal: true, saldo: true },
+              },
+            },
+          },
         },
       });
 
@@ -923,17 +954,26 @@ export class GastosController {
       for (const ab of abonosCompra) {
         const monto = Number(ab.monto);
         totalEgresos += monto;
+        const ref = ab.referencia || '';
+        const esPagoAjuste = /ajuste por edición/i.test(ref);
+        const cxp = ab.ordenCompra?.cuentaPorPagar;
+        const baseDesc = esPagoAjuste
+          ? `Pago ajuste OC ${ab.ordenCompra?.numero || ''}`
+          : `Pago OC ${ab.ordenCompra?.numero || ''}`;
         recentMovements.push({
           id: ab.id,
           tipo: 'egreso',
           origen: 'orden_compra',
           fecha: ab.fecha,
           monto,
-          descripcion: `Pago OC ${ab.ordenCompra?.numero || ''}`,
-          referencia: ab.referencia || '',
+          descripcion: baseDesc,
+          referencia: ref,
           metodoPago: ab.metodoPago?.nombre || 'No especificado',
           entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
           usuario: ab.registradoPor?.nombre || '—',
+          ordenTotal: cxp ? Number(cxp.montoTotal) : null,
+          ordenSaldo: cxp ? Number(cxp.saldo) : null,
+          esPagoAjuste,
         });
       }
 
