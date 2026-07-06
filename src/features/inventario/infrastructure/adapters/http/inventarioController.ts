@@ -20,7 +20,31 @@ export class InventarioController {
   }
 
   private userRol(req: Request): string | undefined {
-    return (req as any).user?.rol;
+    return (req as { user?: { rol?: string } }).user?.rol;
+  }
+
+  private userId(req: Request): string | undefined {
+    return (req as { user?: { id?: string } }).user?.id;
+  }
+
+  private isAdminRol(rol?: string): boolean {
+    const r = (rol || '').toLowerCase();
+    return r === 'admin' || r === 'administrador';
+  }
+
+  private prestamosQueryFromRequest(req: Request) {
+    const user = (req as { user?: { id?: string; rol?: string } }).user;
+    const isAdmin = this.isAdminRol(user?.rol);
+    return {
+      estado: this.str(req.query.estado),
+      page: req.query.page ? parseInt(String(req.query.page), 10) : undefined,
+      limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+      fechaInicio: this.str(req.query.fechaInicio),
+      fechaFin: this.str(req.query.fechaFin),
+      searchTool: this.str(req.query.searchTool),
+      filterPersona: this.str(req.query.filterPersona),
+      ...(!isAdmin && user?.id ? { responsableId: user.id } : {}),
+    };
   }
 
   // ── Materiales ──────────────────────────────────────────────────────────────
@@ -157,7 +181,7 @@ export class InventarioController {
 
   async listPrestamos(req: Request, res: Response) {
     try {
-      const data = await this.service.getPrestamos(this.str(req.query.estado));
+      const data = await this.service.getPrestamos(this.prestamosQueryFromRequest(req));
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }
@@ -174,9 +198,12 @@ export class InventarioController {
       const observacion = typeof req.body?.observacionDevolucion === 'string'
         ? req.body.observacionDevolucion.trim()
         : undefined;
+      const user = (req as { user?: { id?: string; rol?: string } }).user;
+      const actorUserId = this.isAdminRol(user?.rol) ? undefined : user?.id;
       const data = await this.service.devolverPrestamo(
         String(req.params.id),
         observacion || undefined,
+        actorUserId,
       );
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }

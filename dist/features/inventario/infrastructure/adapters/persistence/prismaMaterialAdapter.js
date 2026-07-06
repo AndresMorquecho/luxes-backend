@@ -212,13 +212,73 @@ export class PrismaMaterialAdapter {
         return row;
     }
     // ── Préstamos ────────────────────────────────────────────────────────────────
-    async listPrestamos(estado) {
+    async listPrestamos(options) {
+        return this.listPrestamosWithOptions(options);
+    }
+    buildPrestamosWhere(options) {
+        const where = {};
+        if (options.estado)
+            where.estado = options.estado;
+        if (options.responsableId)
+            where.responsableId = options.responsableId;
+        if (options.fechaInicio || options.fechaFin) {
+            const fechaSalida = {};
+            if (options.fechaInicio) {
+                const start = new Date(options.fechaInicio);
+                if (!Number.isNaN(start.getTime()))
+                    fechaSalida.gte = start;
+            }
+            if (options.fechaFin) {
+                const end = new Date(options.fechaFin);
+                if (!Number.isNaN(end.getTime())) {
+                    end.setHours(23, 59, 59, 999);
+                    fechaSalida.lte = end;
+                }
+            }
+            if (Object.keys(fechaSalida).length > 0)
+                where.fechaSalida = fechaSalida;
+        }
+        if (options.searchTool?.trim()) {
+            const term = options.searchTool.trim();
+            where.material = {
+                OR: [
+                    { nombre: { contains: term, mode: 'insensitive' } },
+                    { codigo: { contains: term, mode: 'insensitive' } },
+                ],
+            };
+        }
+        if (options.filterPersona?.trim()) {
+            where.responsable = {
+                nombre: { contains: options.filterPersona.trim(), mode: 'insensitive' },
+            };
+        }
+        return where;
+    }
+    async listPrestamosWithOptions(options) {
+        const where = this.buildPrestamosWhere(options || {});
+        const include = {
+            material: { select: { nombre: true, tipo: true, codigo: true, unidadMedida: true } },
+            responsable: { select: { nombre: true, username: true } },
+        };
+        const page = options?.page;
+        const limit = options?.limit;
+        if (page && limit) {
+            const skip = (page - 1) * limit;
+            const [rows, total] = await Promise.all([
+                this.prisma.prestamo.findMany({
+                    where,
+                    include,
+                    orderBy: { fechaSalida: 'desc' },
+                    skip,
+                    take: limit,
+                }),
+                this.prisma.prestamo.count({ where }),
+            ]);
+            return { items: rows, total };
+        }
         const rows = await this.prisma.prestamo.findMany({
-            where: estado ? { estado } : undefined,
-            include: {
-                material: { select: { nombre: true, tipo: true, codigo: true, unidadMedida: true } },
-                responsable: { select: { nombre: true, username: true } },
-            },
+            where,
+            include,
             orderBy: { fechaSalida: 'desc' },
         });
         return rows;

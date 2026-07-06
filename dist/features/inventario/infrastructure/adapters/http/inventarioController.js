@@ -18,6 +18,27 @@ export class InventarioController {
     userRol(req) {
         return req.user?.rol;
     }
+    userId(req) {
+        return req.user?.id;
+    }
+    isAdminRol(rol) {
+        const r = (rol || '').toLowerCase();
+        return r === 'admin' || r === 'administrador';
+    }
+    prestamosQueryFromRequest(req) {
+        const user = req.user;
+        const isAdmin = this.isAdminRol(user?.rol);
+        return {
+            estado: this.str(req.query.estado),
+            page: req.query.page ? parseInt(String(req.query.page), 10) : undefined,
+            limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+            fechaInicio: this.str(req.query.fechaInicio),
+            fechaFin: this.str(req.query.fechaFin),
+            searchTool: this.str(req.query.searchTool),
+            filterPersona: this.str(req.query.filterPersona),
+            ...(!isAdmin && user?.id ? { responsableId: user.id } : {}),
+        };
+    }
     // ── Materiales ──────────────────────────────────────────────────────────────
     async listMateriales(req, res) {
         try {
@@ -163,7 +184,7 @@ export class InventarioController {
     // ── Préstamos ────────────────────────────────────────────────────────────────
     async listPrestamos(req, res) {
         try {
-            const data = await this.service.getPrestamos(this.str(req.query.estado));
+            const data = await this.service.getPrestamos(this.prestamosQueryFromRequest(req));
             return this.ok(res, data);
         }
         catch (e) {
@@ -184,7 +205,9 @@ export class InventarioController {
             const observacion = typeof req.body?.observacionDevolucion === 'string'
                 ? req.body.observacionDevolucion.trim()
                 : undefined;
-            const data = await this.service.devolverPrestamo(String(req.params.id), observacion || undefined);
+            const user = req.user;
+            const actorUserId = this.isAdminRol(user?.rol) ? undefined : user?.id;
+            const data = await this.service.devolverPrestamo(String(req.params.id), observacion || undefined, actorUserId);
             return this.ok(res, data);
         }
         catch (e) {

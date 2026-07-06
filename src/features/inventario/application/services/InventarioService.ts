@@ -107,8 +107,17 @@ export class InventarioService {
 
   // ── Préstamos ────────────────────────────────────────────────────────────────
 
-  getPrestamos(estado?: string): Promise<PrestamoData[]> {
-    return this.repo.listPrestamos(estado);
+  getPrestamos(options?: {
+    estado?: string;
+    page?: number;
+    limit?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
+    searchTool?: string;
+    filterPersona?: string;
+    responsableId?: string;
+  }): Promise<PrestamoData[] | { items: PrestamoData[]; total: number }> {
+    return this.repo.listPrestamos(options);
   }
 
   async registrarPrestamo(data: Omit<PrestamoData, 'id' | 'fechaSalida'>): Promise<PrestamoData> {
@@ -134,9 +143,16 @@ export class InventarioService {
     return prestamo;
   }
 
-  async devolverPrestamo(id: string, observacionDevolucion?: string | null): Promise<PrestamoData> {
+  async devolverPrestamo(
+    id: string,
+    observacionDevolucion?: string | null,
+    actorUserId?: string,
+  ): Promise<PrestamoData> {
     const prestamo = await this.repo.findPrestamoById(id);
     if (!prestamo) throw new Error('Préstamo no encontrado.');
+    if (actorUserId && prestamo.responsableId !== actorUserId) {
+      throw new Error('No tienes permiso para registrar esta devolución.');
+    }
     if (prestamo.estado === 'devuelto') {
       throw new Error('Esta herramienta ya fue devuelta.');
     }

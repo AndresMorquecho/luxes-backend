@@ -76,8 +76,8 @@ export class InventarioService {
         }
     }
     // ── Préstamos ────────────────────────────────────────────────────────────────
-    getPrestamos(estado) {
-        return this.repo.listPrestamos(estado);
+    getPrestamos(options) {
+        return this.repo.listPrestamos(options);
     }
     async registrarPrestamo(data) {
         const mat = await this.repo.findById(data.materialId);
@@ -99,10 +99,13 @@ export class InventarioService {
         });
         return prestamo;
     }
-    async devolverPrestamo(id, observacionDevolucion) {
+    async devolverPrestamo(id, observacionDevolucion, actorUserId) {
         const prestamo = await this.repo.findPrestamoById(id);
         if (!prestamo)
             throw new Error('Préstamo no encontrado.');
+        if (actorUserId && prestamo.responsableId !== actorUserId) {
+            throw new Error('No tienes permiso para registrar esta devolución.');
+        }
         if (prestamo.estado === 'devuelto') {
             throw new Error('Esta herramienta ya fue devuelta.');
         }
