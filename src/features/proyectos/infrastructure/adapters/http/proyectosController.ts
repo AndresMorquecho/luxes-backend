@@ -3,7 +3,7 @@ import { prisma } from '../../../../../config/prismaClient.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
-import { notificarDevolucionHerramientasInstalacion } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
+import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
 
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
 
@@ -904,7 +904,6 @@ export class ProyectosController {
               autoAvance: true,
             },
           };
-          // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
           await prisma.notification.create({
             data: {
               title: payload.title,
@@ -915,14 +914,18 @@ export class ProyectosController {
           });
           await sendPushToRole('admin', payload);
           console.log(`[Proyecto ${id}] Notificación de instalación completada enviada a administradores`);
+        } catch (notifError) {
+          console.error('[Proyecto] Error sending push notification for completed installation:', notifError);
+        }
 
+        try {
           await notificarDevolucionHerramientasInstalacion({
             proyectoId: String(id),
             proyectoNombre: proyecto?.nombre || String(id),
-            datosInstalacion: datosMerged,
+            datosInstalacion: datosAGuardar as Record<string, unknown>,
           });
-        } catch (notifError) {
-          console.error('[Proyecto] Error sending push notification for completed installation:', notifError);
+        } catch (devolError) {
+          console.error('[Proyecto] Error registrando devoluciones de herramientas:', devolError);
         }
       }
 
@@ -935,6 +938,19 @@ export class ProyectosController {
     } catch (error) {
       console.error('[proyectos/avanzarFase]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al avanzar fase' } });
+    }
+  }
+
+  async sincronizarDevoluciones(_req: Request, res: Response): Promise<Response> {
+    try {
+      const procesados = await sincronizarDevolucionesInstalacionesPendientes();
+      return res.status(200).json({ success: true, data: { procesados } });
+    } catch (error) {
+      console.error('[proyectos/sincronizarDevoluciones]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al sincronizar devoluciones' },
+      });
     }
   }
 

@@ -8,6 +8,7 @@ type MaterialInstalacion = {
   cantidadLlevada?: number;
   responsable?: string;
   tipo?: string;
+  subtipo?: string;
   observacion?: string;
 };
 
@@ -20,6 +21,10 @@ function normalizeName(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+function normalizeSku(value: string): string {
+  return value.trim().replace(/\s+/g, '').toUpperCase();
+}
+
 function cantidadMaterial(m: MaterialInstalacion): number {
   const raw = m.cantidadLlevada ?? m.cantidad ?? 1;
   const n = Number(raw);
@@ -28,11 +33,14 @@ function cantidadMaterial(m: MaterialInstalacion): number {
 
 function esHerramientaRegistro(
   m: MaterialInstalacion,
-  material?: { tipo?: string | null; esPrestable?: boolean | null } | null,
+  material?: { tipo?: string | null; subtipo?: string | null; esPrestable?: boolean | null } | null,
 ): boolean {
+  if (String(m.responsable || '').trim()) return true;
   const tipo = String(m.tipo || '').toLowerCase();
-  if (tipo === 'herramienta') return true;
+  const subtipo = String(m.subtipo || '').toLowerCase();
+  if (tipo === 'herramienta' || subtipo === 'herramienta') return true;
   if (material?.tipo === 'herramienta') return true;
+  if (material?.subtipo === 'herramienta') return true;
   if (material?.esPrestable === true) return true;
   return false;
 }
@@ -40,9 +48,10 @@ function esHerramientaRegistro(
 async function findMaterial(m: MaterialInstalacion) {
   const sku = String(m.sku || '').trim();
   const nombre = String(m.nombre || '').trim();
+  const skuNorm = sku ? normalizeSku(sku) : '';
 
-  if (sku) {
-    const bySku = await prisma.material.findFirst({
+  if (sku && sku !== 'SIN-CODIGO') {
+    const byExactSku = await prisma.material.findFirst({
       where: {
         OR: [
           { codigo: { equals: sku, mode: 'insensitive' } },
@@ -50,12 +59,31 @@ async function findMaterial(m: MaterialInstalacion) {
         ],
       },
     });
-    if (bySku) return bySku;
+    if (byExactSku) return byExactSku;
+
+    const candidates = await prisma.material.findMany({
+      where: {
+        OR: [
+          { codigo: { not: null } },
+          { nombre: nombre ? { contains: nombre, mode: 'insensitive' } : undefined },
+        ],
+      },
+      take: 200,
+    });
+    const byNormSku = candidates.find(
+      (row) => row.codigo && normalizeSku(row.codigo) === skuNorm,
+    );
+    if (byNormSku) return byNormSku;
   }
 
   if (nombre) {
-    return prisma.material.findFirst({
+    const byNombre = await prisma.material.findFirst({
       where: { nombre: { equals: nombre, mode: 'insensitive' } },
+    });
+    if (byNombre) return byNombre;
+
+    return prisma.material.findFirst({
+      where: { nombre: { contains: nombre, mode: 'insensitive' } },
     });
   }
 
@@ -116,17 +144,64 @@ async function resolveUserIdForResponsable(
   return partial?.id ?? null;
 }
 
+async function getFallbackResponsableUserId(): Promise<string | null> {
+  const taller = await prisma.user.findFirst({
+    where: {
+      estado: 'activo',
+      OR: [
+        { rol: { equals: 'taller', mode: 'insensitive' } },
+        { rol: { equals: 'Taller', mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (taller) return taller.id;
+
+  const admin = await prisma.user.findFirst({
+    where: {
+      estado: 'activo',
+      OR: [
+        { rol: { equals: 'admin', mode: 'insensitive' } },
+        { rol: { equals: 'administrador', mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true },
+  });
+  return admin?.id ?? null;
+}
+
+async function yaRegistradoParaProyecto(proyectoId: string): Promise<boolean> {
+  const tag = `[PROYECTO_ID:${proyectoId}]`;
+  const existing = await prisma.prestamo.findFirst({
+    where: {
+      estado: 'prestado',
+      comentarios: { contains: tag },
+    },
+  });
+  return Boolean(existing);
+}
+
 async function registrarPrestamoDevolucion(
   materialId: string,
   responsableId: string,
   cantidad: number,
   comentarios: string,
-  responsableNombre: string,
+  encargadoNombre: string,
 ) {
-  const existing = await prisma.prestamo.findFirst({
-    where: { materialId, responsableId, estado: 'prestado' },
-  });
-  if (existing) return existing;
+  const tagMatch = comentarios.match(/\[PROYECTO_ID:(.+?)\]/);
+  const proyectoTag = tagMatch ? `[PROYECTO_ID:${tagMatch[1]}]` : null;
+
+  if (proyectoTag) {
+    const existing = await prisma.prestamo.findFirst({
+      where: {
+        materialId,
+        responsableId,
+        estado: 'prestado',
+        comentarios: { contains: proyectoTag },
+      },
+    });
+    if (existing) return existing;
+  }
 
   const mat = await prisma.material.findUnique({ where: { id: materialId } });
   if (!mat) return null;
@@ -147,7 +222,7 @@ async function registrarPrestamoDevolucion(
       data: {
         stockActual: { decrement: cantidad },
         estadoUso: 'EN USO',
-        aCargo: responsableNombre,
+        aCargo: encargadoNombre,
       },
     });
   } else {
@@ -155,12 +230,46 @@ async function registrarPrestamoDevolucion(
       where: { id: materialId },
       data: {
         estadoUso: 'EN USO',
-        aCargo: responsableNombre,
+        aCargo: encargadoNombre,
       },
     });
   }
 
   return prestamo;
+}
+
+async function cargarDatosInstalacion(
+  proyectoId: string,
+  datosInstalacion: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const materiales = datosInstalacion.materiales;
+  const personal = datosInstalacion.personalAsignado;
+  if (Array.isArray(materiales) && materiales.length > 0) {
+    return datosInstalacion;
+  }
+
+  const fase = await prisma.proyectoFase.findUnique({
+    where: {
+      proyectoId_fase: { proyectoId, fase: 'INSTALACION' },
+    },
+  });
+  if (!fase?.datos) return datosInstalacion;
+
+  try {
+    const parsed = JSON.parse(fase.datos) as Record<string, unknown>;
+    return {
+      ...parsed,
+      ...datosInstalacion,
+      materiales: Array.isArray(datosInstalacion.materiales) && datosInstalacion.materiales.length
+        ? datosInstalacion.materiales
+        : parsed.materiales,
+      personalAsignado: Array.isArray(datosInstalacion.personalAsignado) && datosInstalacion.personalAsignado.length
+        ? datosInstalacion.personalAsignado
+        : parsed.personalAsignado,
+    };
+  } catch {
+    return datosInstalacion;
+  }
 }
 
 /**
@@ -172,26 +281,51 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
   proyectoNombre: string;
   datosInstalacion: Record<string, unknown>;
 }): Promise<void> {
-  const materiales = Array.isArray(params.datosInstalacion.materiales)
-    ? (params.datosInstalacion.materiales as MaterialInstalacion[])
+  if (await yaRegistradoParaProyecto(params.proyectoId)) {
+    console.log(`[instalacionDevolucion] Préstamos ya registrados para ${params.proyectoId}`);
+    return;
+  }
+
+  const datosInstalacion = await cargarDatosInstalacion(
+    params.proyectoId,
+    params.datosInstalacion,
+  );
+
+  const materiales = Array.isArray(datosInstalacion.materiales)
+    ? (datosInstalacion.materiales as MaterialInstalacion[])
     : [];
-  const personalAsignado = Array.isArray(params.datosInstalacion.personalAsignado)
-    ? (params.datosInstalacion.personalAsignado as PersonalAsignado[])
+  const personalAsignado = Array.isArray(datosInstalacion.personalAsignado)
+    ? (datosInstalacion.personalAsignado as PersonalAsignado[])
     : [];
 
   const candidatos = materiales.filter((m) => String(m.responsable || '').trim());
-  if (candidatos.length === 0) return;
+  if (candidatos.length === 0) {
+    console.log(`[instalacionDevolucion] Sin herramientas con responsable en ${params.proyectoId}`);
+    return;
+  }
 
   const herramientas: Array<MaterialInstalacion & { materialId?: string }> = [];
   for (const item of candidatos) {
     const material = await findMaterial(item);
-    if (!esHerramientaRegistro(item, material)) continue;
-    herramientas.push({ ...item, materialId: material?.id });
+    if (!esHerramientaRegistro(item, material)) {
+      console.log(`[instalacionDevolucion] Omitido (no es herramienta): ${item.nombre}`);
+      continue;
+    }
+    if (!material?.id) {
+      console.log(`[instalacionDevolucion] Material no encontrado en inventario: ${item.nombre} (${item.sku || 'sin sku'})`);
+      continue;
+    }
+    herramientas.push({ ...item, materialId: material.id });
   }
 
-  if (herramientas.length === 0) return;
+  if (herramientas.length === 0) {
+    console.log(`[instalacionDevolucion] Ninguna herramienta válida para ${params.proyectoId}`);
+    return;
+  }
 
+  const fallbackUserId = await getFallbackResponsableUserId();
   const porEncargado = new Map<string, typeof herramientas>();
+
   for (const h of herramientas) {
     const key = normalizeName(String(h.responsable));
     if (!porEncargado.has(key)) porEncargado.set(key, []);
@@ -201,19 +335,21 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
   for (const tools of porEncargado.values()) {
     const responsableNombre = String(tools[0].responsable || '').trim();
     const userId = await resolveUserIdForResponsable(responsableNombre, personalAsignado);
+    const prestamoUserId = userId || fallbackUserId;
 
     const toolLabels: string[] = [];
     for (const tool of tools) {
       const qty = cantidadMaterial(tool);
       toolLabels.push(`${tool.nombre}${qty > 1 ? ` (x${qty})` : ''}`);
 
-      if (tool.materialId && userId) {
+      if (tool.materialId && prestamoUserId) {
+        const encargadoPrefix = userId ? '' : `Encargado: ${responsableNombre} | `;
         try {
           await registrarPrestamoDevolucion(
             tool.materialId,
-            userId,
+            prestamoUserId,
             qty,
-            `Devolución pendiente tras instalación del proyecto ${params.proyectoNombre} [PROYECTO_ID:${params.proyectoId}]`,
+            `${encargadoPrefix}Devolución pendiente tras instalación del proyecto ${params.proyectoNombre} [PROYECTO_ID:${params.proyectoId}]`,
             responsableNombre,
           );
         } catch (err) {
@@ -244,7 +380,7 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
             url: '/devoluciones',
             proyectoId: params.proyectoId,
           },
-        });
+        }).catch(() => {});
       } else {
         await prisma.notification.create({
           data: {
@@ -256,10 +392,39 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
         });
       }
       console.log(
-        `[Proyecto ${params.proyectoId}] Devolución notificada a ${responsableNombre} (${userId || 'sin usuario vinculado'})`,
+        `[instalacionDevolucion] ${params.proyectoId} → ${responsableNombre} (${userId || 'taller'})`,
       );
     } catch (err) {
       console.error('[instalacionDevolucion] Error enviando notificación:', err);
     }
   }
+}
+
+/** Procesa instalaciones ya completadas que aún no tienen préstamos de devolución. */
+export async function sincronizarDevolucionesInstalacionesPendientes(): Promise<number> {
+  const fases = await prisma.proyectoFase.findMany({
+    where: { fase: 'INSTALACION' },
+    include: {
+      proyecto: { select: { id: true, nombre: true } },
+    },
+  });
+
+  let procesados = 0;
+  for (const fase of fases) {
+    try {
+      const datos = fase.datos ? (JSON.parse(fase.datos) as Record<string, unknown>) : {};
+      if (datos.instalacionCompletada !== true) continue;
+      if (await yaRegistradoParaProyecto(fase.proyectoId)) continue;
+
+      await notificarDevolucionHerramientasInstalacion({
+        proyectoId: fase.proyectoId,
+        proyectoNombre: fase.proyecto?.nombre || fase.proyectoId,
+        datosInstalacion: datos,
+      });
+      procesados += 1;
+    } catch (err) {
+      console.error(`[instalacionDevolucion] Error sincronizando ${fase.proyectoId}:`, err);
+    }
+  }
+  return procesados;
 }
