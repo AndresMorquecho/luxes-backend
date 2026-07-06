@@ -161,6 +161,7 @@ export interface ComprasRepositoryPort {
     abonoMonto?: number;
     metodoPagoId?: string;
     abonoReferencia?: string;
+    registradoPorUserId?: string | null;
     fechaRecepcion?: Date;
     notasRecepcion?: string;
     recibidoPorId?: string;
@@ -184,6 +185,7 @@ export interface ComprasRepositoryPort {
     metodoPagoId: string;
     monto: number;
     referencia?: string;
+    registradoPorUserId?: string | null;
   }): Promise<AbonoCompraData>;
 
   // ── Cuentas por Pagar ──

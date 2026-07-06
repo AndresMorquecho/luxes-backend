@@ -29,6 +29,9 @@ model User {
   tareasCreadas       Tarea[]           @relation("TareasCreadas")
   tareasAsignadas     TareaAsignacion[] @relation("TareasAsignadas")
   cierresCaja         CierreCaja[]
+  abonosProformaRegistrados AbonoProforma[] @relation("AbonoProformaRegistradoPor")
+  gastosRegistrados         Gasto[]         @relation("GastoRegistradoPor")
+  abonosCompraRegistrados   AbonoCompra[]   @relation("AbonoCompraRegistradoPor")
   empleadoId          String?       @unique @map("empleado_id")
   empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
 
@@ -251,9 +254,12 @@ model AbonoCompra {
   monto           Float
   fecha           DateTime     @default(now())
   referencia      String?
+  registradoPorUserId String?  @map("registrado_por_user_id")
+  registradoPor       User?    @relation("AbonoCompraRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
 
   @@index([ordenCompraId])
   @@index([metodoPagoId])
+  @@index([registradoPorUserId])
   @@map("abonos_compra")
 }
 
@@ -576,9 +582,12 @@ model AbonoProforma {
   monto         Float
   fecha         DateTime   @default(now())
   referencia    String?
+  registradoPorUserId String? @map("registrado_por_user_id")
+  registradoPor       User?   @relation("AbonoProformaRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
 
   @@index([proformaId])
   @@index([metodoPagoId])
+  @@index([registradoPorUserId])
   @@map("abonos_proforma")
 }
 
@@ -597,11 +606,14 @@ model Gasto {
   mantenimientos VehiculoMantenimiento[]
   metodoPagoId   String?                 @map("metodo_pago_id")
   metodoPago     MetodoPago?             @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
+  registradoPorUserId String?            @map("registrado_por_user_id")
+  registradoPor       User?              @relation("GastoRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
   createdAt      DateTime                @default(now()) @map("created_at")
   updatedAt      DateTime                @updatedAt @map("updated_at")
 
   @@index([proyectoId])
   @@index([metodoPagoId])
+  @@index([registradoPorUserId])
   @@map("gastos")
 }
 

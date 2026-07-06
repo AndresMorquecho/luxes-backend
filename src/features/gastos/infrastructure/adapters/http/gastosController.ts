@@ -39,7 +39,8 @@ export class GastosController {
       }
 
       const id = b.id && String(b.id).startsWith('GTO-') ? b.id : await nextGastoId();
-      
+      const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
+
       const gasto = await prisma.gasto.create({
         data: {
           id,
@@ -51,6 +52,7 @@ export class GastosController {
           notas: b.notas ?? '',
           proyectoId: b.proyectoId || null,
           metodoPagoId: b.metodoPagoId || null,
+          registradoPorUserId: registradoPorUserId ?? undefined,
         },
         include: { metodoPago: true },
       });
@@ -321,6 +323,7 @@ export class GastosController {
           where: whereIngreso,
           include: {
             metodoPago: true,
+            registradoPor: { select: { nombre: true } },
             proforma: {
               include: {
                 cliente: { select: { nombre: true } },
@@ -342,7 +345,7 @@ export class GastosController {
             metodoPago: ab.metodoPago?.nombre || 'No especificado',
             metodoPagoId: ab.metodoPagoId,
             entidad: ab.proforma?.clienteNombre || ab.proforma?.cliente?.nombre || 'Cliente no especificado',
-            usuario: ab.proforma?.atiende || '—',
+            usuario: ab.registradoPor?.nombre || '—',
           });
         }
       }
@@ -356,7 +359,10 @@ export class GastosController {
 
         const gastos = await prisma.gasto.findMany({
           where: whereGasto,
-          include: { metodoPago: true },
+          include: {
+            metodoPago: true,
+            registradoPor: { select: { nombre: true } },
+          },
           orderBy: { fecha: 'desc' },
         });
 
@@ -372,7 +378,7 @@ export class GastosController {
             metodoPago: g.metodoPago?.nombre || 'No especificado',
             metodoPagoId: g.metodoPagoId,
             entidad: g.proveedor || g.categoria || '',
-            usuario: '—',
+            usuario: g.registradoPor?.nombre || '—',
           });
         }
 
@@ -386,11 +392,10 @@ export class GastosController {
           where: whereAbono,
           include: {
             metodoPago: true,
+            registradoPor: { select: { nombre: true } },
             ordenCompra: {
               include: {
                 proveedor: { select: { nombre: true } },
-                usuario: { select: { nombre: true } },
-                aprobadoPor: { select: { nombre: true } },
               },
             },
           },
@@ -409,7 +414,7 @@ export class GastosController {
             metodoPago: ab.metodoPago?.nombre || 'No especificado',
             metodoPagoId: ab.metodoPagoId,
             entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
-            usuario: ab.ordenCompra?.aprobadoPor?.nombre || ab.ordenCompra?.usuario?.nombre || '—',
+            usuario: ab.registradoPor?.nombre || '—',
           });
         }
       }

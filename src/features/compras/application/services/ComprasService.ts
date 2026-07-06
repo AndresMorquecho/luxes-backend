@@ -123,6 +123,7 @@ export class ComprasService {
     abonoMonto?: number;
     metodoPagoId?: string;
     abonoReferencia?: string;
+    registradoPorUserId?: string | null;
     fechaRecepcion?: Date;
     notasRecepcion?: string;
     recibidoPorId?: string;
@@ -152,6 +153,7 @@ export class ComprasService {
     metodoPagoId: string;
     monto: number;
     referencia?: string;
+    registradoPorUserId?: string | null;
   }): Promise<AbonoCompraData> {
     if (data.monto <= 0) throw new Error('El monto del abono debe ser mayor a 0.');
 

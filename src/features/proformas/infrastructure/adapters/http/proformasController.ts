@@ -508,6 +508,7 @@ export class ProformasController {
       const nuevoEstado = abonoMonto >= (total - 0.01) ? 'Pagada' : 'Aprobada';
 
       const result = await prisma.$transaction(async (tx) => {
+        const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
         // 1. Crear el abono
         await tx.abonoProforma.create({
           data: {
@@ -515,6 +516,7 @@ export class ProformasController {
             metodoPagoId: String(metodoPagoId),
             monto: abonoMonto,
             referencia: referencia ?? '',
+            registradoPorUserId: registradoPorUserId ?? undefined,
           },
         });
 
@@ -631,6 +633,7 @@ export class ProformasController {
       const nuevoEstado = (yaCobrado + abonoMonto) >= (total - 0.01) ? 'Pagada' : 'Aprobada';
 
       const result = await prisma.$transaction(async (tx) => {
+        const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
         // 1. Crear el abono
         await tx.abonoProforma.create({
           data: {
@@ -638,6 +641,7 @@ export class ProformasController {
             metodoPagoId: String(metodoPagoId),
             monto: abonoMonto,
             referencia: referencia ?? '',
+            registradoPorUserId: registradoPorUserId ?? undefined,
           },
         });
 

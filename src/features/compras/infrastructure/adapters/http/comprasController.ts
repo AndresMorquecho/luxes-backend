@@ -156,6 +156,10 @@ export class ComprasController {
         updateData.aprobadoPorId = userId;
       }
 
+      if (updateData.abonoMonto && userId) {
+        updateData.registradoPorUserId = userId;
+      }
+
       const data = await this.service.updateOrden(id, updateData);
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }
@@ -208,9 +212,11 @@ export class ComprasController {
 
   async createAbono(req: Request, res: Response) {
     try {
+      const userId = (req as { user?: { id?: string } }).user?.id || null;
       const data = await this.service.registrarAbono({
         ...req.body,
         ordenCompraId: String(req.params.id),
+        registradoPorUserId: userId,
       });
       return res.status(201).json({ success: true, data });
     } catch (e) { return this.fail(res, e, 400); }

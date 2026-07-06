@@ -417,6 +417,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     abonoMonto?: number;
     metodoPagoId?: string;
     abonoReferencia?: string;
+    registradoPorUserId?: string | null;
     fechaRecepcion?: Date;
     notasRecepcion?: string;
     recibidoPorId?: string;
@@ -533,10 +534,11 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       // Registrar el abono
       await this.prisma.abonoCompra.create({
         data: {
-          ordenCompra: { connect: { id } },
-          metodoPago: { connect: { id: data.metodoPagoId } },
+          ordenCompraId: id,
+          metodoPagoId: data.metodoPagoId,
           monto: abonoMonto,
           referencia: data.abonoReferencia || null,
+          registradoPorUserId: data.registradoPorUserId ?? undefined,
         }
       });
 
@@ -764,13 +766,15 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     metodoPagoId: string;
     monto: number;
     referencia?: string;
+    registradoPorUserId?: string | null;
   }): Promise<AbonoCompraData> {
     const row = await this.prisma.abonoCompra.create({
       data: {
-        ordenCompra: { connect: { id: data.ordenCompraId } },
-        metodoPago: { connect: { id: data.metodoPagoId } },
+        ordenCompraId: data.ordenCompraId,
+        metodoPagoId: data.metodoPagoId,
         monto: data.monto,
         referencia: data.referencia,
+        registradoPorUserId: data.registradoPorUserId ?? undefined,
       },
       include: { metodoPago: true },
     });
