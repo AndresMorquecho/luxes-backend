@@ -90,7 +90,47 @@ export class GastosController {
         };
       });
 
-      const data = [...gastosManual, ...pagosCompra].sort(
+      const compromisosOC = await prisma.cuentaPorPagar.findMany({
+        where: {
+          saldo: { gt: 0.01 },
+          ordenCompra: {
+            estado: { in: ['aprobada', 'parcialmente_recibida'] },
+          },
+        },
+        include: {
+          ordenCompra: {
+            include: { proveedor: { select: { nombre: true } } },
+          },
+        },
+      });
+
+      const saldosPendientes = compromisosOC.map((cxp) => {
+        const total = Number(cxp.montoTotal);
+        const saldo = Number(cxp.saldo);
+        return {
+          id: `cxp-saldo-${cxp.id}`,
+          concepto: `Saldo pendiente OC ${cxp.ordenCompra?.numero || ''}`.trim(),
+          categoria: 'compras',
+          fecha: cxp.ordenCompra?.fecha || new Date(),
+          monto: saldo,
+          proveedor: cxp.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
+          notas: `Total orden $${total.toFixed(2)} — aún por pagar en caja`,
+          metodoPagoId: null,
+          metodoPago: null,
+          registradoPor: null,
+          origen: 'cuenta_por_pagar' as const,
+          readonly: true,
+          referencia: '',
+          ordenCompraId: cxp.ordenCompraId,
+          ordenNumero: cxp.ordenCompra?.numero || null,
+          ordenTotal: total,
+          ordenPagado: Number(cxp.montoPagado),
+          ordenSaldo: saldo,
+          esCompromiso: true,
+        };
+      });
+
+      const data = [...gastosManual, ...pagosCompra, ...saldosPendientes].sort(
         (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
       );
 
@@ -376,7 +416,7 @@ export class GastosController {
       interface Movimiento {
         id: string;
         tipo: 'ingreso' | 'egreso';
-        origen: 'proforma' | 'gasto' | 'orden_compra';
+        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar';
         fecha: Date;
         monto: number;
         descripcion: string;
@@ -385,6 +425,10 @@ export class GastosController {
         metodoPagoId: string | null;
         entidad: string;
         usuario: string;
+        esCompromiso?: boolean;
+        ordenTotal?: number | null;
+        ordenSaldo?: number | null;
+        esPagoAjuste?: boolean;
       }
 
       const movimientos: Movimiento[] = [];
@@ -506,14 +550,59 @@ export class GastosController {
             esPagoAjuste,
           });
         }
+
+        // 4. EGRESOS — Saldos pendientes de órdenes de compra (compromiso, no caja)
+        if (!metodoPagoId) {
+          const cxpPendientes = await prisma.cuentaPorPagar.findMany({
+            where: {
+              saldo: { gt: 0.01 },
+              ordenCompra: {
+                estado: { in: ['aprobada', 'parcialmente_recibida'] },
+                fecha: { gte: desdeDate, lte: hastaLimit },
+              },
+            },
+            include: {
+              ordenCompra: {
+                include: { proveedor: { select: { nombre: true } } },
+              },
+            },
+          });
+
+          for (const cxp of cxpPendientes) {
+            const oc = cxp.ordenCompra;
+            if (!oc) continue;
+            const saldo = Number(cxp.saldo);
+            const total = Number(cxp.montoTotal);
+            movimientos.push({
+              id: `cxp-saldo-${cxp.id}`,
+              tipo: 'egreso',
+              origen: 'cuenta_por_pagar',
+              fecha: oc.fecha,
+              monto: saldo,
+              descripcion: `Saldo pendiente OC ${oc.numero}`,
+              referencia: `Total orden $${total.toFixed(2)} — aún por pagar`,
+              metodoPago: 'Cuenta por pagar',
+              metodoPagoId: null,
+              entidad: oc.proveedor?.nombre || 'Sin proveedor',
+              usuario: '—',
+              esCompromiso: true,
+              ordenTotal: total,
+              ordenSaldo: saldo,
+            });
+          }
+        }
       }
 
       // Sort unified by date descending
       movimientos.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 
-      // Compute KPIs
-      const totalIngresos = movimientos.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0);
-      const totalEgresos = movimientos.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0);
+      // Compute KPIs (caja + compromisos OC pendientes)
+      const movCaja = movimientos.filter((m) => !m.esCompromiso);
+      const compromisos = movimientos.filter((m) => m.esCompromiso);
+      const totalIngresos = movCaja.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0);
+      const totalEgresosCaja = movCaja.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0);
+      const totalCompromisos = compromisos.reduce((s, m) => s + m.monto, 0);
+      const totalEgresos = totalEgresosCaja + totalCompromisos;
 
       return res.status(200).json({
         success: true,
@@ -522,6 +611,8 @@ export class GastosController {
           kpi: {
             totalIngresos,
             totalEgresos,
+            totalEgresosCaja,
+            totalCompromisos,
             balance: totalIngresos - totalEgresos,
             conteo: movimientos.length,
           },
@@ -607,6 +698,22 @@ export class GastosController {
         egresosCategoria['compras'] = (egresosCategoria['compras'] || 0) + monto;
         const method = ab.metodoPago?.nombre || 'No especificado';
         egresosMetodo[method] = (egresosMetodo[method] || 0) + monto;
+      }
+
+      const cxpReporte = await prisma.cuentaPorPagar.findMany({
+        where: {
+          saldo: { gt: 0.01 },
+          ordenCompra: {
+            estado: { in: ['aprobada', 'parcialmente_recibida'] },
+            fecha: { gte: desdeDate, lte: hastaLimit },
+          },
+        },
+      });
+      for (const cxp of cxpReporte) {
+        const saldo = Number(cxp.saldo);
+        totalEgresos += saldo;
+        egresosCategoria['compras'] = (egresosCategoria['compras'] || 0) + saldo;
+        egresosMetodo['Cuenta por pagar'] = (egresosMetodo['Cuenta por pagar'] || 0) + saldo;
       }
 
       // 3. Evolución mensual (últimos 6 meses)
@@ -900,7 +1007,7 @@ export class GastosController {
       interface Movement {
         id: string;
         tipo: 'ingreso' | 'egreso';
-        origen: 'proforma' | 'gasto' | 'orden_compra';
+        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar';
         fecha: Date;
         monto: number;
         descripcion: string;
@@ -971,9 +1078,38 @@ export class GastosController {
           metodoPago: ab.metodoPago?.nombre || 'No especificado',
           entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
           usuario: ab.registradoPor?.nombre || '—',
-          ordenTotal: cxp ? Number(cxp.montoTotal) : null,
-          ordenSaldo: cxp ? Number(cxp.saldo) : null,
-          esPagoAjuste,
+        });
+      }
+
+      // Expenses - OC saldos pendientes (compromiso)
+      const cxpDashboard = await prisma.cuentaPorPagar.findMany({
+        where: {
+          saldo: { gt: 0.01 },
+          ordenCompra: {
+            estado: { in: ['aprobada', 'parcialmente_recibida'] },
+            fecha: { gte: desdeDate, lte: hastaLimit },
+          },
+        },
+        include: {
+          ordenCompra: { include: { proveedor: true } },
+        },
+      });
+      for (const cxp of cxpDashboard) {
+        const saldo = Number(cxp.saldo);
+        const oc = cxp.ordenCompra;
+        if (!oc) continue;
+        totalEgresos += saldo;
+        recentMovements.push({
+          id: `cxp-saldo-${cxp.id}`,
+          tipo: 'egreso',
+          origen: 'cuenta_por_pagar',
+          fecha: oc.fecha,
+          monto: saldo,
+          descripcion: `Saldo pendiente OC ${oc.numero}`,
+          referencia: `Total $${Number(cxp.montoTotal).toFixed(2)}`,
+          metodoPago: 'Cuenta por pagar',
+          entidad: oc.proveedor?.nombre || 'Sin proveedor',
+          usuario: '—',
         });
       }
 

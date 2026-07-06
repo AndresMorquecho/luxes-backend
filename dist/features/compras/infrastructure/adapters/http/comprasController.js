@@ -147,6 +147,12 @@ export class ComprasController {
                     error: { message: 'No tienes permiso para modificar esta orden.' },
                 });
             }
+            const esNuevaAprobacion = updateData.estado === 'aprobada' && orden.estado !== 'aprobada';
+            // Evitar re-aprobación accidental al editar una orden ya aprobada
+            if (orden.estado === 'aprobada' && updateData.estado === 'aprobada') {
+                delete updateData.estado;
+                delete updateData.aprobadoPorId;
+            }
             if (!hasAprobacion && isCreatorPending) {
                 delete updateData.estado;
                 delete updateData.aprobadoPorId;
@@ -155,8 +161,8 @@ export class ComprasController {
                 delete updateData.abonoReferencia;
                 delete updateData.registrarAbonoAjuste;
             }
-            // Abono: en aprobación inicial o en edición solo si se marca explícitamente
-            const esAprobacionConAbono = updateData.estado === 'aprobada' && Number(updateData.abonoMonto) > 0;
+            // Abono: solo en aprobación nueva o en edición con flag explícito
+            const esAprobacionConAbono = esNuevaAprobacion && Number(updateData.abonoMonto) > 0;
             const esAjusteFinanciero = updateData.registrarAbonoAjuste === true;
             if (!esAprobacionConAbono && !esAjusteFinanciero) {
                 delete updateData.abonoMonto;

@@ -138,7 +138,9 @@ export class ComprasService {
       throw new Error('La orden debe conservar al menos un item.');
     }
 
-    const abonoMonto = (data.registrarAbonoAjuste === true || data.estado === 'aprobada')
+    const esNuevaAprobacion =
+      data.estado === 'aprobada' && orden.estado !== 'aprobada';
+    const abonoMonto = (data.registrarAbonoAjuste === true || esNuevaAprobacion)
       ? (Number(data.abonoMonto) || 0)
       : 0;
     if (abonoMonto > 0) {

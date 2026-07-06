@@ -437,7 +437,8 @@ export class PrismaComprasAdapter {
         const cxp = await this.prisma.cuentaPorPagar.findUnique({
             where: { ordenCompraId: id },
         });
-        const abonoMonto = (data.registrarAbonoAjuste === true || data.estado === 'aprobada')
+        const esNuevaAprobacion = data.estado === 'aprobada' && ordenAnterior?.estado !== 'aprobada';
+        const abonoMonto = (data.registrarAbonoAjuste === true || esNuevaAprobacion)
             ? (Number(data.abonoMonto) || 0)
             : 0;
         if (abonoMonto > 0 && data.metodoPagoId) {
