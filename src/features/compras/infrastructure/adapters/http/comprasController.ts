@@ -144,13 +144,33 @@ export class ComprasController {
         });
       }
 
+      const esNuevaAprobacion =
+        updateData.estado === 'aprobada' && orden.estado !== 'aprobada';
+      // Evitar re-aprobación accidental al editar una orden ya aprobada
+      if (orden.estado === 'aprobada' && updateData.estado === 'aprobada') {
+        delete updateData.estado;
+        delete updateData.aprobadoPorId;
+      }
+
       if (!hasAprobacion && isCreatorPending) {
         delete updateData.estado;
         delete updateData.aprobadoPorId;
         delete updateData.abonoMonto;
         delete updateData.metodoPagoId;
         delete updateData.abonoReferencia;
+        delete updateData.registrarAbonoAjuste;
       }
+
+      // Abono: solo en aprobación nueva o en edición con flag explícito
+      const esAprobacionConAbono =
+        esNuevaAprobacion && Number(updateData.abonoMonto) > 0;
+      const esAjusteFinanciero = updateData.registrarAbonoAjuste === true;
+      if (!esAprobacionConAbono && !esAjusteFinanciero) {
+        delete updateData.abonoMonto;
+        delete updateData.metodoPagoId;
+        delete updateData.abonoReferencia;
+      }
+      delete updateData.registrarAbonoAjuste;
 
       if (updateData.estado === 'aprobada' && userId) {
         updateData.aprobadoPorId = userId;

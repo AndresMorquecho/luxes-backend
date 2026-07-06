@@ -147,15 +147,34 @@ export class ComprasController {
                     error: { message: 'No tienes permiso para modificar esta orden.' },
                 });
             }
+            const esNuevaAprobacion = updateData.estado === 'aprobada' && orden.estado !== 'aprobada';
+            // Evitar re-aprobación accidental al editar una orden ya aprobada
+            if (orden.estado === 'aprobada' && updateData.estado === 'aprobada') {
+                delete updateData.estado;
+                delete updateData.aprobadoPorId;
+            }
             if (!hasAprobacion && isCreatorPending) {
                 delete updateData.estado;
                 delete updateData.aprobadoPorId;
                 delete updateData.abonoMonto;
                 delete updateData.metodoPagoId;
                 delete updateData.abonoReferencia;
+                delete updateData.registrarAbonoAjuste;
             }
+            // Abono: solo en aprobación nueva o en edición con flag explícito
+            const esAprobacionConAbono = esNuevaAprobacion && Number(updateData.abonoMonto) > 0;
+            const esAjusteFinanciero = updateData.registrarAbonoAjuste === true;
+            if (!esAprobacionConAbono && !esAjusteFinanciero) {
+                delete updateData.abonoMonto;
+                delete updateData.metodoPagoId;
+                delete updateData.abonoReferencia;
+            }
+            delete updateData.registrarAbonoAjuste;
             if (updateData.estado === 'aprobada' && userId) {
                 updateData.aprobadoPorId = userId;
+            }
+            if (updateData.abonoMonto && userId) {
+                updateData.registradoPorUserId = userId;
             }
             const data = await this.service.updateOrden(id, updateData);
             return this.ok(res, data);
@@ -212,9 +231,11 @@ export class ComprasController {
     }
     async createAbono(req, res) {
         try {
+            const userId = req.user?.id || null;
             const data = await this.service.registrarAbono({
                 ...req.body,
                 ordenCompraId: String(req.params.id),
+                registradoPorUserId: userId,
             });
             return res.status(201).json({ success: true, data });
         }

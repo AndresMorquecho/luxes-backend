@@ -417,6 +417,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     abonoMonto?: number;
     metodoPagoId?: string;
     abonoReferencia?: string;
+    registrarAbonoAjuste?: boolean;
     registradoPorUserId?: string | null;
     fechaRecepcion?: Date;
     notasRecepcion?: string;
@@ -479,13 +480,19 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       const detallesData = data.detalles.map(d => ({
         descripcion: d.descripcion,
         cantidad: d.cantidad,
-        precioUnitario: d.precioUnitario,
-        subtotal: d.cantidad * d.precioUnitario,
+        precioUnitario: d.precioUnitario ?? 0,
+        subtotal: d.cantidad * (d.precioUnitario ?? 0),
         materialId: d.materialId || undefined,
       }));
 
       const subtotal = detallesData.reduce((sum, d) => sum + d.subtotal, 0);
-      const impuesto = data.impuesto ?? 0;
+      const ordenActual = await this.prisma.ordenCompra.findUnique({
+        where: { id },
+        select: { impuesto: true },
+      });
+      const impuesto = data.impuesto !== undefined
+        ? data.impuesto
+        : Number(ordenActual?.impuesto ?? 0);
       total = subtotal + impuesto;
 
       updateData.subtotal = subtotal;
@@ -529,7 +536,11 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       where: { ordenCompraId: id },
     });
 
-    const abonoMonto = data.abonoMonto || 0;
+    const esNuevaAprobacion =
+      data.estado === 'aprobada' && ordenAnterior?.estado !== 'aprobada';
+    const abonoMonto = (data.registrarAbonoAjuste === true || esNuevaAprobacion)
+      ? (Number(data.abonoMonto) || 0)
+      : 0;
     if (abonoMonto > 0 && data.metodoPagoId) {
       // Registrar el abono
       await this.prisma.abonoCompra.create({
@@ -605,6 +616,14 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       include: this.ordenInclude,
     });
 
+    const byOrden = await this.loadDetallesForOrdenIds([id]);
+    const detallesActualizados = byOrden.get(id) || (row as { detalles?: DetalleCompraData[] }).detalles || [];
+
+    const ordenActualizada = {
+      ...row,
+      detalles: detallesActualizados,
+    };
+
     // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto (Deshabilitado en Costeo por Consumo)
     /*
     if (data.estado === 'aprobada' && row.proyectoId) {
@@ -638,7 +657,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
               where: { id: data.aprobadoPorId },
               select: { nombre: true },
             })
-          : (row as any).aprobadoPor;
+          : (ordenActualizada as any).aprobadoPor;
 
         const aprobadorNombre = aprobador?.nombre || 'Administración';
 
@@ -728,7 +747,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       }
     }
 
-    return row as unknown as OrdenCompraData;
+    return ordenActualizada as unknown as OrdenCompraData;
   }
 
   async updateDetalleRecepcion(id: string, data: {
