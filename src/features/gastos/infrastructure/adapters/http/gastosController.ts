@@ -20,11 +20,67 @@ export class GastosController {
 
   async list(_req: Request, res: Response): Promise<Response> {
     try {
-      const gastos = await prisma.gasto.findMany({
-        include: { metodoPago: true },
-        orderBy: { fecha: 'desc' },
-      });
-      return res.status(200).json({ success: true, data: gastos });
+      const [gastos, abonosCompra] = await Promise.all([
+        prisma.gasto.findMany({
+          include: {
+            metodoPago: true,
+            registradoPor: { select: { id: true, nombre: true } },
+          },
+          orderBy: { fecha: 'desc' },
+        }),
+        prisma.abonoCompra.findMany({
+          include: {
+            metodoPago: true,
+            registradoPor: { select: { id: true, nombre: true } },
+            ordenCompra: {
+              include: {
+                proveedor: { select: { nombre: true } },
+              },
+            },
+          },
+          orderBy: { fecha: 'desc' },
+        }),
+      ]);
+
+      const gastosManual = gastos.map((g) => ({
+        id: g.id,
+        concepto: g.concepto,
+        categoria: g.categoria,
+        fecha: g.fecha,
+        monto: Number(g.monto),
+        proveedor: g.proveedor,
+        notas: g.notas,
+        metodoPagoId: g.metodoPagoId,
+        metodoPago: g.metodoPago,
+        registradoPor: g.registradoPor,
+        origen: 'gasto' as const,
+        readonly: false,
+        referencia: '',
+      }));
+
+      const pagosCompra = abonosCompra.map((ab) => ({
+        id: ab.id,
+        concepto: `Pago OC ${ab.ordenCompra?.numero || ''}`.trim(),
+        categoria: 'compras',
+        fecha: ab.fecha,
+        monto: Number(ab.monto),
+        proveedor: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
+        notas: ab.referencia || '',
+        metodoPagoId: ab.metodoPagoId,
+        metodoPago: ab.metodoPago,
+        registradoPor: ab.registradoPor,
+        origen: 'orden_compra' as const,
+        readonly: true,
+        referencia: ab.referencia || '',
+        ordenCompraId: ab.ordenCompraId,
+        ordenNumero: ab.ordenCompra?.numero || null,
+      }));
+
+      const data = [...gastosManual, ...pagosCompra].sort(
+        (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
+      );
+
+      return res.status(200).json({ success: true, data });
     } catch (error) {
       console.error('[gastos/list]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener gastos' } });
@@ -98,6 +154,13 @@ export class GastosController {
   async remove(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
+      const pagoCompra = await prisma.abonoCompra.findUnique({ where: { id: String(id) } });
+      if (pagoCompra) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Los pagos de órdenes de compra no se eliminan desde Gastos.' },
+        });
+      }
       await prisma.gasto.delete({
         where: { id: String(id) },
       });
@@ -409,7 +472,9 @@ export class GastosController {
             origen: 'orden_compra',
             fecha: ab.fecha,
             monto: Number(ab.monto),
-            descripcion: `Pago OC ${ab.ordenCompra?.numero || ''}`,
+            descripcion: ab.referencia
+              ? `Pago OC ${ab.ordenCompra?.numero || ''} — ${ab.referencia}`.trim()
+              : `Pago OC ${ab.ordenCompra?.numero || ''}`,
             referencia: ab.referencia || '',
             metodoPago: ab.metodoPago?.nombre || 'No especificado',
             metodoPagoId: ab.metodoPagoId,

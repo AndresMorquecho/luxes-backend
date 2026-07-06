@@ -510,6 +510,12 @@ export class PrismaComprasAdapter {
             data: updateData,
             include: this.ordenInclude,
         });
+        const byOrden = await this.loadDetallesForOrdenIds([id]);
+        const detallesActualizados = byOrden.get(id) || row.detalles || [];
+        const ordenActualizada = {
+            ...row,
+            detalles: detallesActualizados,
+        };
         // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto (Deshabilitado en Costeo por Consumo)
         /*
         if (data.estado === 'aprobada' && row.proyectoId) {
@@ -542,7 +548,7 @@ export class PrismaComprasAdapter {
                         where: { id: data.aprobadoPorId },
                         select: { nombre: true },
                     })
-                    : row.aprobadoPor;
+                    : ordenActualizada.aprobadoPor;
                 const aprobadorNombre = aprobador?.nombre || 'Administración';
                 // Obtener el creador para conocer su rol
                 const creador = await this.prisma.user.findUnique({
@@ -625,7 +631,7 @@ export class PrismaComprasAdapter {
                 console.error('[Notification Approval Error]', err);
             }
         }
-        return row;
+        return ordenActualizada;
     }
     async updateDetalleRecepcion(id, data) {
         await this.prisma.detalleCompra.update({
