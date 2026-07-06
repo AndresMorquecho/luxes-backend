@@ -177,6 +177,28 @@ function getInstalacionCompletionErrors(datos, ordenesCompra = []) {
     }
     return faltantes;
 }
+const FASES_ORDEN = ['COTIZACION', 'DISEÑO', 'PRODUCCION', 'INSTALACION', 'ENTREGA', 'COMPLETADO'];
+function getSiguienteFaseId(faseActual, requiereInstalacion) {
+    const idx = FASES_ORDEN.indexOf(faseActual);
+    if (idx === -1 || idx >= FASES_ORDEN.length - 1)
+        return null;
+    let siguiente = FASES_ORDEN[idx + 1];
+    if (siguiente === 'INSTALACION' && !requiereInstalacion) {
+        return getSiguienteFaseId(siguiente, requiereInstalacion);
+    }
+    if (siguiente === 'ENTREGA' && requiereInstalacion) {
+        return getSiguienteFaseId(siguiente, requiereInstalacion);
+    }
+    return siguiente;
+}
+const FASE_LABELS = {
+    COTIZACION: 'Cotización',
+    'DISEÑO': 'Diseño',
+    PRODUCCION: 'Producción',
+    INSTALACION: 'Instalación',
+    ENTREGA: 'Entrega',
+    COMPLETADO: 'Completado',
+};
 const PROGRESO_POR_FASE = {
     COTIZACION: 0,
     'DISEÑO': 20,
@@ -686,13 +708,43 @@ export class ProyectosController {
                     });
                 }
             }
-            // Actualizar fase actual del proyecto y su progreso
+            const seCompletaInstalacion = fase === 'INSTALACION' &&
+                datos.instalacionCompletada === true &&
+                datosInstalacionAnterior.instalacionCompletada !== true;
+            let nuevaFaseActual = String(fase);
+            const proyectoUpdateData = {
+                progreso: PROGRESO_POR_FASE[String(fase)] ?? 0,
+            };
+            if (seCompletaInstalacion) {
+                const siguiente = getSiguienteFaseId('INSTALACION', proyecto.requiereInstalacion === true);
+                if (siguiente) {
+                    nuevaFaseActual = siguiente;
+                    proyectoUpdateData.progreso = PROGRESO_POR_FASE[siguiente] ?? 0;
+                    if (siguiente === 'COMPLETADO') {
+                        proyectoUpdateData.estado = 'COMPLETADO';
+                        proyectoUpdateData.fechaCompletado = new Date();
+                    }
+                    await prisma.proyectoFase.upsert({
+                        where: {
+                            proyectoId_fase: {
+                                proyectoId: String(id),
+                                fase: siguiente,
+                            },
+                        },
+                        update: {},
+                        create: {
+                            proyectoId: String(id),
+                            fase: siguiente,
+                            completada: false,
+                            datos: '{}',
+                        },
+                    });
+                }
+            }
+            proyectoUpdateData.faseActual = nuevaFaseActual;
             await prisma.proyecto.update({
                 where: { id: String(id) },
-                data: {
-                    faseActual: String(fase),
-                    progreso: PROGRESO_POR_FASE[String(fase)] ?? 0
-                },
+                data: proyectoUpdateData,
             });
             // Si es la fase de DISEÑO y tiene fecha de aprobación, enviar notificación a Taller
             if (fase === 'DISEÑO' && datos.fechaAprobacionDiseno) {
@@ -750,21 +802,24 @@ export class ProyectosController {
                     console.error('[Proyecto] Error sending push notification for started installation:', notifError);
                 }
             }
-            // Si es la fase de INSTALACION y se marca como completada, enviar notificación a Administradores
-            const seCompletaInstalacion = fase === 'INSTALACION' &&
-                datos.instalacionCompletada === true &&
-                datosInstalacionAnterior.instalacionCompletada !== true;
             if (seCompletaInstalacion) {
                 try {
+                    const faltantesAdmin = getInstalacionCompletionErrors(datosMerged, proyecto.ordenesCompra || []);
+                    const faseDestinoLabel = FASE_LABELS[nuevaFaseActual] || nuevaFaseActual;
+                    let body = `La instalación del proyecto "${proyecto?.nombre || id}" ha sido completada en el sitio. El proyecto avanzó automáticamente a ${faseDestinoLabel}. [PROYECTO_ID:${id}]`;
+                    if (faltantesAdmin.length > 0) {
+                        body += ` Pendiente: ${faltantesAdmin.join('; ')}.`;
+                    }
                     const payload = {
                         title: 'Instalación Completada',
-                        body: `La instalación del proyecto "${proyecto?.nombre || id}" ha sido completada en el sitio.`,
+                        body,
                         icon: '/LogoGlobo.png',
                         badge: '/LogoGlobo.png',
                         data: {
                             url: `/proyectos/${id}`,
                             action: 'view_project',
                             proyectoId: id,
+                            autoAvance: true,
                         },
                     };
                     // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
@@ -967,7 +1022,7 @@ export class ProyectosController {
     async serveArchivoProyecto(req, res) {
         try {
             const proyectoId = String(req.params.id);
-            const safeName = path.basename(String(req.params.filename || ''));
+            const safeName = path.basename(decodeURIComponent(String(req.params.filename || '')));
             if (!safeName || safeName === '.' || safeName === '..') {
                 return res.status(400).json({
                     success: false,
@@ -976,7 +1031,8 @@ export class ProyectosController {
             }
             const allowedDir = path.resolve(path.join(PROYECTOS_UPLOADS_ROOT, proyectoId));
             const filePath = path.resolve(path.join(allowedDir, safeName));
-            if (!filePath.startsWith(allowedDir + path.sep) && filePath !== allowedDir) {
+            const relative = path.relative(allowedDir, filePath);
+            if (relative.startsWith('..') || path.isAbsolute(relative)) {
                 return res.status(403).json({
                     success: false,
                     error: { code: 'FORBIDDEN', message: 'Ruta no permitida' },

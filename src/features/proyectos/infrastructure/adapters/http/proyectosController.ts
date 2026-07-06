@@ -211,6 +211,30 @@ function getInstalacionCompletionErrors(
   return faltantes;
 }
 
+const FASES_ORDEN = ['COTIZACION', 'DISEÑO', 'PRODUCCION', 'INSTALACION', 'ENTREGA', 'COMPLETADO'] as const;
+
+function getSiguienteFaseId(faseActual: string, requiereInstalacion: boolean): string | null {
+  const idx = FASES_ORDEN.indexOf(faseActual as (typeof FASES_ORDEN)[number]);
+  if (idx === -1 || idx >= FASES_ORDEN.length - 1) return null;
+  let siguiente = FASES_ORDEN[idx + 1];
+  if (siguiente === 'INSTALACION' && !requiereInstalacion) {
+    return getSiguienteFaseId(siguiente, requiereInstalacion);
+  }
+  if (siguiente === 'ENTREGA' && requiereInstalacion) {
+    return getSiguienteFaseId(siguiente, requiereInstalacion);
+  }
+  return siguiente;
+}
+
+const FASE_LABELS: Record<string, string> = {
+  COTIZACION: 'Cotización',
+  'DISEÑO': 'Diseño',
+  PRODUCCION: 'Producción',
+  INSTALACION: 'Instalación',
+  ENTREGA: 'Entrega',
+  COMPLETADO: 'Completado',
+};
+
 const PROGRESO_POR_FASE: Record<string, number> = {
   COTIZACION: 0,
   'DISEÑO': 20,
@@ -754,13 +778,48 @@ export class ProyectosController {
         }
       }
 
-      // Actualizar fase actual del proyecto y su progreso
+      const seCompletaInstalacion =
+        fase === 'INSTALACION' &&
+        datos.instalacionCompletada === true &&
+        datosInstalacionAnterior.instalacionCompletada !== true;
+
+      let nuevaFaseActual = String(fase);
+      const proyectoUpdateData: Record<string, unknown> = {
+        progreso: PROGRESO_POR_FASE[String(fase)] ?? 0,
+      };
+
+      if (seCompletaInstalacion) {
+        const siguiente = getSiguienteFaseId('INSTALACION', proyecto.requiereInstalacion === true);
+        if (siguiente) {
+          nuevaFaseActual = siguiente;
+          proyectoUpdateData.progreso = PROGRESO_POR_FASE[siguiente] ?? 0;
+          if (siguiente === 'COMPLETADO') {
+            proyectoUpdateData.estado = 'COMPLETADO';
+            proyectoUpdateData.fechaCompletado = new Date();
+          }
+          await prisma.proyectoFase.upsert({
+            where: {
+              proyectoId_fase: {
+                proyectoId: String(id),
+                fase: siguiente,
+              },
+            },
+            update: {},
+            create: {
+              proyectoId: String(id),
+              fase: siguiente,
+              completada: false,
+              datos: '{}',
+            },
+          });
+        }
+      }
+
+      proyectoUpdateData.faseActual = nuevaFaseActual;
+
       await prisma.proyecto.update({
         where: { id: String(id) },
-        data: { 
-          faseActual: String(fase),
-          progreso: PROGRESO_POR_FASE[String(fase)] ?? 0
-        },
+        data: proyectoUpdateData,
       });
 
       // Si es la fase de DISEÑO y tiene fecha de aprobación, enviar notificación a Taller
@@ -821,23 +880,27 @@ export class ProyectosController {
         }
       }
 
-      // Si es la fase de INSTALACION y se marca como completada, enviar notificación a Administradores
-      const seCompletaInstalacion =
-        fase === 'INSTALACION' &&
-        datos.instalacionCompletada === true &&
-        datosInstalacionAnterior.instalacionCompletada !== true;
-
       if (seCompletaInstalacion) {
         try {
+          const faltantesAdmin = getInstalacionCompletionErrors(
+            datosMerged,
+            proyecto.ordenesCompra || [],
+          );
+          const faseDestinoLabel = FASE_LABELS[nuevaFaseActual] || nuevaFaseActual;
+          let body = `La instalación del proyecto "${proyecto?.nombre || id}" ha sido completada en el sitio. El proyecto avanzó automáticamente a ${faseDestinoLabel}. [PROYECTO_ID:${id}]`;
+          if (faltantesAdmin.length > 0) {
+            body += ` Pendiente: ${faltantesAdmin.join('; ')}.`;
+          }
           const payload = {
             title: 'Instalación Completada',
-            body: `La instalación del proyecto "${proyecto?.nombre || id}" ha sido completada en el sitio.`,
+            body,
             icon: '/LogoGlobo.png',
             badge: '/LogoGlobo.png',
             data: {
               url: `/proyectos/${id}`,
               action: 'view_project',
               proyectoId: id,
+              autoAvance: true,
             },
           };
           // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)

@@ -15,6 +15,7 @@ import { createClientesModule } from './features/clientes/infrastructure/composi
 import { createProformasModule } from './features/proformas/infrastructure/composition/proformasContainer.js';
 import { createConfiguracionModule } from './features/configuracion/infrastructure/composition/configuracionContainer.js';
 import { createProyectosModule } from './features/proyectos/infrastructure/composition/proyectosContainer.js';
+import { ProyectosController } from './features/proyectos/infrastructure/adapters/http/proyectosController.js';
 import { createImpresionesModule } from './features/impresiones/infrastructure/composition/impresionesContainer.js';
 import { createGastosModule } from './features/gastos/infrastructure/composition/gastosContainer.js';
 import { createLandingRoutes } from './features/landing/infrastructure/routes/landingRoutes.js';
@@ -222,6 +223,9 @@ async function bootstrap() {
     app.get('/health', (_req, res) => {
         res.json({ status: 'ok', service: 'luxes-backend' });
     });
+    // Archivos de proyecto (diseño / evidencias): público, sin JWT — <img> no envía Authorization
+    const proyectosArchivosController = new ProyectosController();
+    app.get('/api/proyectos/:id/archivos/:filename', (req, res) => proyectosArchivosController.serveArchivoProyecto(req, res));
     // Middleware de auditoría automática — registra acciones mutantes en audit_logs
     app.use('/api', auditMiddleware);
     const { authRoutes } = await createAuthModule();
