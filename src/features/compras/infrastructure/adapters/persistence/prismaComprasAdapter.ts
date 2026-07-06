@@ -611,6 +611,14 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       include: this.ordenInclude,
     });
 
+    const byOrden = await this.loadDetallesForOrdenIds([id]);
+    const detallesActualizados = byOrden.get(id) || (row as { detalles?: DetalleCompraData[] }).detalles || [];
+
+    const ordenActualizada = {
+      ...row,
+      detalles: detallesActualizados,
+    };
+
     // Registrar gasto automáticamente si fue aprobada y está ligada a un proyecto (Deshabilitado en Costeo por Consumo)
     /*
     if (data.estado === 'aprobada' && row.proyectoId) {
@@ -644,7 +652,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
               where: { id: data.aprobadoPorId },
               select: { nombre: true },
             })
-          : (row as any).aprobadoPor;
+          : (ordenActualizada as any).aprobadoPor;
 
         const aprobadorNombre = aprobador?.nombre || 'Administración';
 
@@ -734,7 +742,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       }
     }
 
-    return row as unknown as OrdenCompraData;
+    return ordenActualizada as unknown as OrdenCompraData;
   }
 
   async updateDetalleRecepcion(id: string, data: {
