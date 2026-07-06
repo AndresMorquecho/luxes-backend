@@ -384,12 +384,18 @@ export class PrismaComprasAdapter {
             const detallesData = data.detalles.map(d => ({
                 descripcion: d.descripcion,
                 cantidad: d.cantidad,
-                precioUnitario: d.precioUnitario,
-                subtotal: d.cantidad * d.precioUnitario,
+                precioUnitario: d.precioUnitario ?? 0,
+                subtotal: d.cantidad * (d.precioUnitario ?? 0),
                 materialId: d.materialId || undefined,
             }));
             const subtotal = detallesData.reduce((sum, d) => sum + d.subtotal, 0);
-            const impuesto = data.impuesto ?? 0;
+            const ordenActual = await this.prisma.ordenCompra.findUnique({
+                where: { id },
+                select: { impuesto: true },
+            });
+            const impuesto = data.impuesto !== undefined
+                ? data.impuesto
+                : Number(ordenActual?.impuesto ?? 0);
             total = subtotal + impuesto;
             updateData.subtotal = subtotal;
             updateData.impuesto = impuesto;
@@ -436,10 +442,11 @@ export class PrismaComprasAdapter {
             // Registrar el abono
             await this.prisma.abonoCompra.create({
                 data: {
-                    ordenCompra: { connect: { id } },
-                    metodoPago: { connect: { id: data.metodoPagoId } },
+                    ordenCompraId: id,
+                    metodoPagoId: data.metodoPagoId,
                     monto: abonoMonto,
                     referencia: data.abonoReferencia || null,
+                    registradoPorUserId: data.registradoPorUserId ?? undefined,
                 }
             });
             const currentMontoPagado = cxp ? cxp.montoPagado : 0;
@@ -645,10 +652,11 @@ export class PrismaComprasAdapter {
     async createAbono(data) {
         const row = await this.prisma.abonoCompra.create({
             data: {
-                ordenCompra: { connect: { id: data.ordenCompraId } },
-                metodoPago: { connect: { id: data.metodoPagoId } },
+                ordenCompraId: data.ordenCompraId,
+                metodoPagoId: data.metodoPagoId,
                 monto: data.monto,
                 referencia: data.referencia,
+                registradoPorUserId: data.registradoPorUserId ?? undefined,
             },
             include: { metodoPago: true },
         });

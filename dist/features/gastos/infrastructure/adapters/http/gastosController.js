@@ -34,6 +34,7 @@ export class GastosController {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Concepto, fecha y monto son requeridos' } });
             }
             const id = b.id && String(b.id).startsWith('GTO-') ? b.id : await nextGastoId();
+            const registradoPorUserId = req.user?.id || null;
             const gasto = await prisma.gasto.create({
                 data: {
                     id,
@@ -45,6 +46,7 @@ export class GastosController {
                     notas: b.notas ?? '',
                     proyectoId: b.proyectoId || null,
                     metodoPagoId: b.metodoPagoId || null,
+                    registradoPorUserId: registradoPorUserId ?? undefined,
                 },
                 include: { metodoPago: true },
             });
@@ -272,6 +274,7 @@ export class GastosController {
                     where: whereIngreso,
                     include: {
                         metodoPago: true,
+                        registradoPor: { select: { nombre: true } },
                         proforma: {
                             include: {
                                 cliente: { select: { nombre: true } },
@@ -292,7 +295,7 @@ export class GastosController {
                         metodoPago: ab.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: ab.metodoPagoId,
                         entidad: ab.proforma?.clienteNombre || ab.proforma?.cliente?.nombre || 'Cliente no especificado',
-                        usuario: ab.proforma?.atiende || '—',
+                        usuario: ab.registradoPor?.nombre || '—',
                     });
                 }
             }
@@ -305,7 +308,10 @@ export class GastosController {
                     whereGasto.metodoPagoId = String(metodoPagoId);
                 const gastos = await prisma.gasto.findMany({
                     where: whereGasto,
-                    include: { metodoPago: true },
+                    include: {
+                        metodoPago: true,
+                        registradoPor: { select: { nombre: true } },
+                    },
                     orderBy: { fecha: 'desc' },
                 });
                 for (const g of gastos) {
@@ -320,7 +326,7 @@ export class GastosController {
                         metodoPago: g.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: g.metodoPagoId,
                         entidad: g.proveedor || g.categoria || '',
-                        usuario: '—',
+                        usuario: g.registradoPor?.nombre || '—',
                     });
                 }
                 // 3. EGRESOS — AbonoCompra
@@ -333,11 +339,10 @@ export class GastosController {
                     where: whereAbono,
                     include: {
                         metodoPago: true,
+                        registradoPor: { select: { nombre: true } },
                         ordenCompra: {
                             include: {
                                 proveedor: { select: { nombre: true } },
-                                usuario: { select: { nombre: true } },
-                                aprobadoPor: { select: { nombre: true } },
                             },
                         },
                     },
@@ -355,7 +360,7 @@ export class GastosController {
                         metodoPago: ab.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: ab.metodoPagoId,
                         entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
-                        usuario: ab.ordenCompra?.aprobadoPor?.nombre || ab.ordenCompra?.usuario?.nombre || '—',
+                        usuario: ab.registradoPor?.nombre || '—',
                     });
                 }
             }
@@ -672,15 +677,26 @@ export class GastosController {
             // 5. Últimos movimientos financieros y KPIs
             const abonosProforma = await prisma.abonoProforma.findMany({
                 where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-                include: { metodoPago: true, proforma: true }
+                include: {
+                    metodoPago: true,
+                    registradoPor: { select: { nombre: true } },
+                    proforma: true,
+                },
             });
             const dbGastos = await prisma.gasto.findMany({
                 where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-                include: { metodoPago: true }
+                include: {
+                    metodoPago: true,
+                    registradoPor: { select: { nombre: true } },
+                },
             });
             const abonosCompra = await prisma.abonoCompra.findMany({
                 where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-                include: { metodoPago: true, ordenCompra: { include: { proveedor: true, usuario: true, aprobadoPor: true } } }
+                include: {
+                    metodoPago: true,
+                    registradoPor: { select: { nombre: true } },
+                    ordenCompra: { include: { proveedor: true } },
+                },
             });
             const recentMovements = [];
             let totalIngresos = 0;
@@ -699,7 +715,7 @@ export class GastosController {
                     referencia: ab.referencia || '',
                     metodoPago: ab.metodoPago?.nombre || 'No especificado',
                     entidad: ab.proforma?.clienteNombre || 'Cliente no especificado',
-                    usuario: ab.proforma?.atiende || '—',
+                    usuario: ab.registradoPor?.nombre || '—',
                 });
             }
             // Expenses - General Gastos
@@ -716,7 +732,7 @@ export class GastosController {
                     referencia: '',
                     metodoPago: g.metodoPago?.nombre || 'No especificado',
                     entidad: g.proveedor || g.categoria || '',
-                    usuario: '—',
+                    usuario: g.registradoPor?.nombre || '—',
                 });
             }
             // Expenses - OC Payments
@@ -733,7 +749,7 @@ export class GastosController {
                     referencia: ab.referencia || '',
                     metodoPago: ab.metodoPago?.nombre || 'No especificado',
                     entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
-                    usuario: ab.ordenCompra?.aprobadoPor?.nombre || ab.ordenCompra?.usuario?.nombre || '—',
+                    usuario: ab.registradoPor?.nombre || '—',
                 });
             }
             // Sort and slice top 5

@@ -157,6 +157,9 @@ export class ComprasController {
             if (updateData.estado === 'aprobada' && userId) {
                 updateData.aprobadoPorId = userId;
             }
+            if (updateData.abonoMonto && userId) {
+                updateData.registradoPorUserId = userId;
+            }
             const data = await this.service.updateOrden(id, updateData);
             return this.ok(res, data);
         }
@@ -212,9 +215,11 @@ export class ComprasController {
     }
     async createAbono(req, res) {
         try {
+            const userId = req.user?.id || null;
             const data = await this.service.registrarAbono({
                 ...req.body,
                 ordenCompraId: String(req.params.id),
+                registradoPorUserId: userId,
             });
             return res.status(201).json({ success: true, data });
         }
