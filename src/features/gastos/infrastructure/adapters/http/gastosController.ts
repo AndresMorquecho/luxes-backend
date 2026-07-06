@@ -777,17 +777,28 @@ export class GastosController {
       // 5. Últimos movimientos financieros y KPIs
       const abonosProforma = await prisma.abonoProforma.findMany({
         where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-        include: { metodoPago: true, proforma: true }
+        include: {
+          metodoPago: true,
+          registradoPor: { select: { nombre: true } },
+          proforma: true,
+        },
       });
 
       const dbGastos = await prisma.gasto.findMany({
         where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-        include: { metodoPago: true }
+        include: {
+          metodoPago: true,
+          registradoPor: { select: { nombre: true } },
+        },
       });
 
       const abonosCompra = await prisma.abonoCompra.findMany({
         where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-        include: { metodoPago: true, ordenCompra: { include: { proveedor: true, usuario: true, aprobadoPor: true } } }
+        include: {
+          metodoPago: true,
+          registradoPor: { select: { nombre: true } },
+          ordenCompra: { include: { proveedor: true } },
+        },
       });
 
       interface Movement {
@@ -821,7 +832,7 @@ export class GastosController {
           referencia: ab.referencia || '',
           metodoPago: ab.metodoPago?.nombre || 'No especificado',
           entidad: ab.proforma?.clienteNombre || 'Cliente no especificado',
-          usuario: ab.proforma?.atiende || '—',
+          usuario: ab.registradoPor?.nombre || '—',
         });
       }
 
@@ -839,7 +850,7 @@ export class GastosController {
           referencia: '',
           metodoPago: g.metodoPago?.nombre || 'No especificado',
           entidad: g.proveedor || g.categoria || '',
-          usuario: '—',
+          usuario: g.registradoPor?.nombre || '—',
         });
       }
 
@@ -857,7 +868,7 @@ export class GastosController {
           referencia: ab.referencia || '',
           metodoPago: ab.metodoPago?.nombre || 'No especificado',
           entidad: ab.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
-          usuario: ab.ordenCompra?.aprobadoPor?.nombre || ab.ordenCompra?.usuario?.nombre || '—',
+          usuario: ab.registradoPor?.nombre || '—',
         });
       }
 
