@@ -479,13 +479,19 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       const detallesData = data.detalles.map(d => ({
         descripcion: d.descripcion,
         cantidad: d.cantidad,
-        precioUnitario: d.precioUnitario,
-        subtotal: d.cantidad * d.precioUnitario,
+        precioUnitario: d.precioUnitario ?? 0,
+        subtotal: d.cantidad * (d.precioUnitario ?? 0),
         materialId: d.materialId || undefined,
       }));
 
       const subtotal = detallesData.reduce((sum, d) => sum + d.subtotal, 0);
-      const impuesto = data.impuesto ?? 0;
+      const ordenActual = await this.prisma.ordenCompra.findUnique({
+        where: { id },
+        select: { impuesto: true },
+      });
+      const impuesto = data.impuesto !== undefined
+        ? data.impuesto
+        : Number(ordenActual?.impuesto ?? 0);
       total = subtotal + impuesto;
 
       updateData.subtotal = subtotal;

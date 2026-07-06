@@ -130,9 +130,38 @@ export class ComprasService {
   }): Promise<OrdenCompraData> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) throw new Error('Orden de compra no encontrada.');
+    if (orden.estado === 'recibida' || orden.estado === 'parcialmente_recibida') {
+      throw new Error('No se puede modificar una orden que ya fue recibida o está en recepción parcial.');
+    }
     if (data.detalles && data.detalles.length === 0) {
       throw new Error('La orden debe conservar al menos un item.');
     }
+
+    const abonoMonto = Number(data.abonoMonto) || 0;
+    if (abonoMonto > 0) {
+      if (!data.metodoPagoId) {
+        throw new Error('Debe seleccionar un método de pago para registrar el abono del ajuste.');
+      }
+
+      let nuevoTotal = Number(orden.total) || 0;
+      if (data.detalles?.length) {
+        const subtotal = data.detalles.reduce(
+          (sum, d) => sum + d.cantidad * (d.precioUnitario ?? 0),
+          0,
+        );
+        const impuesto = data.impuesto !== undefined ? data.impuesto : (Number(orden.impuesto) || 0);
+        nuevoTotal = subtotal + impuesto;
+      }
+
+      const pagado = Number(orden.cuentaPorPagar?.montoPagado) || 0;
+      const saldoTrasAjuste = Math.max(0, nuevoTotal - pagado);
+      if (abonoMonto > saldoTrasAjuste + 0.01) {
+        throw new Error(
+          `El abono excede el saldo pendiente tras el ajuste ($${saldoTrasAjuste.toFixed(2)}).`,
+        );
+      }
+    }
+
     return this.repo.updateOrden(id, data);
   }
 
