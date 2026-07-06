@@ -181,6 +181,23 @@ async function yaRegistradoParaProyecto(proyectoId: string): Promise<boolean> {
   return Boolean(existing);
 }
 
+function cantidadPorDevolver(tools: MaterialInstalacion[]): number {
+  return tools.reduce((sum, tool) => sum + cantidadMaterial(tool), 0);
+}
+
+function etiquetaCantidadDevolver(cantidad: number): string {
+  if (cantidad === 1) return '1 herramienta por devolver';
+  return `${cantidad} herramientas por devolver`;
+}
+
+async function tienePrestamoActivo(materialId: string): Promise<boolean> {
+  const existing = await prisma.prestamo.findFirst({
+    where: { materialId, estado: 'prestado' },
+    select: { id: true },
+  });
+  return Boolean(existing);
+}
+
 async function registrarPrestamoDevolucion(
   materialId: string,
   responsableId: string,
@@ -190,6 +207,14 @@ async function registrarPrestamoDevolucion(
 ) {
   const tagMatch = comentarios.match(/\[PROYECTO_ID:(.+?)\]/);
   const proyectoTag = tagMatch ? `[PROYECTO_ID:${tagMatch[1]}]` : null;
+
+  const prestamoActivo = await prisma.prestamo.findFirst({
+    where: { materialId, estado: 'prestado' },
+  });
+  if (prestamoActivo) {
+    console.log(`[instalacionDevolucion] Material ${materialId} ya prestado, no se duplica`);
+    return prestamoActivo;
+  }
 
   if (proyectoTag) {
     const existing = await prisma.prestamo.findFirst({
@@ -315,6 +340,10 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
       console.log(`[instalacionDevolucion] Material no encontrado en inventario: ${item.nombre} (${item.sku || 'sin sku'})`);
       continue;
     }
+    if (await tienePrestamoActivo(material.id)) {
+      console.log(`[instalacionDevolucion] Ya prestada, omitiendo: ${item.nombre}`);
+      continue;
+    }
     herramientas.push({ ...item, materialId: material.id });
   }
 
@@ -337,10 +366,8 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
     const userId = await resolveUserIdForResponsable(responsableNombre, personalAsignado);
     const prestamoUserId = userId || fallbackUserId;
 
-    const toolLabels: string[] = [];
     for (const tool of tools) {
       const qty = cantidadMaterial(tool);
-      toolLabels.push(`${tool.nombre}${qty > 1 ? ` (x${qty})` : ''}`);
 
       if (tool.materialId && prestamoUserId) {
         const encargadoPrefix = userId ? '' : `Encargado: ${responsableNombre} | `;
@@ -358,33 +385,35 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
       }
     }
 
-    const listaHerramientas = toolLabels.join(', ');
-    const message = `La instalación del proyecto "${params.proyectoNombre}" finalizó. Debes devolver: ${listaHerramientas}. [PROYECTO_ID:${params.proyectoId}]`;
+    const cantidadDevolver = cantidadPorDevolver(tools);
+    const etiquetaCantidad = etiquetaCantidadDevolver(cantidadDevolver);
+    const message = `La instalación del proyecto "${params.proyectoNombre}" finalizó. Tienes ${etiquetaCantidad}. [PROYECTO_ID:${params.proyectoId}]`;
 
     try {
       if (userId) {
         await prisma.notification.create({
           data: {
-            title: 'Herramienta en devolución',
+            title: etiquetaCantidad,
             message,
             userId,
             createdBy: 'Sistema Luxes',
           },
         });
         await sendPushToUsers([userId], {
-          title: 'Herramienta en devolución',
-          body: `Debes devolver: ${listaHerramientas} (proyecto ${params.proyectoNombre})`,
+          title: etiquetaCantidad,
+          body: `Tienes ${etiquetaCantidad} tras el proyecto "${params.proyectoNombre}".`,
           icon: '/LogoGlobo.png',
           badge: '/LogoGlobo.png',
           data: {
             url: '/devoluciones',
             proyectoId: params.proyectoId,
+            cantidadDevolver,
           },
         }).catch(() => {});
       } else {
         await prisma.notification.create({
           data: {
-            title: 'Herramienta en devolución',
+            title: etiquetaCantidad,
             message: `${responsableNombre}: ${message}`,
             rol: 'taller',
             createdBy: 'Sistema Luxes',
