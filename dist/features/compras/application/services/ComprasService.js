@@ -96,6 +96,24 @@ export class ComprasService {
             throw new Error('Orden de compra no encontrada.');
         return this.repo.deleteOrden(id);
     }
+    async editarOrden(id, data) {
+        if (!data.detalles || data.detalles.length === 0) {
+            throw new Error('La orden debe conservar al menos un ítem.');
+        }
+        for (const d of data.detalles) {
+            if (d.cantidad <= 0)
+                throw new Error(`La cantidad de "${d.descripcion}" debe ser mayor a 0.`);
+            if (d.precioUnitario < 0)
+                throw new Error(`El precio de "${d.descripcion}" no puede ser negativo.`);
+        }
+        if (data.abonoMonto && data.abonoMonto > 0 && !data.metodoPagoId) {
+            throw new Error('Debe seleccionar un método de pago para registrar el pago inicial.');
+        }
+        return this.repo.editarOrdenConReconciliacion(id, {
+            ...data,
+            impuesto: data.impuesto ?? 0,
+        });
+    }
     // ── Abonos ─────────────────────────────────────────────────────────────────
     getAbonosByOrden(ordenId) {
         return this.repo.findAbonosByOrden(ordenId);

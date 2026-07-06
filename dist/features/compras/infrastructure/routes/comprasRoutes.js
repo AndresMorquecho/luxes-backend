@@ -24,6 +24,7 @@ export function createComprasRoutes(ctrl) {
     router.get('/:id/detalles', (req, res) => ctrl.getOrdenDetalles(req, res));
     router.post('/:id/restaurar-detalles', (req, res) => ctrl.restoreOrdenDetalles(req, res));
     router.get('/:id', (req, res) => ctrl.getOrdenById(req, res));
+    router.put('/:id/editar', (req, res) => ctrl.editarOrden(req, res));
     router.put('/:id', (req, res) => ctrl.updateOrden(req, res));
     router.delete('/:id', (req, res) => ctrl.deleteOrden(req, res));
     // ── Abonos por Orden ───────────────────────────────────────────────────────
