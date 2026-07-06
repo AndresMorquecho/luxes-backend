@@ -161,6 +161,7 @@ export interface ComprasRepositoryPort {
     abonoMonto?: number;
     metodoPagoId?: string;
     abonoReferencia?: string;
+    registrarAbonoAjuste?: boolean;
     registradoPorUserId?: string | null;
     fechaRecepcion?: Date;
     notasRecepcion?: string;

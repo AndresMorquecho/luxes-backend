@@ -64,7 +64,9 @@ export class ComprasService {
         if (data.detalles && data.detalles.length === 0) {
             throw new Error('La orden debe conservar al menos un item.');
         }
-        const abonoMonto = Number(data.abonoMonto) || 0;
+        const abonoMonto = (data.registrarAbonoAjuste === true || data.estado === 'aprobada')
+            ? (Number(data.abonoMonto) || 0)
+            : 0;
         if (abonoMonto > 0) {
             if (!data.metodoPagoId) {
                 throw new Error('Debe seleccionar un método de pago para registrar el abono del ajuste.');

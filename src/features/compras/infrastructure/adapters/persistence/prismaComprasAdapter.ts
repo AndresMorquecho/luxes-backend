@@ -417,6 +417,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     abonoMonto?: number;
     metodoPagoId?: string;
     abonoReferencia?: string;
+    registrarAbonoAjuste?: boolean;
     registradoPorUserId?: string | null;
     fechaRecepcion?: Date;
     notasRecepcion?: string;
@@ -535,7 +536,9 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       where: { ordenCompraId: id },
     });
 
-    const abonoMonto = data.abonoMonto || 0;
+    const abonoMonto = (data.registrarAbonoAjuste === true || data.estado === 'aprobada')
+      ? (Number(data.abonoMonto) || 0)
+      : 0;
     if (abonoMonto > 0 && data.metodoPagoId) {
       // Registrar el abono
       await this.prisma.abonoCompra.create({

@@ -150,7 +150,19 @@ export class ComprasController {
         delete updateData.abonoMonto;
         delete updateData.metodoPagoId;
         delete updateData.abonoReferencia;
+        delete updateData.registrarAbonoAjuste;
       }
+
+      // Abono: en aprobación inicial o en edición solo si se marca explícitamente
+      const esAprobacionConAbono =
+        updateData.estado === 'aprobada' && Number(updateData.abonoMonto) > 0;
+      const esAjusteFinanciero = updateData.registrarAbonoAjuste === true;
+      if (!esAprobacionConAbono && !esAjusteFinanciero) {
+        delete updateData.abonoMonto;
+        delete updateData.metodoPagoId;
+        delete updateData.abonoReferencia;
+      }
+      delete updateData.registrarAbonoAjuste;
 
       if (updateData.estado === 'aprobada' && userId) {
         updateData.aprobadoPorId = userId;
