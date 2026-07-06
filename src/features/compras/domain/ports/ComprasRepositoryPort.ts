@@ -216,6 +216,27 @@ export interface ComprasRepositoryPort {
     totalDeuda: number;
   }>;
 
+  // ── Edición con Reconciliación ──
+  editarOrdenConReconciliacion(id: string, data: {
+    fecha?: string;
+    concepto?: string;
+    notas?: string;
+    proyectoId?: string | null;
+    impuesto: number;
+    detalles: {
+      id?: string;
+      descripcion: string;
+      cantidad: number;
+      precioUnitario: number;
+      materialId?: string | null;
+      isCustom?: boolean;
+    }[];
+    editadoPorId: string;
+    abonoMonto?: number;
+    metodoPagoId?: string | null;
+    abonoReferencia?: string;
+  }): Promise<OrdenCompraData>;
+
   // ── Inventario Helpers ──
   adjustMaterialStock(materialId: string, cantidad: number): Promise<void>;
   createMaterialMovimiento(data: {

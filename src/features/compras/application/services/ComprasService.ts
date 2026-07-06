@@ -180,6 +180,44 @@ export class ComprasService {
     return this.repo.deleteOrden(id);
   }
 
+  async editarOrden(
+    id: string,
+    data: {
+      fecha?: string;
+      concepto?: string;
+      notas?: string;
+      proyectoId?: string | null;
+      impuesto?: number;
+      detalles: {
+        id?: string;
+        descripcion: string;
+        cantidad: number;
+        precioUnitario: number;
+        materialId?: string | null;
+        isCustom?: boolean;
+      }[];
+      editadoPorId: string;
+      abonoMonto?: number;
+      metodoPagoId?: string | null;
+      abonoReferencia?: string;
+    }
+  ): Promise<OrdenCompraData> {
+    if (!data.detalles || data.detalles.length === 0) {
+      throw new Error('La orden debe conservar al menos un ítem.');
+    }
+    for (const d of data.detalles) {
+      if (d.cantidad <= 0) throw new Error(`La cantidad de "${d.descripcion}" debe ser mayor a 0.`);
+      if (d.precioUnitario < 0) throw new Error(`El precio de "${d.descripcion}" no puede ser negativo.`);
+    }
+    if (data.abonoMonto && data.abonoMonto > 0 && !data.metodoPagoId) {
+      throw new Error('Debe seleccionar un método de pago para registrar el pago inicial.');
+    }
+    return this.repo.editarOrdenConReconciliacion(id, {
+      ...data,
+      impuesto: data.impuesto ?? 0,
+    });
+  }
+
   // ── Abonos ─────────────────────────────────────────────────────────────────
 
   getAbonosByOrden(ordenId: string): Promise<AbonoCompraData[]> {

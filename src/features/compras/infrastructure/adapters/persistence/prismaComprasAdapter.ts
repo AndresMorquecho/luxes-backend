@@ -978,6 +978,230 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     };
   }
 
+  // ── Edición con Reconciliación Financiera ──────────────────────────────────
+
+  /**
+   * Anula la orden anterior (elimina todos sus registros financieros, devolviendo
+   * el dinero a las cuentas de origen) y crea una nueva orden con los datos actualizados.
+   * Opcionalmente registra un pago inicial en la nueva orden.
+   *
+   * Este enfoque es "void & replace":
+   * - Los abonos anteriores se eliminan → los saldos de metodos_pago quedan correctos
+   *   (los saldos son calculados con SUM en tiempo real, no se guardan).
+   * - La CxP anterior se elimina en cascada.
+   * - Se crea una nueva orden con nuevo número correlativo.
+   * - Si se provee metodoPagoId + abonoMonto, se registra abono en la nueva orden.
+   */
+  async editarOrdenConReconciliacion(
+    id: string,
+    data: {
+      fecha?: string;
+      concepto?: string;
+      notas?: string;
+      proyectoId?: string | null;
+      impuesto: number;
+      detalles: {
+        id?: string;
+        descripcion: string;
+        cantidad: number;
+        precioUnitario: number;
+        materialId?: string | null;
+        isCustom?: boolean;
+      }[];
+      editadoPorId: string;
+      // Pago inicial opcional en la nueva orden
+      abonoMonto?: number;
+      metodoPagoId?: string | null;
+      abonoReferencia?: string;
+    }
+  ): Promise<OrdenCompraData> {
+    // 1. Cargar la orden vieja fuera de la transacción (para obtener datos que necesitamos)
+    const ordenVieja = await this.prisma.ordenCompra.findUnique({
+      where: { id },
+      include: {
+        detalles: true,
+        cuentaPorPagar: true,
+        abonos: true,
+      },
+    });
+    if (!ordenVieja) throw new Error('Orden de compra no encontrada.');
+
+    const estadosEditables = ['pendiente_aprobacion', 'aprobada', 'parcialmente_recibida'];
+    if (!estadosEditables.includes(ordenVieja.estado)) {
+      throw new Error(
+        `No se puede editar una orden en estado "${ordenVieja.estado}". Solo se pueden editar órdenes pendientes, aprobadas o con recepción parcial.`
+      );
+    }
+
+    // Validar que no se eliminen ítems ya recepcionados en inventario
+    const detallesExistentes = ordenVieja.detalles;
+    for (const nuevoDetalle of data.detalles) {
+      if (!nuevoDetalle.id) continue;
+      const existente = detallesExistentes.find((d) => d.id === nuevoDetalle.id);
+      if (!existente) continue;
+      const fueRecepcionado = (existente.cantidadRecibida ?? 0) > 0;
+      const esInventario = !!existente.materialId;
+      if (fueRecepcionado && esInventario && nuevoDetalle.cantidad !== existente.cantidad) {
+        throw new Error(
+          `El ítem "${existente.descripcion}" ya fue recepcionado en inventario. No se puede cambiar la cantidad (${existente.cantidad}). Solo se puede editar el precio.`
+        );
+      }
+    }
+    for (const existente of detallesExistentes) {
+      const fueRecepcionado = (existente.cantidadRecibida ?? 0) > 0;
+      const esInventario = !!existente.materialId;
+      if (fueRecepcionado && esInventario) {
+        const sigueEnLista = data.detalles.some((d) => d.id === existente.id);
+        if (!sigueEnLista) {
+          throw new Error(
+            `El ítem "${existente.descripcion}" ya fue recepcionado y no puede eliminarse de la orden.`
+          );
+        }
+      }
+    }
+
+    // 2. Calcular totales de la nueva orden
+    const nuevosDetallesData = data.detalles.map((d) => {
+      const existente = d.id ? detallesExistentes.find((e) => e.id === d.id) : null;
+      return {
+        descripcion: d.descripcion,
+        cantidad: d.cantidad,
+        precioUnitario: d.precioUnitario,
+        subtotal: d.cantidad * d.precioUnitario,
+        materialId: d.materialId || null,
+        cantidadRecibida: existente?.cantidadRecibida ?? null,
+        descargableInventario: existente?.descargableInventario ?? null,
+        fechaRecepcion: existente?.fechaRecepcion ?? null,
+      };
+    });
+
+    const nuevoSubtotal = nuevosDetallesData.reduce((sum, d) => sum + d.subtotal, 0);
+    const nuevoImpuesto = data.impuesto ?? 0;
+    const nuevoTotal = nuevoSubtotal + nuevoImpuesto;
+
+    // 3. Determinar estado de recepción de la nueva orden
+    // Si algún ítem fue recepcionado, la nueva orden hereda ese estado
+    const algunoRecibido = detallesExistentes.some((d) => (d.cantidadRecibida ?? 0) > 0);
+    const todosRecibidos = detallesExistentes.length > 0 &&
+      detallesExistentes.every((d) => (d.cantidadRecibida ?? 0) > 0);
+    const estadoNuevo = todosRecibidos ? 'recibida'
+      : algunoRecibido ? 'parcialmente_recibida'
+      : ordenVieja.estado === 'aprobada' ? 'aprobada'
+      : 'pendiente_aprobacion';
+
+    // 4. Transacción: eliminar la orden vieja y crear la nueva
+    const nuevaOrden = await this.prisma.$transaction(async (tx) => {
+      // Eliminar abonos (esto restaura los saldos en los métodos de pago automáticamente,
+      // porque los saldos se calculan con SUM en tiempo real)
+      await tx.abonoCompra.deleteMany({ where: { ordenCompraId: id } });
+
+      // Eliminar CxP
+      await tx.cuentaPorPagar.deleteMany({ where: { ordenCompraId: id } });
+
+      // Eliminar detalles
+      await tx.detalleCompra.deleteMany({ where: { ordenCompraId: id } });
+
+      // Eliminar la orden vieja
+      await tx.ordenCompra.delete({ where: { id } });
+
+      // Generar nuevo número correlativo
+      const year = new Date().getFullYear();
+      const suffix = `_${year}`;
+      const last = await tx.ordenCompra.findFirst({
+        where: { numero: { endsWith: suffix } },
+        orderBy: { numero: 'desc' },
+        select: { numero: true },
+      });
+      const lastNum = last ? parseInt(last.numero.split('_')[1], 10) : 0;
+      const nuevoNumero = `ORC_${String(lastNum + 1).padStart(3, '0')}_${year}`;
+
+      // Preparar abono inicial si se provee
+      const abonoMonto = data.abonoMonto && data.abonoMonto > 0 ? data.abonoMonto : 0;
+      const montoPagadoInicial = abonoMonto;
+      const saldoInicial = Math.max(0, nuevoTotal - montoPagadoInicial);
+      let estadoPago: string;
+      if (nuevoTotal <= 0) {
+        estadoPago = 'sin_pagar';
+      } else if (saldoInicial <= 0) {
+        estadoPago = 'pagado';
+      } else if (montoPagadoInicial > 0) {
+        estadoPago = 'parcial';
+      } else {
+        estadoPago = 'sin_pagar';
+      }
+
+      // Crear la nueva orden
+      const createData: any = {
+        numero: nuevoNumero,
+        usuarioId: ordenVieja.usuarioId,
+        fecha: data.fecha ? new Date(data.fecha) : new Date(ordenVieja.fecha),
+        subtotal: nuevoSubtotal,
+        impuesto: nuevoImpuesto,
+        total: nuevoTotal,
+        concepto: data.concepto ?? ordenVieja.concepto ?? '',
+        notas: data.notas ?? ordenVieja.notas ?? '',
+        estado: estadoNuevo,
+        estadoPago,
+        aprobadoPorId: ordenVieja.aprobadoPorId ?? null,
+        fechaAprobacion: ordenVieja.fechaAprobacion ?? null,
+        recibidoPorId: ordenVieja.recibidoPorId ?? null,
+        fechaRecepcion: ordenVieja.fechaRecepcion ?? null,
+        notasRecepcion: ordenVieja.notasRecepcion ?? null,
+        proveedorId: ordenVieja.proveedorId ?? null,
+        proyectoId: data.proyectoId !== undefined ? (data.proyectoId || null) : (ordenVieja.proyectoId || null),
+        detalles: {
+          create: nuevosDetallesData.map((d) => ({
+            descripcion: d.descripcion,
+            cantidad: d.cantidad,
+            precioUnitario: d.precioUnitario,
+            subtotal: d.subtotal,
+            materialId: d.materialId,
+            cantidadRecibida: d.cantidadRecibida,
+            descargableInventario: d.descargableInventario,
+            fechaRecepcion: d.fechaRecepcion,
+          })),
+        },
+      };
+
+      // Crear CxP si hay total
+      if (nuevoTotal > 0) {
+        createData.cuentaPorPagar = {
+          create: {
+            montoTotal: nuevoTotal,
+            montoPagado: montoPagadoInicial,
+            saldo: saldoInicial,
+            estado: estadoPago === 'sin_pagar' ? 'pendiente'
+              : estadoPago === 'pagado' ? 'pagado' : 'parcial',
+          },
+        };
+      }
+
+      // Crear abono inicial si hay pago
+      if (abonoMonto > 0 && data.metodoPagoId) {
+        createData.abonos = {
+          create: {
+            metodoPagoId: data.metodoPagoId,
+            monto: abonoMonto,
+            referencia: data.abonoReferencia || null,
+            registradoPorUserId: data.editadoPorId,
+          },
+        };
+      }
+
+      const nueva = await tx.ordenCompra.create({
+        data: createData,
+        select: { id: true },
+      });
+
+      return nueva.id;
+    });
+
+    // 5. Retornar la nueva orden con include completo
+    const resultado = await this.findOrdenById(nuevaOrden);
+    if (!resultado) throw new Error('No se pudo recuperar la nueva orden.');
+    return resultado;
+  }
+
   // ── Inventario Helpers ──
 
   async adjustMaterialStock(materialId: string, cantidad: number): Promise<void> {
