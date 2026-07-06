@@ -3,6 +3,7 @@ import { prisma } from '../../../../../config/prismaClient.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
+import { notificarDevolucionHerramientasInstalacion } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
 
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
 
@@ -914,6 +915,12 @@ export class ProyectosController {
           });
           await sendPushToRole('admin', payload);
           console.log(`[Proyecto ${id}] Notificación de instalación completada enviada a administradores`);
+
+          await notificarDevolucionHerramientasInstalacion({
+            proyectoId: String(id),
+            proyectoNombre: proyecto?.nombre || String(id),
+            datosInstalacion: datosMerged,
+          });
         } catch (notifError) {
           console.error('[Proyecto] Error sending push notification for completed installation:', notifError);
         }

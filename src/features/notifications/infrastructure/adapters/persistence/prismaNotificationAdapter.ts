@@ -35,6 +35,28 @@ function expandRoleAliases(role: string): string[] {
   return Array.from(aliases);
 }
 
+/** Títulos de cola de impresión que no deben mostrarse al rol Taller. */
+const TALLER_EXCLUDED_TITLE_PATTERNS = [
+  'nuevo trabajo de impresión',
+  'nuevo trabajo de impresion',
+  'nuevo trabajo en cola',
+  'impresión en cola',
+  'impresion en cola',
+];
+
+function getRoleExclusionClause(role: string) {
+  const r = role.toLowerCase();
+  if (r !== 'taller') return null;
+
+  return {
+    NOT: {
+      OR: TALLER_EXCLUDED_TITLE_PATTERNS.map((pattern) => ({
+        title: { contains: pattern, mode: 'insensitive' as const },
+      })),
+    },
+  };
+}
+
 /**
  * Una notificación es visible solo si cumple TODOS los criterios definidos:
  * - userId → solo ese usuario
@@ -48,7 +70,7 @@ function buildVisibilityFilter(userId: string, role: string, userPermissions: st
     ? { OR: [{ permission: null }, { permission: { in: userPermissions } }] }
     : { permission: null };
 
-  return {
+  const baseFilter = {
     OR: [
       { userId },
       {
@@ -65,6 +87,11 @@ function buildVisibilityFilter(userId: string, role: string, userPermissions: st
       },
     ],
   };
+
+  const roleExclusion = getRoleExclusionClause(role);
+  if (!roleExclusion) return baseFilter;
+
+  return { AND: [baseFilter, roleExclusion] };
 }
 
 export class PrismaNotificationAdapter implements NotificationRepositoryPort {
