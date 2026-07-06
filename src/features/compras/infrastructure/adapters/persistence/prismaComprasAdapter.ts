@@ -959,6 +959,199 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     };
   }
 
+  // ── Edición con Reconciliación Financiera ──────────────────────────────────
+
+  /**
+   * Edita los detalles de una OC y reconcilia la cuenta por pagar sin duplicar pagos.
+   * Reglas:
+   * - Ítems de inventario ya recepcionados (cantidadRecibida > 0): solo se puede cambiar el precio.
+   * - Ítems de texto libre (materialId nulo): editables libremente.
+   * - montoPagado se preserva; solo se actualiza el montoTotal y el saldo.
+   * - Si nuevo total < montoPagado, el saldo queda en 0 y estadoPago = 'pagado' (sin crédito negativo en CxP).
+   */
+  async editarOrdenConReconciliacion(
+    id: string,
+    data: {
+      fecha?: string;
+      concepto?: string;
+      notas?: string;
+      proyectoId?: string | null;
+      impuesto: number;
+      detalles: {
+        id?: string; // ID existente del detalle (para ítems recepcionados)
+        descripcion: string;
+        cantidad: number;
+        precioUnitario: number;
+        materialId?: string | null;
+        isCustom?: boolean;
+      }[];
+      editadoPorId: string;
+    }
+  ): Promise<OrdenCompraData> {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Cargar estado actual de la orden con todos sus detalles
+      const orden = await tx.ordenCompra.findUnique({
+        where: { id },
+        include: {
+          detalles: true,
+          cuentaPorPagar: true,
+        },
+      });
+      if (!orden) throw new Error('Orden de compra no encontrada.');
+
+      const estadosEditables = [
+        'pendiente_aprobacion',
+        'aprobada',
+        'parcialmente_recibida',
+      ];
+      if (!estadosEditables.includes(orden.estado)) {
+        throw new Error(
+          `No se puede editar una orden en estado "${orden.estado}". Solo se pueden editar órdenes pendientes, aprobadas o con recepción parcial.`
+        );
+      }
+
+      // 2. Validar restricciones por ítem
+      const detallesExistentes = orden.detalles;
+      for (const nuevoDetalle of data.detalles) {
+        if (!nuevoDetalle.id) continue; // ítem nuevo, sin restricciones
+        const existente = detallesExistentes.find((d) => d.id === nuevoDetalle.id);
+        if (!existente) continue;
+
+        const fueRecepcionado = (existente.cantidadRecibida ?? 0) > 0;
+        const esInventario = !!existente.materialId;
+
+        if (fueRecepcionado && esInventario) {
+          // Solo permitir cambio de precio; cantidad bloqueada
+          if (nuevoDetalle.cantidad !== existente.cantidad) {
+            throw new Error(
+              `El ítem "${existente.descripcion}" ya fue recepcionado en inventario. No se puede cambiar la cantidad (${existente.cantidad}). Solo se puede editar el precio.`
+            );
+          }
+        }
+      }
+
+      // 3. Verificar que no se eliminaron ítems recepcionados de inventario
+      for (const existente of detallesExistentes) {
+        const fueRecepcionado = (existente.cantidadRecibida ?? 0) > 0;
+        const esInventario = !!existente.materialId;
+        if (fueRecepcionado && esInventario) {
+          const sigueEnLista = data.detalles.some((d) => d.id === existente.id);
+          if (!sigueEnLista) {
+            throw new Error(
+              `El ítem "${existente.descripcion}" ya fue recepcionado y no puede eliminarse de la orden.`
+            );
+          }
+        }
+      }
+
+      // 4. Recalcular totales con los nuevos detalles
+      const nuevosDetallesData = data.detalles.map((d) => ({
+        descripcion: d.descripcion,
+        cantidad: d.cantidad,
+        precioUnitario: d.precioUnitario,
+        subtotal: d.cantidad * d.precioUnitario,
+        materialId: d.materialId || null,
+        // Preservar cantidadRecibida y descargableInventario del detalle existente
+        cantidadRecibida: d.id
+          ? (detallesExistentes.find((e) => e.id === d.id)?.cantidadRecibida ?? null)
+          : null,
+        descargableInventario: d.id
+          ? (detallesExistentes.find((e) => e.id === d.id)?.descargableInventario ?? null)
+          : null,
+        fechaRecepcion: d.id
+          ? (detallesExistentes.find((e) => e.id === d.id)?.fechaRecepcion ?? null)
+          : null,
+      }));
+
+      const nuevoSubtotal = nuevosDetallesData.reduce((sum, d) => sum + d.subtotal, 0);
+      const nuevoImpuesto = data.impuesto ?? 0;
+      const nuevoTotal = nuevoSubtotal + nuevoImpuesto;
+
+      // 5. Reconciliar la Cuenta por Pagar
+      const cxp = orden.cuentaPorPagar;
+      const montoPagadoHistorico = cxp ? cxp.montoPagado : 0;
+      const nuevoSaldo = Math.max(0, nuevoTotal - montoPagadoHistorico);
+      let nuevoEstadoCxP: string;
+      let nuevoEstadoPago: string;
+      if (nuevoTotal <= 0) {
+        nuevoEstadoCxP = 'pendiente';
+        nuevoEstadoPago = 'sin_pagar';
+      } else if (nuevoSaldo <= 0) {
+        nuevoEstadoCxP = 'pagado';
+        nuevoEstadoPago = 'pagado';
+      } else if (montoPagadoHistorico > 0) {
+        nuevoEstadoCxP = 'parcial';
+        nuevoEstadoPago = 'parcial';
+      } else {
+        nuevoEstadoCxP = 'pendiente';
+        nuevoEstadoPago = 'sin_pagar';
+      }
+
+      if (cxp) {
+        await tx.cuentaPorPagar.update({
+          where: { id: cxp.id },
+          data: {
+            montoTotal: nuevoTotal,
+            saldo: nuevoSaldo,
+            estado: nuevoEstadoCxP,
+            // montoPagado no cambia: el dinero ya salió
+          },
+        });
+      } else if (nuevoTotal > 0) {
+        // Si no existía CxP y ahora hay un total, crearla
+        await tx.cuentaPorPagar.create({
+          data: {
+            ordenCompraId: id,
+            montoTotal: nuevoTotal,
+            montoPagado: 0,
+            saldo: nuevoTotal,
+            estado: 'pendiente',
+          },
+        });
+        nuevoEstadoPago = 'sin_pagar';
+      }
+
+      // 6. Reemplazar detalles atomicamente
+      await tx.detalleCompra.deleteMany({ where: { ordenCompraId: id } });
+      await tx.detalleCompra.createMany({
+        data: nuevosDetallesData.map((d) => ({
+          ordenCompraId: id,
+          descripcion: d.descripcion,
+          cantidad: d.cantidad,
+          precioUnitario: d.precioUnitario,
+          subtotal: d.subtotal,
+          materialId: d.materialId,
+          cantidadRecibida: d.cantidadRecibida,
+          descargableInventario: d.descargableInventario,
+          fechaRecepcion: d.fechaRecepcion,
+        })),
+      });
+
+      // 7. Actualizar la orden
+      const updateData: any = {
+        subtotal: nuevoSubtotal,
+        impuesto: nuevoImpuesto,
+        total: nuevoTotal,
+        estadoPago: nuevoEstadoPago,
+      };
+      if (data.concepto !== undefined) updateData.concepto = data.concepto;
+      if (data.notas !== undefined) updateData.notas = data.notas;
+      if (data.fecha) updateData.fecha = new Date(data.fecha);
+      if (data.proyectoId !== undefined) {
+        updateData.proyectoId = data.proyectoId || null;
+      }
+
+      await tx.ordenCompra.update({ where: { id }, data: updateData });
+
+      // 8. Retornar la orden actualizada (fuera de la transacción para usar el include completo)
+      return null as any; // Placeholder, resolvemos después
+    }).then(async () => {
+      const updated = await this.findOrdenById(id);
+      if (!updated) throw new Error('No se pudo recuperar la orden actualizada.');
+      return updated;
+    });
+  }
+
   // ── Inventario Helpers ──
 
   async adjustMaterialStock(materialId: string, cantidad: number): Promise<void> {

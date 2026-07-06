@@ -201,6 +201,42 @@ export class ComprasController {
     } catch (e) { return this.fail(res, e); }
   }
 
+  async editarOrden(req: Request, res: Response) {
+    try {
+      const user = (req as any).user;
+      const rol = (user?.rol || '').toLowerCase();
+      const isAdmin = rol === 'admin' || rol === 'administrador';
+      const hasPermiso = isAdmin || user?.permissions?.includes('aprobacion_ordenes_compra');
+      if (!hasPermiso) {
+        return res.status(403).json({
+          success: false,
+          error: { message: 'Solo los administradores pueden editar órdenes con reconciliación financiera.' },
+        });
+      }
+
+      const id = String(req.params.id);
+      const { fecha, concepto, notas, proyectoId, impuesto, detalles } = req.body;
+
+      if (!Array.isArray(detalles) || detalles.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Debe incluir al menos un ítem en la orden.' },
+        });
+      }
+
+      const data = await this.service.editarOrden(id, {
+        fecha,
+        concepto,
+        notas,
+        proyectoId: proyectoId || null,
+        impuesto: parseFloat(impuesto) || 0,
+        detalles,
+        editadoPorId: user.id,
+      });
+      return this.ok(res, data);
+    } catch (e) { return this.fail(res, e, 400); }
+  }
+
   // ── Abonos ─────────────────────────────────────────────────────────────────
 
   async listAbonos(req: Request, res: Response) {
