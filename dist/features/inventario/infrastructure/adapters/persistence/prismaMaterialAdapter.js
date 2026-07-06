@@ -216,7 +216,7 @@ export class PrismaMaterialAdapter {
         const rows = await this.prisma.prestamo.findMany({
             where: estado ? { estado } : undefined,
             include: {
-                material: { select: { nombre: true, tipo: true, unidadMedida: true } },
+                material: { select: { nombre: true, tipo: true, codigo: true, unidadMedida: true } },
                 responsable: { select: { nombre: true, username: true } },
             },
             orderBy: { fechaSalida: 'desc' },
@@ -227,7 +227,7 @@ export class PrismaMaterialAdapter {
         const row = await this.prisma.prestamo.findUnique({
             where: { id },
             include: {
-                material: { select: { nombre: true, tipo: true, unidadMedida: true } },
+                material: { select: { nombre: true, tipo: true, codigo: true, unidadMedida: true } },
                 responsable: { select: { nombre: true, username: true } },
             },
         });
@@ -246,7 +246,7 @@ export class PrismaMaterialAdapter {
                 responsable: { connect: { id: data.responsableId } },
             },
             include: {
-                material: { select: { nombre: true, tipo: true, unidadMedida: true } },
+                material: { select: { nombre: true, tipo: true, codigo: true, unidadMedida: true } },
                 responsable: { select: { nombre: true, username: true } },
             },
         });
@@ -263,7 +263,7 @@ export class PrismaMaterialAdapter {
                     : {}),
             },
             include: {
-                material: { select: { nombre: true, tipo: true, unidadMedida: true } },
+                material: { select: { nombre: true, tipo: true, codigo: true, unidadMedida: true } },
                 responsable: { select: { nombre: true, username: true } },
             },
         });

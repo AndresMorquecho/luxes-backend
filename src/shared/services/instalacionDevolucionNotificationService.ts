@@ -100,7 +100,10 @@ async function resolveUserIdForResponsable(
 
   const member = personalAsignado.find(
     (p) => normalizeName(String(p.nombre || '')) === norm,
-  );
+  ) || personalAsignado.find((p) => {
+    const pn = normalizeName(String(p.nombre || ''));
+    return pn && (pn.includes(norm) || norm.includes(pn));
+  });
   if (member?.empleadoId) {
     const byEmpleado = await prisma.user.findFirst({
       where: { empleadoId: String(member.empleadoId), estado: 'activo' },
@@ -142,32 +145,6 @@ async function resolveUserIdForResponsable(
     return userName.includes(norm) || norm.includes(userName);
   });
   return partial?.id ?? null;
-}
-
-async function getFallbackResponsableUserId(): Promise<string | null> {
-  const taller = await prisma.user.findFirst({
-    where: {
-      estado: 'activo',
-      OR: [
-        { rol: { equals: 'taller', mode: 'insensitive' } },
-        { rol: { equals: 'Taller', mode: 'insensitive' } },
-      ],
-    },
-    select: { id: true },
-  });
-  if (taller) return taller.id;
-
-  const admin = await prisma.user.findFirst({
-    where: {
-      estado: 'activo',
-      OR: [
-        { rol: { equals: 'admin', mode: 'insensitive' } },
-        { rol: { equals: 'administrador', mode: 'insensitive' } },
-      ],
-    },
-    select: { id: true },
-  });
-  return admin?.id ?? null;
 }
 
 async function yaRegistradoParaProyecto(proyectoId: string): Promise<boolean> {
@@ -352,7 +329,6 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
     return;
   }
 
-  const fallbackUserId = await getFallbackResponsableUserId();
   const porEncargado = new Map<string, typeof herramientas>();
 
   for (const h of herramientas) {
@@ -364,19 +340,24 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
   for (const tools of porEncargado.values()) {
     const responsableNombre = String(tools[0].responsable || '').trim();
     const userId = await resolveUserIdForResponsable(responsableNombre, personalAsignado);
-    const prestamoUserId = userId || fallbackUserId;
+
+    if (!userId) {
+      console.warn(
+        `[instalacionDevolucion] Sin usuario vinculado para "${responsableNombre}", omitiendo préstamo y notificación`,
+      );
+      continue;
+    }
 
     for (const tool of tools) {
       const qty = cantidadMaterial(tool);
 
-      if (tool.materialId && prestamoUserId) {
-        const encargadoPrefix = userId ? '' : `Encargado: ${responsableNombre} | `;
+      if (tool.materialId) {
         try {
           await registrarPrestamoDevolucion(
             tool.materialId,
-            prestamoUserId,
+            userId,
             qty,
-            `${encargadoPrefix}Devolución pendiente tras instalación del proyecto ${params.proyectoNombre} [PROYECTO_ID:${params.proyectoId}]`,
+            `Devolución pendiente tras instalación del proyecto ${params.proyectoNombre} [PROYECTO_ID:${params.proyectoId}]`,
             responsableNombre,
           );
         } catch (err) {
@@ -390,38 +371,27 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
     const message = `La instalación del proyecto "${params.proyectoNombre}" finalizó. Tienes ${etiquetaCantidad}. [PROYECTO_ID:${params.proyectoId}]`;
 
     try {
-      if (userId) {
-        await prisma.notification.create({
-          data: {
-            title: etiquetaCantidad,
-            message,
-            userId,
-            createdBy: 'Sistema Luxes',
-          },
-        });
-        await sendPushToUsers([userId], {
+      await prisma.notification.create({
+        data: {
           title: etiquetaCantidad,
-          body: `Tienes ${etiquetaCantidad} tras el proyecto "${params.proyectoNombre}".`,
-          icon: '/LogoGlobo.png',
-          badge: '/LogoGlobo.png',
-          data: {
-            url: '/devoluciones',
-            proyectoId: params.proyectoId,
-            cantidadDevolver,
-          },
-        }).catch(() => {});
-      } else {
-        await prisma.notification.create({
-          data: {
-            title: etiquetaCantidad,
-            message: `${responsableNombre}: ${message}`,
-            rol: 'taller',
-            createdBy: 'Sistema Luxes',
-          },
-        });
-      }
+          message,
+          userId,
+          createdBy: 'Sistema Luxes',
+        },
+      });
+      await sendPushToUsers([userId], {
+        title: etiquetaCantidad,
+        body: `Tienes ${etiquetaCantidad} tras el proyecto "${params.proyectoNombre}".`,
+        icon: '/LogoGlobo.png',
+        badge: '/LogoGlobo.png',
+        data: {
+          url: '/devoluciones',
+          proyectoId: params.proyectoId,
+          cantidadDevolver,
+        },
+      }).catch(() => {});
       console.log(
-        `[instalacionDevolucion] ${params.proyectoId} → ${responsableNombre} (${userId || 'taller'})`,
+        `[instalacionDevolucion] ${params.proyectoId} → notificación solo a usuario ${userId} (${responsableNombre})`,
       );
     } catch (err) {
       console.error('[instalacionDevolucion] Error enviando notificación:', err);
