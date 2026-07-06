@@ -193,6 +193,9 @@ export class ComprasService {
         isCustom?: boolean;
       }[];
       editadoPorId: string;
+      abonoMonto?: number;
+      metodoPagoId?: string | null;
+      abonoReferencia?: string;
     }
   ): Promise<OrdenCompraData> {
     if (!data.detalles || data.detalles.length === 0) {
@@ -201,6 +204,9 @@ export class ComprasService {
     for (const d of data.detalles) {
       if (d.cantidad <= 0) throw new Error(`La cantidad de "${d.descripcion}" debe ser mayor a 0.`);
       if (d.precioUnitario < 0) throw new Error(`El precio de "${d.descripcion}" no puede ser negativo.`);
+    }
+    if (data.abonoMonto && data.abonoMonto > 0 && !data.metodoPagoId) {
+      throw new Error('Debe seleccionar un método de pago para registrar el pago inicial.');
     }
     return this.repo.editarOrdenConReconciliacion(id, {
       ...data,

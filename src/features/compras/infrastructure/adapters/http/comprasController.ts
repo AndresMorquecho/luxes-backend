@@ -230,12 +230,12 @@ export class ComprasController {
       if (!hasPermiso) {
         return res.status(403).json({
           success: false,
-          error: { message: 'Solo los administradores pueden editar órdenes con reconciliación financiera.' },
+          error: { message: 'Solo los administradores pueden editar órdenes con anulación y reemplazo.' },
         });
       }
 
       const id = String(req.params.id);
-      const { fecha, concepto, notas, proyectoId, impuesto, detalles } = req.body;
+      const { fecha, concepto, notas, proyectoId, impuesto, detalles, abonoMonto, metodoPagoId, abonoReferencia } = req.body;
 
       if (!Array.isArray(detalles) || detalles.length === 0) {
         return res.status(400).json({
@@ -252,6 +252,9 @@ export class ComprasController {
         impuesto: parseFloat(impuesto) || 0,
         detalles,
         editadoPorId: user.id,
+        abonoMonto: abonoMonto ? parseFloat(abonoMonto) : undefined,
+        metodoPagoId: metodoPagoId || null,
+        abonoReferencia: abonoReferencia || undefined,
       });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }

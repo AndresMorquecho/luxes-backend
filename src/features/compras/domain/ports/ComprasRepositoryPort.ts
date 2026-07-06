@@ -232,6 +232,9 @@ export interface ComprasRepositoryPort {
       isCustom?: boolean;
     }[];
     editadoPorId: string;
+    abonoMonto?: number;
+    metodoPagoId?: string | null;
+    abonoReferencia?: string;
   }): Promise<OrdenCompraData>;
 
   // ── Inventario Helpers ──
