@@ -61,6 +61,10 @@ export class ComprasService {
         if (orden.estado === 'recibida' || orden.estado === 'parcialmente_recibida') {
             throw new Error('No se puede modificar una orden que ya fue recibida o está en recepción parcial.');
         }
+        const isApprovalTransition = data.estado === 'aprobada' || data.estado === 'rechazada';
+        if (!isApprovalTransition && orden.estado !== 'aprobada') {
+            throw new Error('Solo se pueden editar órdenes que ya fueron aprobadas.');
+        }
         if (data.detalles && data.detalles.length === 0) {
             throw new Error('La orden debe conservar al menos un item.');
         }

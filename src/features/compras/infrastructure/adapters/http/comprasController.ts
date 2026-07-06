@@ -123,8 +123,6 @@ export class ComprasController {
       const rol = (user?.rol || '').toLowerCase();
       const isAdmin = rol === 'admin' || rol === 'administrador';
       const hasAprobacion = isAdmin || user?.permissions?.includes('aprobacion_ordenes_compra');
-      const isCreatorPending =
-        orden.usuarioId === userId && orden.estado === 'pendiente_aprobacion';
 
       const updateData = { ...req.body };
       const isApprovalAction =
@@ -137,7 +135,14 @@ export class ComprasController {
         });
       }
 
-      if (!hasAprobacion && !isCreatorPending) {
+      if (!isApprovalAction && orden.estado !== 'aprobada') {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Solo se pueden editar órdenes aprobadas. Las pendientes deben gestionarse desde aprobación.' },
+        });
+      }
+
+      if (!isApprovalAction && !hasAprobacion) {
         return res.status(403).json({
           success: false,
           error: { message: 'No tienes permiso para modificar esta orden.' },
@@ -150,15 +155,6 @@ export class ComprasController {
       if (orden.estado === 'aprobada' && updateData.estado === 'aprobada') {
         delete updateData.estado;
         delete updateData.aprobadoPorId;
-      }
-
-      if (!hasAprobacion && isCreatorPending) {
-        delete updateData.estado;
-        delete updateData.aprobadoPorId;
-        delete updateData.abonoMonto;
-        delete updateData.metodoPagoId;
-        delete updateData.abonoReferencia;
-        delete updateData.registrarAbonoAjuste;
       }
 
       // Abono: solo en aprobación nueva o en edición con flag explícito
