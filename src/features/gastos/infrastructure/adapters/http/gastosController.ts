@@ -25,7 +25,7 @@ export class GastosController {
       const search = (req.query.search as string || '').toLowerCase();
       const origenFiltro = req.query.origen as string || 'todos';
 
-      const [gastos, abonosCompra, nominas, anticipos, compromisosOC] = await Promise.all([
+      const [gastos, abonosCompra, nominas, anticipos] = await Promise.all([
         prisma.gasto.findMany({
           include: {
             metodoPago: true,
@@ -40,9 +40,6 @@ export class GastosController {
             ordenCompra: {
               include: {
                 proveedor: { select: { nombre: true } },
-                cuentaPorPagar: {
-                  select: { montoTotal: true, montoPagado: true, saldo: true },
-                },
               },
             },
           },
@@ -56,46 +53,32 @@ export class GastosController {
           include: { empleado: { select: { nombre: true } } },
           orderBy: { fecha: 'desc' },
         }),
-        prisma.cuentaPorPagar.findMany({
-          where: {
-            saldo: { gt: 0.01 },
-            ordenCompra: {
-              estado: { in: ['aprobada', 'parcialmente_recibida'] },
-            },
-          },
-          include: {
-            ordenCompra: {
-              include: { proveedor: { select: { nombre: true } } },
-            },
-          },
-        }),
       ]);
 
-      const gastosManual = gastos.map((g) => ({
-        id: g.id,
-        concepto: g.concepto,
-        categoria: g.categoria,
-        fecha: g.fecha,
-        monto: Number(g.monto),
-        proveedor: g.proveedor,
-        notas: g.notas,
-        metodoPagoId: g.metodoPagoId,
-        metodoPago: g.metodoPago,
-        registradoPor: g.registradoPor,
-        origen: 'gasto' as const,
-        readonly: false,
-        referencia: '',
-      }));
+      const gastosManual = gastos.map((g) => {
+        const isVehiculo = g.categoria?.toLowerCase() === 'vehiculos' || g.categoria?.toLowerCase() === 'mantenimiento';
+        return {
+          id: g.id,
+          concepto: isVehiculo ? `[${g.proveedor || g.categoria}] ${g.concepto}` : g.concepto,
+          categoria: g.categoria,
+          fecha: g.fecha,
+          monto: Number(g.monto),
+          proveedor: g.proveedor,
+          notas: g.notas,
+          metodoPagoId: g.metodoPagoId,
+          metodoPago: g.metodoPago,
+          registradoPor: g.registradoPor,
+          origen: isVehiculo ? 'vehiculo' : 'otros_gastos',
+          readonly: false,
+          referencia: '',
+        };
+      });
 
       const pagosCompra = abonosCompra.map((ab) => {
         const ref = ab.referencia || '';
-        const esPagoAjuste = /ajuste por edición/i.test(ref);
-        const cxp = ab.ordenCompra?.cuentaPorPagar;
         return {
           id: ab.id,
-          concepto: esPagoAjuste
-            ? `Pago ajuste OC ${ab.ordenCompra?.numero || ''}`.trim()
-            : `Pago OC ${ab.ordenCompra?.numero || ''}`.trim(),
+          concepto: `Abono OC: ${ab.ordenCompra?.numero || ''} ${ref ? '- ' + ref : ''}`.trim(),
           categoria: 'compras',
           fecha: ab.fecha,
           monto: Number(ab.monto),
@@ -107,12 +90,6 @@ export class GastosController {
           origen: 'orden_compra' as const,
           readonly: true,
           referencia: ref,
-          ordenCompraId: ab.ordenCompraId,
-          ordenNumero: ab.ordenCompra?.numero || null,
-          ordenTotal: cxp ? Number(cxp.montoTotal) : null,
-          ordenPagado: cxp ? Number(cxp.montoPagado) : null,
-          ordenSaldo: cxp ? Number(cxp.saldo) : null,
-          esPagoAjuste,
         };
       });
 
@@ -122,18 +99,24 @@ export class GastosController {
         const abonosArr = Array.isArray(abonosRaw) ? abonosRaw : typeof abonosRaw === 'string' ? JSON.parse(abonosRaw) : [];
         if (abonosArr && abonosArr.length > 0) {
           abonosArr.forEach((ab: any, index: number) => {
+            const startDate = new Date(n.fechaInicio);
+            const startDay = startDate.getDate();
+            const startMonth = startDate.toLocaleString('es-EC', { month: 'long' });
+            const startYear = startDate.getFullYear();
+            const quincenaText = startDay <= 15 ? '1era' : '2da';
+            
             pagosNomina.push({
               id: `nomina-abono-${n.id}-${index}`,
-              concepto: `Pago Nómina - ${n.empleado?.nombre || 'Sin nombre'}`,
+              concepto: `Abono a Empleado ${n.empleado?.nombre || 'Sin nombre'} [${quincenaText} Quincena de ${startMonth} del ${startYear}]`,
               categoria: 'recursos_humanos',
               fecha: ab.fecha ? new Date(ab.fecha) : n.updatedAt,
               monto: Number(ab.monto || 0),
               proveedor: 'Personal',
-              notas: ab.referencia || `Liquidación nómina (${new Date(n.fechaInicio).toLocaleDateString()} al ${new Date(n.fechaFin).toLocaleDateString()})`,
+              notas: ab.referencia || '',
               metodoPagoId: ab.metodoPagoId || null,
               metodoPago: null,
               registradoPor: null,
-              origen: 'pago_nomina' as const,
+              origen: 'nomina' as const,
               readonly: true,
               referencia: ab.referencia || '',
             });
@@ -143,7 +126,7 @@ export class GastosController {
 
       const anticiposEmpleados = anticipos.map((ant) => ({
         id: ant.id,
-        concepto: `Anticipo de Sueldo - ${ant.empleado?.nombre || 'Sin nombre'}`,
+        concepto: `Abono a Empleado ${ant.empleado?.nombre || 'Sin nombre'} [Anticipo]`,
         categoria: 'recursos_humanos',
         fecha: ant.fecha,
         monto: Number(ant.monto),
@@ -152,62 +135,27 @@ export class GastosController {
         metodoPagoId: null,
         metodoPago: null,
         registradoPor: null,
-        origen: 'anticipo_empleado' as const,
+        origen: 'nomina' as const,
         readonly: true,
         referencia: '',
       }));
 
-      const saldosPendientes = compromisosOC.map((cxp) => {
-        const total = Number(cxp.montoTotal);
-        const saldo = Number(cxp.saldo);
-        return {
-          id: `cxp-saldo-${cxp.id}`,
-          concepto: `Saldo pendiente OC ${cxp.ordenCompra?.numero || ''}`.trim(),
-          categoria: 'compras',
-          fecha: cxp.ordenCompra?.fecha || new Date(),
-          monto: saldo,
-          proveedor: cxp.ordenCompra?.proveedor?.nombre || 'Sin proveedor',
-          notas: `Total orden $${total.toFixed(2)} — aún por pagar en caja`,
-          metodoPagoId: null,
-          metodoPago: null,
-          registradoPor: null,
-          origen: 'cuenta_por_pagar' as const,
-          readonly: true,
-          referencia: '',
-          ordenCompraId: cxp.ordenCompraId,
-          ordenNumero: cxp.ordenCompra?.numero || null,
-          ordenTotal: total,
-          ordenPagado: Number(cxp.montoPagado),
-          ordenSaldo: saldo,
-          esCompromiso: true,
-        };
-      });
-
-      let filteredData = [...gastosManual, ...pagosCompra, ...pagosNomina, ...anticiposEmpleados, ...saldosPendientes].sort(
+      let filteredData = [...gastosManual, ...pagosCompra, ...pagosNomina, ...anticiposEmpleados].sort(
         (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
       );
 
       // Filtering by origen
       if (origenFiltro !== 'todos') {
-        filteredData = filteredData.filter((g) => {
-          if (origenFiltro === 'gasto') return g.origen !== 'orden_compra' && g.origen !== 'cuenta_por_pagar' && g.origen !== 'pago_nomina' && g.origen !== 'anticipo_empleado';
-          if (origenFiltro === 'nomina_anticipo') return g.origen === 'pago_nomina' || g.origen === 'anticipo_empleado';
-          if (origenFiltro === 'orden_compra') return g.origen === 'orden_compra';
-          if (origenFiltro === 'cuenta_por_pagar') return g.origen === 'cuenta_por_pagar';
-          return true;
-        });
+        filteredData = filteredData.filter((g) => g.origen === origenFiltro);
       }
 
       // Filtering by search query
       if (search) {
         filteredData = filteredData.filter((g) =>
           g.concepto?.toLowerCase().includes(search) ||
-          g.categoria?.toLowerCase().includes(search) ||
           g.proveedor?.toLowerCase().includes(search) ||
           g.referencia?.toLowerCase().includes(search) ||
-          g.notas?.toLowerCase().includes(search) ||
-          (g as any).registradoPor?.nombre?.toLowerCase().includes(search) ||
-          g.ordenNumero?.toLowerCase().includes(search)
+          g.notas?.toLowerCase().includes(search)
         );
       }
 
