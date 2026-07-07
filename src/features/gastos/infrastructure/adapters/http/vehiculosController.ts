@@ -55,7 +55,14 @@ export class VehiculosController {
         where: { id: String(id) },
         include: {
           mantenimientos: {
-            include: { gasto: { include: { metodoPago: true } } },
+            include: { 
+              gasto: { 
+                include: { 
+                  metodoPago: true,
+                  registradoPor: { select: { nombre: true } }
+                } 
+              } 
+            },
             orderBy: { fechaRealizado: 'desc' },
           },
         },
@@ -202,6 +209,7 @@ export class VehiculosController {
 
       // 1. Crear Gasto asociado
       const gastoId = await nextGastoId();
+      const registradoPorUserId = (req as any).user?.id || null;
       await prisma.gasto.create({
         data: {
           id: gastoId,
@@ -212,6 +220,7 @@ export class VehiculosController {
           proveedor: b.proveedor ?? '',
           notas: b.notas ?? '',
           metodoPagoId: b.metodoPagoId || null,
+          registradoPorUserId: registradoPorUserId ?? undefined,
         },
       });
 

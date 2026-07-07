@@ -79,7 +79,7 @@ export class GastosController {
           metodoPago: g.metodoPago,
           registradoPor: g.registradoPor,
           origen: isVehiculo ? 'vehiculo' : 'otros_gastos',
-          readonly: false,
+          readonly: isVehiculo,
           referencia: '',
         };
       });
