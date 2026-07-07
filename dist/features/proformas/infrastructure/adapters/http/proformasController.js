@@ -123,12 +123,16 @@ function mapProforma(p) {
             cantidad: Number(i.cantidad),
             precioUnitario: Number(i.precioUnitario),
         })),
-        abonos: (p.abonos || []).map((ab) => ({
+        abonos: (p.abonos || [])
+            .slice()
+            .sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
+            .map((ab) => ({
             id: ab.id,
             monto: Number(ab.monto),
-            fecha: toDateStr(ab.fecha),
+            fecha: toDateTimeStr(ab.fecha),
             referencia: ab.referencia,
             metodoPago: ab.metodoPago ? { id: ab.metodoPago.id, nombre: ab.metodoPago.nombre } : null,
+            registradoPor: ab.registradoPor ? { id: ab.registradoPor.id, nombre: ab.registradoPor.nombre } : null,
         })),
     };
 }
@@ -221,7 +225,7 @@ export class ProformasController {
             const [proformas, total] = await Promise.all([
                 prisma.proforma.findMany({
                     where,
-                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
                     orderBy: { fecha: 'desc' },
                     skip,
                     take: limitNum,
@@ -391,7 +395,7 @@ export class ProformasController {
                     estado: String(estado),
                     ...(metodoPagoId !== undefined && { metodoPagoId: metodoPagoId || null })
                 },
-                include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+                include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
             });
             let accionAuditoria = 'Cambiar estado de proforma';
             if (estadoStr === 'Aprobada' || estadoStr === 'Pagada') {
@@ -422,7 +426,7 @@ export class ProformasController {
                     items: true,
                     metodoPago: true,
                     abonos: {
-                        include: { metodoPago: true }
+                        include: { metodoPago: true, registradoPor: true }
                     }
                 }
             });
@@ -492,7 +496,7 @@ export class ProformasController {
                         metodoPagoId: String(metodoPagoId),
                         fechaAprobacion: new Date(),
                     },
-                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
                 });
                 return updated;
             });
@@ -535,7 +539,7 @@ export class ProformasController {
             const updated = await prisma.proforma.update({
                 where: { id: proforma.id },
                 data: { estado: 'Rechazada' },
-                include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+                include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
             });
             const adminNombre = req.user?.nombre || 'Administración';
             await notifyVentasEquipo(updated, {
@@ -607,7 +611,7 @@ export class ProformasController {
                     data: {
                         estado: nuevoEstado,
                     },
-                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
                 });
                 return updated;
             });
@@ -616,6 +620,120 @@ export class ProformasController {
         catch (error) {
             console.error('[proformas/registrarAbono]', error);
             return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar abono' } });
+        }
+    }
+    async editarAbono(req, res) {
+        try {
+            const { id, abonoId } = req.params;
+            const b = req.body || {};
+            const { monto, metodoPagoId, referencia } = b;
+            const userRole = (req.user?.rol || '').toUpperCase();
+            const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
+            if (!isAdmin) {
+                return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Solo los administradores pueden editar abonos' } });
+            }
+            if (monto === undefined || !metodoPagoId) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Monto y método de pago son requeridos' } });
+            }
+            const proforma = await prisma.proforma.findUnique({
+                where: { id: String(id) },
+                include: { items: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
+            });
+            if (!proforma) {
+                return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Proforma no encontrada' } });
+            }
+            if (proforma.abonos.length === 0) {
+                return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'No existen abonos registrados en esta proforma' } });
+            }
+            const abonosSorted = proforma.abonos.slice().sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+            const lastAbono = abonosSorted[abonosSorted.length - 1];
+            if (lastAbono.id !== String(abonoId)) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Solo se puede editar el último abono registrado' } });
+            }
+            const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
+            const total = subtotal * (1 + Number(proforma.iva));
+            const sumOtrosAbonos = abonosSorted.slice(0, -1).reduce((s, ab) => s + Number(ab.monto), 0);
+            const nuevoMonto = Number(monto);
+            if (nuevoMonto <= 0) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
+            }
+            const maxPermitted = total - sumOtrosAbonos;
+            if (nuevoMonto > (maxPermitted + 0.01)) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${nuevoMonto} supera el saldo pendiente de $${maxPermitted.toFixed(2)}` } });
+            }
+            const nuevoEstado = (sumOtrosAbonos + nuevoMonto) >= (total - 0.01) ? 'Pagada' : 'Aprobada';
+            const result = await prisma.$transaction(async (tx) => {
+                const registradoPorUserId = req.user?.id || null;
+                await tx.abonoProforma.update({
+                    where: { id: lastAbono.id },
+                    data: {
+                        monto: nuevoMonto,
+                        metodoPagoId: String(metodoPagoId),
+                        referencia: referencia ?? '',
+                        registradoPorUserId: registradoPorUserId ?? undefined,
+                    },
+                });
+                const updated = await tx.proforma.update({
+                    where: { id: proforma.id },
+                    data: {
+                        estado: nuevoEstado,
+                    },
+                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
+                });
+                return updated;
+            });
+            return res.status(200).json({ success: true, data: mapProforma(result) });
+        }
+        catch (error) {
+            console.error('[proformas/editarAbono]', error);
+            return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al editar abono' } });
+        }
+    }
+    async eliminarAbono(req, res) {
+        try {
+            const { id, abonoId } = req.params;
+            const userRole = (req.user?.rol || '').toUpperCase();
+            const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
+            if (!isAdmin) {
+                return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Solo los administradores pueden eliminar abonos' } });
+            }
+            const proforma = await prisma.proforma.findUnique({
+                where: { id: String(id) },
+                include: { items: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
+            });
+            if (!proforma) {
+                return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Proforma no encontrada' } });
+            }
+            if (proforma.abonos.length === 0) {
+                return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'No existen abonos registrados en esta proforma' } });
+            }
+            const abonosSorted = proforma.abonos.slice().sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+            const lastAbono = abonosSorted[abonosSorted.length - 1];
+            if (lastAbono.id !== String(abonoId)) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Solo se puede eliminar el último abono registrado' } });
+            }
+            const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
+            const total = subtotal * (1 + Number(proforma.iva));
+            const sumOtrosAbonos = abonosSorted.slice(0, -1).reduce((s, ab) => s + Number(ab.monto), 0);
+            const nuevoEstado = sumOtrosAbonos >= (total - 0.01) ? 'Pagada' : 'Aprobada';
+            const result = await prisma.$transaction(async (tx) => {
+                await tx.abonoProforma.delete({
+                    where: { id: lastAbono.id },
+                });
+                const updated = await tx.proforma.update({
+                    where: { id: proforma.id },
+                    data: {
+                        estado: nuevoEstado,
+                    },
+                    include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
+                });
+                return updated;
+            });
+            return res.status(200).json({ success: true, data: mapProforma(result) });
+        }
+        catch (error) {
+            console.error('[proformas/eliminarAbono]', error);
+            return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar abono' } });
         }
     }
     async enviar(req, res) {
@@ -634,7 +752,7 @@ export class ProformasController {
             const updated = await prisma.proforma.update({
                 where: { id: String(id) },
                 data: { fechaEnvio: new Date() },
-                include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
+                include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
             });
             const subtotal = (updated.items || []).reduce((s, item) => s + Number(item.cantidad) * Number(item.precioUnitario), 0);
             const total = subtotal * (1 + Number(updated.iva));
