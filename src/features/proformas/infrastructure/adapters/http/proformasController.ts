@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../../../../../config/prismaClient.js';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
+import { logAuditAction } from '../../../../../shared/services/auditLogService.js';
 
 /** Genera el siguiente ID con formato PRO-### */
 async function nextProformaId(): Promise<string> {
@@ -432,6 +433,21 @@ export class ProformasController {
         },
         include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true } } },
       });
+
+      let accionAuditoria = 'Cambiar estado de proforma';
+      if (estadoStr === 'Aprobada' || estadoStr === 'Pagada') {
+        accionAuditoria = estadoStr === 'Pagada' ? 'Aprobar y pagar proforma' : 'Aprobar proforma';
+      } else if (estadoStr === 'Rechazada') {
+        accionAuditoria = 'Rechazar proforma';
+      }
+
+      await logAuditAction({
+        userId: (req as { user?: { id?: string } }).user?.id,
+        accion: accionAuditoria,
+        modulo: 'Proformas',
+        detalle: `PATCH /api/proformas/${id}/estado — ${updated.id} — Cliente: "${updated.clienteNombre}" — Estado: ${estadoStr}`,
+      });
+
       return res.status(200).json({ success: true, data: mapProforma(updated) });
     } catch (error) {
       console.error('[proformas/updateEstado]', error);
@@ -541,6 +557,13 @@ export class ProformasController {
         createdBy: adminNombre,
       });
 
+      await logAuditAction({
+        userId: (req as { user?: { id?: string } }).user?.id,
+        accion: nuevoEstado === 'Pagada' ? 'Aprobar y pagar proforma' : 'Aprobar proforma',
+        modulo: 'Proformas',
+        detalle: `POST /api/proformas/${id}/aprobar — ${result.id} — Cliente: "${result.clienteNombre}" — Abono: $${abonoMonto.toFixed(2)} — Estado: ${nuevoEstado}`,
+      });
+
       return res.status(200).json({ success: true, data: mapProforma(result) });
     } catch (error) {
       console.error('[proformas/aprobar]', error);
@@ -581,6 +604,14 @@ export class ProformasController {
         title: 'Proforma Rechazada',
         message: `La proforma ${updated.id} para "${updated.clienteNombre}" fue rechazada.`,
         createdBy: adminNombre,
+      });
+
+      await logAuditAction({
+        userId: (req as { user?: { id?: string } }).user?.id,
+        accion: 'Rechazar proforma',
+        modulo: 'Proformas',
+        detalle: `POST /api/proformas/${id}/rechazar — ${updated.id} — Cliente: "${updated.clienteNombre}"`,
+        severidad: 'Warning',
       });
 
       return res.status(200).json({ success: true, data: mapProforma(updated) });

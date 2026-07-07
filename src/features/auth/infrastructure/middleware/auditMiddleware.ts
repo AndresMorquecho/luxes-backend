@@ -148,8 +148,16 @@ function resolveModule(url: string): string {
   return MODULE_MAP[moduleKey] || moduleKey || 'Sistema';
 }
 
-function resolveAction(method: string, url: string): string | null {
-  const cleanUrl = url.replace(/\?.*$/, ''); // strip query params
+function resolveAction(method: string, url: string, body?: any): string | null {
+  const cleanUrl = url.replace(/\?.*$/, '');
+
+  if (method === 'PATCH' && /^\/api\/proformas\/[^/]+\/estado$/.test(cleanUrl)) {
+    const estado = String(body?.estado || '');
+    if (estado === 'Aprobada' || estado === 'Pagada') return 'Aprobar proforma';
+    if (estado === 'Rechazada') return 'Rechazar proforma';
+    return 'Cambiar estado de proforma';
+  }
+
   for (const rule of ACTION_RULES) {
     if (rule.method === method && rule.pattern.test(cleanUrl)) {
       return rule.label;
@@ -168,6 +176,9 @@ const AUTH_SKIP_PATTERN = /^\/api\/auth\//;
 const SKIP_PATTERNS = [
   /^\/api\/notifications\/subscribe$/,     // push subscription registration
   /^\/api\/notifications\/vapid-key$/,
+  /^\/api\/proformas\/[^/]+\/aprobar$/,    // logged explicitly in controller
+  /^\/api\/proformas\/[^/]+\/rechazar$/,   // logged explicitly in controller
+  /^\/api\/proformas\/[^/]+\/estado$/,     // logged explicitly in controller
 ];
 
 /**
@@ -203,7 +214,7 @@ export function auditMiddleware(req: any, res: Response, next: NextFunction) {
       const url = req.originalUrl || req.url;
       const method = req.method;
       const modulo = resolveModule(url);
-      const accion = resolveAction(method, url);
+      const accion = resolveAction(method, url, req.body);
 
       // Only log if we could resolve a meaningful action
       if (accion && userId) {
