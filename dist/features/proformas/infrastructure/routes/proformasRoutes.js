@@ -11,6 +11,8 @@ export function createProformasRoutes(controller) {
     router.post('/:id/rechazar', authMiddleware, (req, res) => controller.rechazar(req, res));
     router.post('/:id/enviar', authMiddleware, (req, res) => controller.enviar(req, res));
     router.post('/:id/abonos', authMiddleware, (req, res) => controller.registrarAbono(req, res));
+    router.put('/:id/abonos/:abonoId', authMiddleware, (req, res) => controller.editarAbono(req, res));
+    router.delete('/:id/abonos/:abonoId', authMiddleware, (req, res) => controller.eliminarAbono(req, res));
     router.delete('/:id', authMiddleware, (req, res) => controller.remove(req, res));
     return router;
 }

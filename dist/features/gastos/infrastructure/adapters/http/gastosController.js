@@ -236,7 +236,10 @@ export class GastosController {
                 where: {
                     fecha: { gte: desdeDate, lte: hastaLimit },
                 },
-                include: { metodoPago: true },
+                include: {
+                    metodoPago: true,
+                    registradoPor: { select: { id: true, nombre: true } }
+                },
             });
             // Calcular montos de ingresos por método de pago
             const ingresosDetalle = {};
@@ -254,11 +257,18 @@ export class GastosController {
             // 2. Obtener egresos (gastos + abonos de compra)
             const gastos = await prisma.gasto.findMany({
                 where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-                include: { metodoPago: true },
+                include: {
+                    metodoPago: true,
+                    registradoPor: { select: { id: true, nombre: true } },
+                    mantenimientos: true
+                },
             });
             const abonos = await prisma.abonoCompra.findMany({
                 where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-                include: { metodoPago: true },
+                include: {
+                    metodoPago: true,
+                    registradoPor: { select: { id: true, nombre: true } }
+                },
             });
             // Calcular montos de egresos por método de pago
             const egresosDetalle = {};
@@ -308,6 +318,81 @@ export class GastosController {
                     balance: noEspIng - noEspEgr,
                 });
             }
+            // 4. Segmentación por Secciones de Ingresos (Abonos Iniciales vs Posteriores)
+            let abonosInicialesSum = 0;
+            let abonosPosterioresSum = 0;
+            if (abonosProforma.length > 0) {
+                const proformaIds = [...new Set(abonosProforma.map(ab => ab.proformaId))];
+                // Cargar todos los abonos para estas proformas para determinar el primero cronológico
+                const allAbonosForProformas = await prisma.abonoProforma.findMany({
+                    where: { proformaId: { in: proformaIds } },
+                    orderBy: { fecha: 'asc' },
+                });
+                const firstAbonoIdByProforma = new Map();
+                for (const ab of allAbonosForProformas) {
+                    if (!firstAbonoIdByProforma.has(ab.proformaId)) {
+                        firstAbonoIdByProforma.set(ab.proformaId, ab.id);
+                    }
+                }
+                for (const ab of abonosProforma) {
+                    const isInicial = firstAbonoIdByProforma.get(ab.proformaId) === ab.id;
+                    if (isInicial) {
+                        abonosInicialesSum += Number(ab.monto);
+                    }
+                    else {
+                        abonosPosterioresSum += Number(ab.monto);
+                    }
+                }
+            }
+            // 5. Segmentación por Secciones de Egresos
+            let egresosGeneralesSum = 0;
+            let egresosAutoSum = 0;
+            let egresosComprasSum = 0; // AbonosCompra
+            let egresosPagosSum = 0; // Nominas/personal/pagos category
+            for (const g of gastos) {
+                const monto = Number(g.monto);
+                const cat = (g.categoria || '').toLowerCase();
+                const isAuto = cat === 'vehiculos' || cat === 'vehiculo' || cat === 'auto' || (g.mantenimientos && g.mantenimientos.length > 0);
+                const isPago = cat === 'nomina' || cat === 'nominas' || cat === 'personal' || cat === 'pagos' || cat === 'pago';
+                if (isAuto) {
+                    egresosAutoSum += monto;
+                }
+                else if (isPago) {
+                    egresosPagosSum += monto;
+                }
+                else {
+                    egresosGeneralesSum += monto;
+                }
+            }
+            for (const ab of abonos) {
+                egresosComprasSum += Number(ab.monto);
+            }
+            // 6. Segmentación por Usuario
+            const usuariosDetalleMap = {};
+            const addUsuarioTx = (userId, userName, monto, type) => {
+                const uid = userId || 'sistema';
+                const name = userName || 'Sistema / General';
+                if (!usuariosDetalleMap[uid]) {
+                    usuariosDetalleMap[uid] = { id: uid, nombre: name, ingresos: 0, egresos: 0, balance: 0 };
+                }
+                if (type === 'ingreso') {
+                    usuariosDetalleMap[uid].ingresos += monto;
+                }
+                else {
+                    usuariosDetalleMap[uid].egresos += monto;
+                }
+                usuariosDetalleMap[uid].balance = usuariosDetalleMap[uid].ingresos - usuariosDetalleMap[uid].egresos;
+            };
+            for (const ab of abonosProforma) {
+                addUsuarioTx(ab.registradoPorUserId, ab.registradoPor?.nombre || 'No especificado', Number(ab.monto), 'ingreso');
+            }
+            for (const g of gastos) {
+                addUsuarioTx(g.registradoPorUserId, g.registradoPor?.nombre || 'No especificado', Number(g.monto), 'egreso');
+            }
+            for (const ab of abonos) {
+                addUsuarioTx(ab.registradoPorUserId, ab.registradoPor?.nombre || 'No especificado', Number(ab.monto), 'egreso');
+            }
+            const usuariosDetalle = Object.values(usuariosDetalleMap);
             return res.status(200).json({
                 success: true,
                 data: {
@@ -319,6 +404,20 @@ export class GastosController {
                     metodosDetalle: metodosDetalleList,
                     ingresosConteo: abonosProforma.length,
                     egresosConteo: gastos.length + abonos.length,
+                    // Secciones de Ingresos
+                    seccionIngresos: {
+                        abonosIniciales: abonosInicialesSum,
+                        abonosPosteriores: abonosPosterioresSum,
+                    },
+                    // Secciones de Egresos
+                    seccionEgresos: {
+                        gastosGenerales: egresosGeneralesSum,
+                        gastosAuto: egresosAutoSum,
+                        gastosCompras: egresosComprasSum,
+                        gastosPagos: egresosPagosSum,
+                    },
+                    // Detalle por Usuario
+                    usuariosDetalle,
                 },
             });
         }
