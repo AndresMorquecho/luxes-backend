@@ -24,6 +24,10 @@ export class GastosController {
       const limit = parseInt(req.query.limit as string) || 25;
       const search = (req.query.search as string || '').toLowerCase();
       const origenFiltro = req.query.origen as string || 'todos';
+      const usuarioIdFiltro = req.query.usuarioId as string || '';
+      const metodoPagoIdFiltro = req.query.metodoPagoId as string || '';
+      const startDateFiltro = req.query.startDate as string || '';
+      const endDateFiltro = req.query.endDate as string || '';
 
       const [gastos, abonosCompra, nominas, anticipos] = await Promise.all([
         prisma.gasto.findMany({
@@ -57,9 +61,15 @@ export class GastosController {
 
       const gastosManual = gastos.map((g) => {
         const isVehiculo = g.categoria?.toLowerCase() === 'vehiculos' || g.categoria?.toLowerCase() === 'mantenimiento';
+        let conceptoFinal = g.concepto;
+        if (isVehiculo) {
+          const match = g.concepto.match(/Vehículo:\s*(.+?)(?:\s*\([^)]+\)|$)/i);
+          const placa = match ? match[1].trim() : (g.proveedor || 'Vehículo');
+          conceptoFinal = `[${placa}] ${g.concepto}`;
+        }
         return {
           id: g.id,
-          concepto: isVehiculo ? `[${g.proveedor || g.categoria}] ${g.concepto}` : g.concepto,
+          concepto: conceptoFinal,
           categoria: g.categoria,
           fecha: g.fecha,
           monto: Number(g.monto),
@@ -149,6 +159,28 @@ export class GastosController {
         filteredData = filteredData.filter((g) => g.origen === origenFiltro);
       }
 
+      // Filtering by usuario
+      if (usuarioIdFiltro) {
+        filteredData = filteredData.filter((g) => (g as any).registradoPor?.id === usuarioIdFiltro);
+      }
+
+      // Filtering by metodoPago
+      if (metodoPagoIdFiltro) {
+        filteredData = filteredData.filter((g) => g.metodoPagoId === metodoPagoIdFiltro);
+      }
+
+      // Filtering by dates
+      if (startDateFiltro) {
+        const d = new Date(startDateFiltro);
+        d.setHours(0,0,0,0);
+        filteredData = filteredData.filter((g) => new Date(g.fecha) >= d);
+      }
+      if (endDateFiltro) {
+        const d = new Date(endDateFiltro);
+        d.setHours(23,59,59,999);
+        filteredData = filteredData.filter((g) => new Date(g.fecha) <= d);
+      }
+
       // Filtering by search query
       if (search) {
         filteredData = filteredData.filter((g) =>
@@ -159,6 +191,14 @@ export class GastosController {
         );
       }
 
+      // Calculate totals
+      const sumMontos = (list: any[]) => list.reduce((s, g) => s + Number(g.monto || 0), 0);
+      const totalMonto = sumMontos(filteredData);
+      const totalOtrosGastos = sumMontos(filteredData.filter(g => g.origen === 'otros_gastos'));
+      const totalNomina = sumMontos(filteredData.filter(g => g.origen === 'nomina'));
+      const totalVehiculos = sumMontos(filteredData.filter(g => g.origen === 'vehiculo'));
+      const totalOC = sumMontos(filteredData.filter(g => g.origen === 'orden_compra'));
+
       // Pagination
       const totalCount = filteredData.length;
       const totalPages = Math.ceil(totalCount / limit);
@@ -167,6 +207,13 @@ export class GastosController {
       return res.status(200).json({ 
         success: true, 
         data,
+        totales: {
+          total: totalMonto,
+          otrosGastos: totalOtrosGastos,
+          nomina: totalNomina,
+          vehiculos: totalVehiculos,
+          ordenesCompra: totalOC
+        },
         pagination: { totalCount, totalPages, currentPage: page, limit }
       });
     } catch (error) {
