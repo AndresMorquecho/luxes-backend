@@ -15,6 +15,29 @@ async function nextGastoId(): Promise<string> {
   return `GTO-${String(max + 1).padStart(3, '0')}`;
 }
 
+/**
+ * Checks if a given date falls within any closed cash-register period.
+ * Returns the overlapping CierreCaja record or null.
+ */
+async function findCierreThatCovers(fecha: Date) {
+  const d = new Date(fecha);
+  d.setHours(0, 0, 0, 0);
+  const dEnd = new Date(d);
+  dEnd.setHours(23, 59, 59, 999);
+
+  return prisma.cierreCaja.findFirst({
+    where: {
+      fechaInicio: { lte: dEnd },
+      fechaFin: { gte: d },
+    },
+  });
+}
+
+function isAdminUser(req: any): boolean {
+  const rol = ((req as any).user?.rol || '').toLowerCase();
+  return rol === 'admin' || rol === 'administrador';
+}
+
 export class GastosController {
   // --- GASTOS CRUD ---
 
@@ -229,6 +252,14 @@ export class GastosController {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Concepto, fecha y monto son requeridos' } });
       }
 
+      // Verificar si la fecha cae en un período cerrado
+      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden registrar gastos en un período cerrado (${fi} al ${ff}). Elimine el cierre de caja primero.` } });
+      }
+
       const id = b.id && String(b.id).startsWith('GTO-') ? b.id : await nextGastoId();
       const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
 
@@ -264,6 +295,14 @@ export class GastosController {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Concepto, fecha y monto son requeridos' } });
       }
 
+      // Verificar si la fecha cae en un período cerrado
+      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden editar gastos en un período cerrado (${fi} al ${ff}). Elimine el cierre de caja primero.` } });
+      }
+
       const gasto = await prisma.gasto.update({
         where: { id: String(id) },
         data: {
@@ -295,6 +334,17 @@ export class GastosController {
           success: false,
           error: { code: 'VALIDATION_ERROR', message: 'Los pagos de órdenes de compra no se eliminan desde Gastos.' },
         });
+      }
+
+      // Verificar si el gasto cae en un período cerrado
+      const gastoExistente = await prisma.gasto.findUnique({ where: { id: String(id) } });
+      if (gastoExistente) {
+        const cierreBloqueante = await findCierreThatCovers(gastoExistente.fecha);
+        if (cierreBloqueante) {
+          const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+          const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+          return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden eliminar gastos en un período cerrado (${fi} al ${ff}). Elimine el cierre de caja primero.` } });
+        }
       }
       await prisma.gasto.delete({
         where: { id: String(id) },
@@ -600,6 +650,21 @@ export class GastosController {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Datos incompletos para cierre de caja' } });
       }
 
+      // Verificar que no exista un cierre que se solape con este rango
+      const fi = new Date(String(b.fechaInicio).includes('T') ? b.fechaInicio : b.fechaInicio + 'T00:00:00');
+      const ff = new Date(String(b.fechaFin).includes('T') ? b.fechaFin : b.fechaFin + 'T23:59:59.999');
+      const solapado = await prisma.cierreCaja.findFirst({
+        where: {
+          fechaInicio: { lte: ff },
+          fechaFin: { gte: fi },
+        },
+      });
+      if (solapado) {
+        const si = solapado.fechaInicio.toISOString().split('T')[0];
+        const sf = solapado.fechaFin.toISOString().split('T')[0];
+        return res.status(400).json({ success: false, error: { code: 'CIERRE_DUPLICADO', message: `Ya existe un cierre de caja que cubre el rango ${si} al ${sf}. Elimínelo primero si desea volver a cerrar.` } });
+      }
+
       const usuarioId = (req as any).user?.id || null;
 
       const cierre = await prisma.cierreCaja.create({
@@ -619,6 +684,26 @@ export class GastosController {
     } catch (error) {
       console.error('[cierre/save]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar cierre de caja' } });
+    }
+  }
+
+  async removeCierre(req: Request, res: Response): Promise<Response> {
+    try {
+      if (!isAdminUser(req)) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Solo los administradores pueden eliminar cierres de caja.' } });
+      }
+
+      const { id } = req.params;
+      const cierre = await prisma.cierreCaja.findUnique({ where: { id: String(id) } });
+      if (!cierre) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Cierre de caja no encontrado.' } });
+      }
+
+      await prisma.cierreCaja.delete({ where: { id: String(id) } });
+      return res.status(200).json({ success: true, data: { id } });
+    } catch (error) {
+      console.error('[cierre/remove]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar cierre de caja' } });
     }
   }
 

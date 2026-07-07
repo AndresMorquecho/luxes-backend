@@ -268,6 +268,22 @@ export class ComprasController {
   async createAbono(req: Request, res: Response) {
     try {
       const userId = (req as { user?: { id?: string } }).user?.id || null;
+
+      // Verificar si la fecha del abono cae en un período cerrado de caja
+      const { prisma } = await import('../../../../../config/prismaClient.js');
+      const fechaAbono = req.body.fecha ? new Date(req.body.fecha) : new Date();
+      const cierreBloqueante = await prisma.cierreCaja.findFirst({
+        where: {
+          fechaInicio: { lte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 23, 59, 59, 999) },
+          fechaFin: { gte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 0, 0, 0, 0) },
+        },
+      });
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden registrar pagos a OC en un período cerrado (${fi} al ${ff}). Elimine el cierre de caja primero.` } });
+      }
+
       const data = await this.service.registrarAbono({
         ...req.body,
         ordenCompraId: String(req.params.id),

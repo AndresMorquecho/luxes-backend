@@ -23,6 +23,7 @@ export function createGastosRoutes(
   gastosRouter.get('/cierre/preview', authMiddleware, (req, res) => gastosController.previewCierre(req, res));
   gastosRouter.post('/cierre', authMiddleware, (req, res) => gastosController.saveCierre(req, res));
   gastosRouter.get('/cierre', authMiddleware, (req, res) => gastosController.listCierres(req, res));
+  gastosRouter.delete('/cierre/:id', authMiddleware, (req, res) => gastosController.removeCierre(req, res));
 
   // Reportes
   gastosRouter.get('/reportes/dashboard-summary', authMiddleware, (req, res) => gastosController.getDashboardSummary(req, res));

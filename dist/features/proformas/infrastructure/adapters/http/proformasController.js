@@ -569,6 +569,19 @@ export class ProformasController {
             if (monto === undefined || !metodoPagoId) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Monto y método de pago son requeridos' } });
             }
+            // Verificar si la fecha del abono cae en un período cerrado de caja
+            const fechaAbono = b.fecha ? new Date(b.fecha) : new Date();
+            const cierreBloqueante = await prisma.cierreCaja.findFirst({
+                where: {
+                    fechaInicio: { lte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 23, 59, 59, 999) },
+                    fechaFin: { gte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 0, 0, 0, 0) },
+                },
+            });
+            if (cierreBloqueante) {
+                const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+                const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+                return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden registrar abonos en un período cerrado (${fi} al ${ff}). Elimine el cierre de caja primero.` } });
+            }
             const proforma = await prisma.proforma.findUnique({
                 where: { id: String(id) },
                 include: { items: true, abonos: true },
