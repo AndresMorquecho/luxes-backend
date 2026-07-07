@@ -18,9 +18,14 @@ async function nextGastoId(): Promise<string> {
 export class GastosController {
   // --- GASTOS CRUD ---
 
-  async list(_req: Request, res: Response): Promise<Response> {
+  async list(req: Request, res: Response): Promise<Response> {
     try {
-      const [gastos, abonosCompra] = await Promise.all([
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 25;
+      const search = (req.query.search as string || '').toLowerCase();
+      const origenFiltro = req.query.origen as string || 'todos';
+
+      const [gastos, abonosCompra, nominas, anticipos, compromisosOC] = await Promise.all([
         prisma.gasto.findMany({
           include: {
             metodoPago: true,
@@ -42,6 +47,27 @@ export class GastosController {
             },
           },
           orderBy: { fecha: 'desc' },
+        }),
+        prisma.nominaRegistro.findMany({
+          include: { empleado: { select: { nombre: true } } },
+        }),
+        prisma.egreso.findMany({
+          where: { tipo: 'ANTICIPO' },
+          include: { empleado: { select: { nombre: true } } },
+          orderBy: { fecha: 'desc' },
+        }),
+        prisma.cuentaPorPagar.findMany({
+          where: {
+            saldo: { gt: 0.01 },
+            ordenCompra: {
+              estado: { in: ['aprobada', 'parcialmente_recibida'] },
+            },
+          },
+          include: {
+            ordenCompra: {
+              include: { proveedor: { select: { nombre: true } } },
+            },
+          },
         }),
       ]);
 
@@ -90,19 +116,46 @@ export class GastosController {
         };
       });
 
-      const compromisosOC = await prisma.cuentaPorPagar.findMany({
-        where: {
-          saldo: { gt: 0.01 },
-          ordenCompra: {
-            estado: { in: ['aprobada', 'parcialmente_recibida'] },
-          },
-        },
-        include: {
-          ordenCompra: {
-            include: { proveedor: { select: { nombre: true } } },
-          },
-        },
+      const pagosNomina: any[] = [];
+      nominas.forEach((n) => {
+        const abonosRaw = n.abonos as any;
+        const abonosArr = Array.isArray(abonosRaw) ? abonosRaw : typeof abonosRaw === 'string' ? JSON.parse(abonosRaw) : [];
+        if (abonosArr && abonosArr.length > 0) {
+          abonosArr.forEach((ab: any, index: number) => {
+            pagosNomina.push({
+              id: `nomina-abono-${n.id}-${index}`,
+              concepto: `Pago Nómina - ${n.empleado?.nombre || 'Sin nombre'}`,
+              categoria: 'recursos_humanos',
+              fecha: ab.fecha ? new Date(ab.fecha) : n.updatedAt,
+              monto: Number(ab.monto || 0),
+              proveedor: 'Personal',
+              notas: ab.referencia || `Liquidación nómina (${new Date(n.fechaInicio).toLocaleDateString()} al ${new Date(n.fechaFin).toLocaleDateString()})`,
+              metodoPagoId: ab.metodoPagoId || null,
+              metodoPago: null,
+              registradoPor: null,
+              origen: 'pago_nomina' as const,
+              readonly: true,
+              referencia: ab.referencia || '',
+            });
+          });
+        }
       });
+
+      const anticiposEmpleados = anticipos.map((ant) => ({
+        id: ant.id,
+        concepto: `Anticipo de Sueldo - ${ant.empleado?.nombre || 'Sin nombre'}`,
+        categoria: 'recursos_humanos',
+        fecha: ant.fecha,
+        monto: Number(ant.monto),
+        proveedor: 'Personal',
+        notas: ant.motivo || 'Anticipo registrado en RRHH',
+        metodoPagoId: null,
+        metodoPago: null,
+        registradoPor: null,
+        origen: 'anticipo_empleado' as const,
+        readonly: true,
+        referencia: '',
+      }));
 
       const saldosPendientes = compromisosOC.map((cxp) => {
         const total = Number(cxp.montoTotal);
@@ -130,11 +183,44 @@ export class GastosController {
         };
       });
 
-      const data = [...gastosManual, ...pagosCompra, ...saldosPendientes].sort(
+      let filteredData = [...gastosManual, ...pagosCompra, ...pagosNomina, ...anticiposEmpleados, ...saldosPendientes].sort(
         (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
       );
 
-      return res.status(200).json({ success: true, data });
+      // Filtering by origen
+      if (origenFiltro !== 'todos') {
+        filteredData = filteredData.filter((g) => {
+          if (origenFiltro === 'gasto') return g.origen !== 'orden_compra' && g.origen !== 'cuenta_por_pagar' && g.origen !== 'pago_nomina' && g.origen !== 'anticipo_empleado';
+          if (origenFiltro === 'nomina_anticipo') return g.origen === 'pago_nomina' || g.origen === 'anticipo_empleado';
+          if (origenFiltro === 'orden_compra') return g.origen === 'orden_compra';
+          if (origenFiltro === 'cuenta_por_pagar') return g.origen === 'cuenta_por_pagar';
+          return true;
+        });
+      }
+
+      // Filtering by search query
+      if (search) {
+        filteredData = filteredData.filter((g) =>
+          g.concepto?.toLowerCase().includes(search) ||
+          g.categoria?.toLowerCase().includes(search) ||
+          g.proveedor?.toLowerCase().includes(search) ||
+          g.referencia?.toLowerCase().includes(search) ||
+          g.notas?.toLowerCase().includes(search) ||
+          (g as any).registradoPor?.nombre?.toLowerCase().includes(search) ||
+          g.ordenNumero?.toLowerCase().includes(search)
+        );
+      }
+
+      // Pagination
+      const totalCount = filteredData.length;
+      const totalPages = Math.ceil(totalCount / limit);
+      const data = filteredData.slice((page - 1) * limit, page * limit);
+
+      return res.status(200).json({ 
+        success: true, 
+        data,
+        pagination: { totalCount, totalPages, currentPage: page, limit }
+      });
     } catch (error) {
       console.error('[gastos/list]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener gastos' } });
@@ -298,6 +384,18 @@ export class GastosController {
         },
       });
 
+      const anticipos = await prisma.egreso.findMany({
+        where: {
+          tipo: 'ANTICIPO',
+          fecha: { gte: desdeDate, lte: hastaLimit }
+        }
+      });
+
+      const nominas = await prisma.nominaRegistro.findMany({
+        // For nomina, since payments can happen anytime during the period, 
+        // we'll filter them below by the abono's date if it exists
+      });
+
       // Calcular montos de egresos por método de pago
       const egresosDetalle: Record<string, { id: string; nombre: string; total: number }> = {};
       let totalEgresos = 0;
@@ -323,6 +421,35 @@ export class GastosController {
         }
         egresosDetalle[methodId].total += monto;
       }
+
+      for (const ant of anticipos) {
+        const monto = Number(ant.monto);
+        totalEgresos += monto;
+        const methodId = 'no_especificado';
+        if (!egresosDetalle[methodId]) {
+          egresosDetalle[methodId] = { id: methodId, nombre: 'No especificado', total: 0 };
+        }
+        egresosDetalle[methodId].total += monto;
+      }
+
+      nominas.forEach(n => {
+        const abonosRaw = n.abonos as any;
+        const abonosArr = Array.isArray(abonosRaw) ? abonosRaw : typeof abonosRaw === 'string' ? JSON.parse(abonosRaw) : [];
+        if (abonosArr && abonosArr.length > 0) {
+          abonosArr.forEach((ab: any) => {
+            const abDate = ab.fecha ? new Date(ab.fecha) : n.updatedAt;
+            if (abDate >= desdeDate && abDate <= hastaLimit) {
+              const monto = Number(ab.monto || 0);
+              totalEgresos += monto;
+              const methodId = ab.metodoPagoId || 'no_especificado';
+              if (!egresosDetalle[methodId]) {
+                egresosDetalle[methodId] = { id: methodId, nombre: 'No especificado', total: 0 };
+              }
+              egresosDetalle[methodId].total += monto;
+            }
+          });
+        }
+      });
 
       // 3. Consolidar por métodos de pago
       const metodosPago = await prisma.metodoPago.findMany();
@@ -527,7 +654,7 @@ export class GastosController {
       interface Movimiento {
         id: string;
         tipo: 'ingreso' | 'egreso';
-        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar';
+        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar' | 'pago_nomina' | 'anticipo_empleado';
         fecha: Date;
         monto: number;
         descripcion: string;
@@ -661,6 +788,60 @@ export class GastosController {
             esPagoAjuste,
           });
         }
+
+        // 3.5 EGRESOS — Anticipos y Nomina
+        const anticipos = await prisma.egreso.findMany({
+          where: {
+            tipo: 'ANTICIPO',
+            fecha: { gte: desdeDate, lte: hastaLimit }
+          },
+          include: { empleado: { select: { nombre: true } } }
+        });
+
+        for (const ant of anticipos) {
+          movimientos.push({
+            id: ant.id,
+            tipo: 'egreso',
+            origen: 'anticipo_empleado',
+            fecha: ant.fecha,
+            monto: Number(ant.monto),
+            descripcion: `Anticipo de Sueldo - ${ant.empleado?.nombre || 'Sin nombre'}`,
+            referencia: ant.motivo || '',
+            metodoPago: 'No especificado',
+            metodoPagoId: null,
+            entidad: 'Personal',
+            usuario: '—',
+          });
+        }
+
+        const nominas = await prisma.nominaRegistro.findMany({
+          include: { empleado: { select: { nombre: true } } }
+        });
+
+        nominas.forEach(n => {
+          const abonosRaw = n.abonos as any;
+          const abonosArr = Array.isArray(abonosRaw) ? abonosRaw : typeof abonosRaw === 'string' ? JSON.parse(abonosRaw) : [];
+          if (abonosArr && abonosArr.length > 0) {
+            abonosArr.forEach((ab: any, index: number) => {
+              const abDate = ab.fecha ? new Date(ab.fecha) : n.updatedAt;
+              if (abDate >= desdeDate && abDate <= hastaLimit) {
+                movimientos.push({
+                  id: `nomina-abono-${n.id}-${index}`,
+                  tipo: 'egreso',
+                  origen: 'pago_nomina',
+                  fecha: abDate,
+                  monto: Number(ab.monto || 0),
+                  descripcion: `Pago Nómina - ${n.empleado?.nombre || 'Sin nombre'}`,
+                  referencia: ab.referencia || `Liquidación nómina (${new Date(n.fechaInicio).toLocaleDateString()} al ${new Date(n.fechaFin).toLocaleDateString()})`,
+                  metodoPago: 'No especificado',
+                  metodoPagoId: ab.metodoPagoId || null,
+                  entidad: 'Personal',
+                  usuario: '—',
+                });
+              }
+            });
+          }
+        });
 
         // 4. EGRESOS — Saldos pendientes de órdenes de compra (compromiso, no caja)
         if (!metodoPagoId) {
