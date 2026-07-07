@@ -192,7 +192,7 @@ export class GastosController {
       }
 
       // Calculate totals
-      const sumMontos = (list: any[]) => list.reduce((s, g) => s + Number(g.monto || 0), 0);
+      const sumMontos = (list: any[]) => list.reduce((s, g) => s + Number(g.monto?.toString() || 0), 0);
       const totalMonto = sumMontos(filteredData);
       const totalOtrosGastos = sumMontos(filteredData.filter(g => g.origen === 'otros_gastos'));
       const totalNomina = sumMontos(filteredData.filter(g => g.origen === 'nomina'));
