@@ -35,7 +35,14 @@ export class VehiculosController {
       const vehiculos = await prisma.vehiculo.findMany({
         include: {
           mantenimientos: {
-            include: { gasto: { include: { metodoPago: true } } },
+            include: { 
+              gasto: { 
+                include: { 
+                  metodoPago: true,
+                  registradoPor: { select: { id: true, nombre: true } }
+                } 
+              } 
+            },
             orderBy: { fechaRealizado: 'desc' },
           },
         },
@@ -59,7 +66,7 @@ export class VehiculosController {
               gasto: { 
                 include: { 
                   metodoPago: true,
-                  registradoPor: { select: { nombre: true } }
+                  registradoPor: { select: { id: true, nombre: true } }
                 } 
               } 
             },
