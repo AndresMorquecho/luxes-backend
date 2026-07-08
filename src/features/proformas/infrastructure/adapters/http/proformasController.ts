@@ -116,6 +116,7 @@ function mapProforma(p: any) {
     id: p.id,
     clienteId: p.clienteId,
     cliente: p.clienteNombre,
+    clienteCedula: p.cliente?.cedulaRuc || '',
     telefono: p.telefono,
     email: p.email,
     fecha: toDateStr(p.fecha),
