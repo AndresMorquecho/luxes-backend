@@ -3,6 +3,11 @@ import { prisma } from '../../../../../config/prismaClient.js';
 import { calcSueldoBrutoQuincena, sueldoDiarioEnQuincena, sueldoQuincenaBase, } from '../../../../../shared/utils/sueldoHelpers.js';
 import { calcDiasLaborables, calcDiasLaborados, normalizeFeriados, } from '../../../../../shared/utils/nominaPeriodoHelpers.js';
 import { computeDecimosProvisions, ingresosGravadosPeriodo, loadSbuVigente, } from '../../../../../shared/utils/decimosEcuadorHelpers.js';
+const toDateOnly = (value) => {
+    const str = typeof value === 'string' ? value : value.toISOString().split('T')[0];
+    return new Date(`${str}T00:00:00.000Z`);
+};
+const formatDateOnly = (value) => value.toISOString().split('T')[0];
 async function loadPeriodoFeriados(fInicio, fFin) {
     try {
         const config = await prisma.nominaPeriodoConfig?.findUnique?.({
@@ -33,8 +38,8 @@ export class NominaController {
             const records = await prisma.horaExtra.findMany({
                 where: {
                     fecha: {
-                        gte: new Date(String(fechaInicio)),
-                        lte: new Date(String(fechaFin)),
+                        gte: toDateOnly(String(fechaInicio)),
+                        lte: toDateOnly(String(fechaFin)),
                     }
                 },
                 orderBy: { fecha: 'asc' }
@@ -42,7 +47,7 @@ export class NominaController {
             // Map decimal fields to number to avoid JSON big decimal issue
             const formatted = records.map(r => ({
                 id: r.id,
-                fecha: r.fecha.toISOString().split('T')[0],
+                fecha: formatDateOnly(r.fecha),
                 colaboradorId: r.colaboradorId,
                 horas: Number(r.horas),
                 detalleHorario: r.detalleHorario,
@@ -75,44 +80,33 @@ export class NominaController {
                     error: { code: 'VALIDATION_ERROR', message: 'horasExtras debe ser un arreglo' }
                 });
             }
-            // Upsert all received records
+            // Upsert solo los registros recibidos (sin borrar otros del período)
             const saved = [];
-            const receivedIds = [];
             for (const r of horasExtras) {
                 const total = Number(r.horas) * Number(r.valorPorHora);
-                const recordId = r.id && String(r.id).length > 5 && !String(r.id).includes('.') ? String(r.id) : undefined;
-                const upserted = await prisma.horaExtra.upsert({
-                    where: { id: recordId || 'dummy-uuid-to-force-create' },
-                    update: {
-                        fecha: new Date(r.fecha),
-                        colaboradorId: String(r.colaboradorId),
-                        horas: Number(r.horas),
-                        detalleHorario: r.detalleHorario || '',
-                        descripcion: r.descripcion || '',
-                        valorPorHora: Number(r.valorPorHora),
-                        total: total,
-                        estado: r.estado || 'DEUDOR',
-                        aprobacionEstado: r.aprobacionEstado || 'APROBADA',
-                        origen: r.origen || 'MANUAL',
-                    },
-                    create: {
-                        id: recordId,
-                        fecha: new Date(r.fecha),
-                        colaboradorId: String(r.colaboradorId),
-                        horas: Number(r.horas),
-                        detalleHorario: r.detalleHorario || '',
-                        descripcion: r.descripcion || '',
-                        valorPorHora: Number(r.valorPorHora),
-                        total: total,
-                        estado: r.estado || 'DEUDOR',
-                        aprobacionEstado: r.aprobacionEstado || 'APROBADA',
-                        origen: r.origen || 'MANUAL',
-                    }
-                });
-                receivedIds.push(upserted.id);
+                const recordId = r.id ? String(r.id) : undefined;
+                const data = {
+                    fecha: toDateOnly(String(r.fecha)),
+                    colaboradorId: String(r.colaboradorId),
+                    horas: Number(r.horas),
+                    detalleHorario: r.detalleHorario || '',
+                    descripcion: r.descripcion || '',
+                    valorPorHora: Number(r.valorPorHora),
+                    total,
+                    estado: r.estado || 'DEUDOR',
+                    aprobacionEstado: r.aprobacionEstado || 'APROBADA',
+                    origen: r.origen || 'MANUAL',
+                };
+                const upserted = recordId
+                    ? await prisma.horaExtra.upsert({
+                        where: { id: recordId },
+                        update: data,
+                        create: { id: recordId, ...data },
+                    })
+                    : await prisma.horaExtra.create({ data });
                 saved.push({
                     id: upserted.id,
-                    fecha: upserted.fecha.toISOString().split('T')[0],
+                    fecha: formatDateOnly(upserted.fecha),
                     colaboradorId: upserted.colaboradorId,
                     horas: Number(upserted.horas),
                     detalleHorario: upserted.detalleHorario,
@@ -122,20 +116,6 @@ export class NominaController {
                     estado: upserted.estado,
                     aprobacionEstado: upserted.aprobacionEstado,
                     origen: upserted.origen,
-                });
-            }
-            // If range is provided, delete records in the range that are NOT in the receivedIds list
-            if (fechaInicio && fechaFin) {
-                await prisma.horaExtra.deleteMany({
-                    where: {
-                        fecha: {
-                            gte: new Date(String(fechaInicio)),
-                            lte: new Date(String(fechaFin))
-                        },
-                        id: {
-                            notIn: receivedIds
-                        }
-                    }
                 });
             }
             return res.status(200).json({
@@ -224,6 +204,27 @@ export class NominaController {
             return res.status(500).json({
                 success: false,
                 error: { code: 'INTERNAL_ERROR', message: 'Error al rechazar horas extras' },
+            });
+        }
+    }
+    async deleteOvertime(req, res) {
+        try {
+            const id = String(req.params.id);
+            const existing = await prisma.horaExtra.findUnique({ where: { id } });
+            if (!existing) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Registro de horas extras no encontrado' },
+                });
+            }
+            await prisma.horaExtra.delete({ where: { id } });
+            return res.status(200).json({ success: true });
+        }
+        catch (error) {
+            console.error('[nomina/deleteOvertime]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar horas extras' },
             });
         }
     }

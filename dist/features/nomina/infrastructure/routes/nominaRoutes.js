@@ -7,6 +7,7 @@ export function createNominaRoutes(controller) {
     router.post('/horas-extras/:id/aprobar', authMiddleware, (req, res) => controller.approveOvertime(req, res));
     router.post('/horas-extras/:id/rechazar', authMiddleware, (req, res) => controller.rejectOvertime(req, res));
     router.patch('/horas-extras/:id', authMiddleware, (req, res) => controller.patchOvertime(req, res));
+    router.delete('/horas-extras/:id', authMiddleware, (req, res) => controller.deleteOvertime(req, res));
     router.post('/horas-extras', authMiddleware, (req, res) => controller.saveOvertimeBulk(req, res));
     router.get('/nominas', authMiddleware, (req, res) => controller.getPayrolls(req, res));
     router.post('/nominas', authMiddleware, (req, res) => controller.savePayroll(req, res));
