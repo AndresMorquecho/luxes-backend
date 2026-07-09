@@ -100,6 +100,7 @@ function mapProforma(p) {
         id: p.id,
         clienteId: p.clienteId,
         cliente: p.clienteNombre,
+        clienteCedula: p.cliente?.cedulaRuc || '',
         telefono: p.telefono,
         email: p.email,
         fecha: toDateStr(p.fecha),
@@ -155,7 +156,7 @@ async function resolveClienteId(clienteId) {
 export class ProformasController {
     async list(req, res) {
         try {
-            const { page = '1', limit = '20', search = '', estado = '', fechaDesde = '', fechaHasta = '', clienteId = '' } = req.query;
+            const { page = '1', limit = '20', search = '', estado = '', fechaDesde = '', fechaHasta = '', clienteId = '', usuario = '' } = req.query;
             const pageNum = Math.max(1, parseInt(String(page), 10));
             const limitNum = Math.max(1, Math.min(1000, parseInt(String(limit), 10))); // Permite límites de hasta 1000 para cargas de listados completos en frontend
             const skip = (pageNum - 1) * limitNum;
@@ -176,6 +177,12 @@ export class ProformasController {
                     });
                 }
                 andFilters.push({ OR: clienteOr });
+            }
+            // Filtro por usuario (atiende)
+            if (usuario && String(usuario).trim()) {
+                andFilters.push({
+                    atiende: { contains: String(usuario).trim(), mode: 'insensitive' }
+                });
             }
             // Excluir rechazadas por defecto a menos que se busque específicamente
             if (estado && String(estado).trim()) {
@@ -202,6 +209,7 @@ export class ProformasController {
                         { id: { contains: searchTerm, mode: 'insensitive' } },
                         { telefono: { contains: searchTerm } },
                         { email: { contains: searchTerm, mode: 'insensitive' } },
+                        { atiende: { contains: searchTerm, mode: 'insensitive' } },
                     ],
                 });
             }
