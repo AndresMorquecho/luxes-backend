@@ -116,6 +116,7 @@ function mapProforma(p: any) {
     id: p.id,
     clienteId: p.clienteId,
     cliente: p.clienteNombre,
+    clienteCedula: p.cliente?.cedulaRuc || '',
     telefono: p.telefono,
     email: p.email,
     fecha: toDateStr(p.fecha),
@@ -180,7 +181,8 @@ export class ProformasController {
         estado = '',
         fechaDesde = '',
         fechaHasta = '',
-        clienteId = ''
+        clienteId = '',
+        usuario = ''
       } = req.query;
 
       const pageNum = Math.max(1, parseInt(String(page), 10));
@@ -207,6 +209,13 @@ export class ProformasController {
         andFilters.push({ OR: clienteOr });
       }
 
+      // Filtro por usuario (atiende)
+      if (usuario && String(usuario).trim()) {
+        andFilters.push({
+          atiende: { contains: String(usuario).trim(), mode: 'insensitive' }
+        });
+      }
+
       // Excluir rechazadas por defecto a menos que se busque específicamente
       if (estado && String(estado).trim()) {
         const estStr = String(estado).trim();
@@ -230,6 +239,7 @@ export class ProformasController {
             { id: { contains: searchTerm, mode: 'insensitive' } },
             { telefono: { contains: searchTerm } },
             { email: { contains: searchTerm, mode: 'insensitive' } },
+            { atiende: { contains: searchTerm, mode: 'insensitive' } },
           ],
         });
       }
@@ -465,6 +475,7 @@ export class ProformasController {
       const proforma = await prisma.proforma.findUnique({
         where: { id: String(id) },
         include: {
+          cliente: true,
           items: true,
           metodoPago: true,
           abonos: {

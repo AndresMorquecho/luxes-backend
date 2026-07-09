@@ -257,6 +257,7 @@ const proyectoInclude = {
     },
   },
   gastos: {
+    include: { metodoPago: true, registradoPor: true },
     orderBy: { fecha: 'desc' as const }
   },
   ordenesCompra: {
@@ -360,6 +361,11 @@ function mapProyecto(p: any) {
       monto: Number(g.monto),
       proveedor: g.proveedor,
       notas: g.notas,
+      metodoPagoId: g.metodoPagoId || null,
+      metodoPago: g.metodoPago ? { id: g.metodoPago.id, nombre: g.metodoPago.nombre } : null,
+      registradoPorUserId: g.registradoPorUserId || null,
+      registradoPor: g.registradoPor ? { id: g.registradoPor.id, nombre: g.registradoPor.nombre } : null,
+      createdAt: g.createdAt ? g.createdAt.toISOString() : null,
     })),
     ordenesCompra: (p.ordenesCompra || []).map((oc: any) => ({
       id: oc.id,
@@ -611,6 +617,7 @@ export class ProyectosController {
             }
           });
 
+          const loggedInUserId = (req as any).user?.id || null;
           for (const g of b.gastos) {
             if (g.id && g.id.startsWith('G-OC-')) continue;
             await prisma.gasto.create({
@@ -623,6 +630,8 @@ export class ProyectosController {
                 proveedor: g.proveedor || '',
                 notas: g.notas || '',
                 proyectoId: String(id),
+                metodoPagoId: g.metodoPagoId || null,
+                registradoPorUserId: g.registradoPorUserId || loggedInUserId,
               }
             });
           }
