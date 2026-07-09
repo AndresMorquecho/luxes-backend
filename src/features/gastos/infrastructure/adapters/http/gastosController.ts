@@ -1036,6 +1036,7 @@ export class GastosController {
       const userIds = dbUsers.map(u => u.id);
       const latestTaskByUser: Record<string, { id: string; titulo: string; estado: string; prioridad: string } | null> = {};
       const lastActionByUser: Record<string, { fecha: Date; accion: string; modulo: string; detalle: string } | null> = {};
+      const taskCountByUser: Record<string, number> = {};
 
       if (userIds.length > 0) {
         // Fetch active tasks in batch
@@ -1053,7 +1054,6 @@ export class GastosController {
         });
 
         const latestTaskTimeByUser: Record<string, number> = {};
-        const taskCountByUser: Record<string, number> = {};
         for (const assign of allActiveAssignments) {
           const uid = assign.userId;
           taskCountByUser[uid] = (taskCountByUser[uid] || 0) + 1;
