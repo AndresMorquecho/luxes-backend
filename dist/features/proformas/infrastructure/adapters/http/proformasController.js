@@ -431,6 +431,7 @@ export class ProformasController {
             const proforma = await prisma.proforma.findUnique({
                 where: { id: String(id) },
                 include: {
+                    cliente: true,
                     items: true,
                     metodoPago: true,
                     abonos: {

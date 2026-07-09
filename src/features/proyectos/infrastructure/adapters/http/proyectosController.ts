@@ -365,6 +365,7 @@ function mapProyecto(p: any) {
       metodoPago: g.metodoPago ? { id: g.metodoPago.id, nombre: g.metodoPago.nombre } : null,
       registradoPorUserId: g.registradoPorUserId || null,
       registradoPor: g.registradoPor ? { id: g.registradoPor.id, nombre: g.registradoPor.nombre } : null,
+      createdAt: g.createdAt ? g.createdAt.toISOString() : null,
     })),
     ordenesCompra: (p.ordenesCompra || []).map((oc: any) => ({
       id: oc.id,
