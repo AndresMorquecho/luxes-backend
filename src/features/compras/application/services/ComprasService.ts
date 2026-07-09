@@ -62,6 +62,7 @@ export class ComprasService {
     estado?: string;
     estados?: string[];
     estadoPago?: string;
+    proveedorId?: string;
     creadorRol?: string;
     creadorId?: string;
     pendienteRecepcion?: boolean;

@@ -60,6 +60,7 @@ export class ComprasController {
         ? estadosRaw.split(',').map((s) => s.trim()).filter(Boolean)
         : undefined;
       const estadoPago = this.str(req.query.estadoPago);
+      const proveedorId = this.str(req.query.proveedorId);
       const creadorRol = this.str(req.query.creadorRol);
       const creadorId = this.str(req.query.creadorId);
       const pendienteRecepcion = req.query.pendienteRecepcion === 'true' || req.query.pendienteRecepcion === '1';
@@ -72,6 +73,7 @@ export class ComprasController {
         estado,
         estados,
         estadoPago,
+        proveedorId,
         creadorRol,
         creadorId,
         pendienteRecepcion,
