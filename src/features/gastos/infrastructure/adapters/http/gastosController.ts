@@ -1175,8 +1175,31 @@ export class GastosController {
             { estado: 'ACTIVO' }
           ]
         },
-        select: { id: true, nombre: true, faseActual: true, progreso: true, estado: true, clienteNombre: true, responsable: true }
+        select: { id: true, nombre: true, faseActual: true, progreso: true, estado: true, clienteNombre: true, responsable: true, requiereInstalacion: true }
       });
+
+      // Calcular dinero pendiente de cobro de proformas (Aprobadas)
+      const approvedProformas = await prisma.proforma.findMany({
+        where: { estado: 'Aprobada' },
+        include: { items: true, abonos: true }
+      });
+      let totalProformasPendienteCobro = 0;
+      for (const prof of approvedProformas) {
+        const sub = prof.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
+        const total = sub * (1 + Number(prof.iva || 0.12));
+        const totalAbonos = prof.abonos.reduce((s, ab) => s + Number(ab.monto), 0);
+        const saldo = total - totalAbonos;
+        if (saldo > 0.01) {
+          totalProformasPendienteCobro += saldo;
+        }
+      }
+
+      // Calcular dinero pendiente de cuentas por pagar
+      const allCxPPendientes = await prisma.cuentaPorPagar.findMany({
+        where: { saldo: { gt: 0.01 } },
+        select: { saldo: true }
+      });
+      const totalCxPPendientes = allCxPPendientes.reduce((sum, c) => sum + Number(c.saldo), 0);
 
       const proyectosFaseCount = {
         DISENIO: 0,
@@ -1357,7 +1380,9 @@ export class GastosController {
             rechazadas: rechazadasCount,
             aprobadas: aprobadasCount,
             pagadas: pagadasCount,
-            proyectosActivos: proyectos.filter(p => p.estado === 'ACTIVO').length
+            proyectosActivos: proyectos.filter(p => p.estado === 'ACTIVO').length,
+            totalProformasPendienteCobro,
+            totalCxPPendientes
           },
           usersActivity,
           currentPrintingJob,
