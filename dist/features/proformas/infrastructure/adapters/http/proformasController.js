@@ -116,6 +116,7 @@ function mapProforma(p) {
         fechaEnvio: toDateStr(p.fechaEnvio),
         fechaAprobacion: toDateTimeStr(p.fechaAprobacion),
         creadoPorUserId: p.creadoPorUserId || null,
+        createdAt: toDateTimeStr(p.createdAt),
         items: (p.items || [])
             .slice()
             .sort((a, b) => a.orden - b.orden)
