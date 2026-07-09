@@ -224,7 +224,7 @@ const proyectoInclude = {
         orderBy: { fecha: 'desc' }
     },
     ordenesCompra: {
-        include: { detalles: true, proveedor: true }
+        include: { detalles: true, proveedor: true, usuario: true }
     }
 };
 function mapClienteProyecto(p) {
@@ -340,6 +340,7 @@ function mapProyecto(p) {
             notas: oc.notas,
             fechaCreacion: toDateStr(oc.fechaCreacion),
             fechaAprobacion: toDateStr(oc.fechaAprobacion),
+            usuario: oc.usuario ? { id: oc.usuario.id, nombre: oc.usuario.nombre, rol: oc.usuario.rol } : null,
             items: (oc.detalles || []).map((d) => ({
                 sku: d.materialId ? d.materialId.slice(-8).toUpperCase() : 'ESP-LIBRE',
                 nombre: d.descripcion,
