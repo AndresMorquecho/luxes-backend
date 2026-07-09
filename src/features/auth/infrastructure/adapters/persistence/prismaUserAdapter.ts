@@ -43,6 +43,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         },
       },
     },
+    empleado: true,
   };
 
   async findByUsernameOrEmail(identifier: string): Promise<User | null> {
@@ -73,6 +74,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
+      foto: (dbUser as any).empleado?.foto || null,
     });
   }
 
@@ -101,6 +103,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
+      foto: (dbUser as any).empleado?.foto || null,
     });
   }
 
@@ -126,6 +129,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
+      foto: (dbUser as any).empleado?.foto || null,
     });
   }
 
@@ -160,6 +164,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
+      foto: (dbUser as any).empleado?.foto || null,
     });
   }
 
@@ -186,6 +191,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
         sidebarConfig: dbUser.sidebarConfig,
         empleadoId: dbUser.empleadoId,
+        foto: (dbUser as any).empleado?.foto || null,
       });
     });
   }
@@ -222,6 +228,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
+      foto: (dbUser as any).empleado?.foto || null,
     });
   }
 
