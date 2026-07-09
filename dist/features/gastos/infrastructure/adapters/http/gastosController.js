@@ -919,6 +919,7 @@ export class GastosController {
             const userIds = dbUsers.map(u => u.id);
             const latestTaskByUser = {};
             const lastActionByUser = {};
+            const taskCountByUser = {};
             if (userIds.length > 0) {
                 // Fetch active tasks in batch
                 const allActiveAssignments = await prisma.tareaAsignacion.findMany({
@@ -934,7 +935,6 @@ export class GastosController {
                     }
                 });
                 const latestTaskTimeByUser = {};
-                const taskCountByUser = {};
                 for (const assign of allActiveAssignments) {
                     const uid = assign.userId;
                     taskCountByUser[uid] = (taskCountByUser[uid] || 0) + 1;
