@@ -907,7 +907,14 @@ export class GastosController {
             // 1. Usuarios y actividades
             const dbUsers = await prisma.user.findMany({
                 where: { estado: 'activo' },
-                select: { id: true, nombre: true, username: true, rol: true, empleadoId: true }
+                select: {
+                    id: true,
+                    nombre: true,
+                    username: true,
+                    rol: true,
+                    empleadoId: true,
+                    empleado: { select: { foto: true } }
+                }
             });
             const userIds = dbUsers.map(u => u.id);
             const latestTaskByUser = {};
@@ -963,6 +970,7 @@ export class GastosController {
                 username: u.username,
                 rol: u.rol,
                 empleadoId: u.empleadoId,
+                foto: u.empleado?.foto || null,
                 activeTask: latestTaskByUser[u.id] || null,
                 lastAction: lastActionByUser[u.id] || null
             }));
