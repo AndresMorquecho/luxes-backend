@@ -1363,6 +1363,17 @@ export class GastosController {
           currentPrintingJob,
           printQueue,
           proyectosActivos: proyectos,
+          proformas: proformas.map(p => {
+            const sub = p.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
+            const total = sub * (1 + Number(p.iva || 0.12));
+            return {
+              id: p.id,
+              fecha: p.fecha.toISOString().split('T')[0],
+              clienteNombre: p.clienteNombre,
+              estado: p.estado,
+              total
+            };
+          }),
           proyectosFaseCount,
           recentMovements: top5Movements
         }
