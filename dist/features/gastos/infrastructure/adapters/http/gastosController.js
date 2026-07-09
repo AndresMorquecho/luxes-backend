@@ -934,8 +934,10 @@ export class GastosController {
                     }
                 });
                 const latestTaskTimeByUser = {};
+                const taskCountByUser = {};
                 for (const assign of allActiveAssignments) {
                     const uid = assign.userId;
+                    taskCountByUser[uid] = (taskCountByUser[uid] || 0) + 1;
                     const task = assign.tarea;
                     const taskTime = new Date(task.fechaCreacion).getTime();
                     if (!latestTaskByUser[uid] || taskTime > latestTaskTimeByUser[uid]) {
@@ -972,6 +974,7 @@ export class GastosController {
                 empleadoId: u.empleadoId,
                 foto: u.empleado?.foto || null,
                 activeTask: latestTaskByUser[u.id] || null,
+                pendingTasksCount: taskCountByUser[u.id] || 0,
                 lastAction: lastActionByUser[u.id] || null
             }));
             // 2. Cola de impresión
@@ -1209,6 +1212,130 @@ export class GastosController {
                     usuario: '—',
                 });
             }
+            // 1. Previous period metrics for trend analysis
+            const rangeMs = hastaLimit.getTime() - desdeDate.getTime();
+            const desdePrevDate = new Date(desdeDate.getTime() - rangeMs);
+            const hastaPrevDate = new Date(desdeDate.getTime() - 1);
+            const prevAbonosProforma = await prisma.abonoProforma.findMany({
+                where: { fecha: { gte: desdePrevDate, lte: hastaPrevDate } },
+                select: { monto: true }
+            });
+            const totalIngresosPrev = prevAbonosProforma.reduce((sum, ab) => sum + Number(ab.monto), 0);
+            const prevGastos = await prisma.gasto.findMany({
+                where: { fecha: { gte: desdePrevDate, lte: hastaPrevDate } },
+                select: { monto: true }
+            });
+            const totalGastosPrev = prevGastos.reduce((sum, g) => sum + Number(g.monto), 0);
+            const prevAbonosCompra = await prisma.abonoCompra.findMany({
+                where: { fecha: { gte: desdePrevDate, lte: hastaPrevDate } },
+                select: { monto: true }
+            });
+            const totalAbonosCompraPrev = prevAbonosCompra.reduce((sum, ab) => sum + Number(ab.monto), 0);
+            const prevCxP = await prisma.cuentaPorPagar.findMany({
+                where: {
+                    ordenCompra: {
+                        fecha: { gte: desdePrevDate, lte: hastaPrevDate }
+                    }
+                },
+                select: { saldo: true }
+            });
+            const totalCxPPrev = prevCxP.reduce((sum, c) => sum + Number(c.saldo), 0);
+            const totalEgresosPrev = totalGastosPrev + totalAbonosCompraPrev + totalCxPPrev;
+            const balancePrev = totalIngresosPrev - totalEgresosPrev;
+            const prevProformas = await prisma.proforma.findMany({
+                where: { fecha: { gte: desdePrevDate, lte: hastaPrevDate }, estado: 'Aprobada' },
+                include: { items: true, abonos: true }
+            });
+            let totalProformasPendienteCobroPrev = 0;
+            for (const prof of prevProformas) {
+                const sub = prof.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
+                const total = sub * (1 + Number(prof.iva || 0.12));
+                const totalAbonos = prof.abonos.reduce((s, ab) => s + Number(ab.monto), 0);
+                const saldo = total - totalAbonos;
+                if (saldo > 0.01) {
+                    totalProformasPendienteCobroPrev += saldo;
+                }
+            }
+            const pctChange = (curr, prev) => {
+                if (prev === 0)
+                    return curr > 0 ? 100 : 0;
+                return Number((((curr - prev) / prev) * 100).toFixed(1));
+            };
+            const changeBalance = pctChange(totalIngresos - totalEgresos, balancePrev);
+            const changeIngresos = pctChange(totalIngresos, totalIngresosPrev);
+            const changeEgresos = pctChange(totalEgresos, totalEgresosPrev);
+            const changeProformasPendienteCobro = pctChange(totalProformasPendienteCobro, totalProformasPendienteCobroPrev);
+            const changeCxPPendientes = pctChange(totalCxPPendientes, totalCxPPrev);
+            // 2. Daily Data for Flow Chart & Sparklines
+            const dailyDataMap = {};
+            let cur = new Date(desdeDate);
+            while (cur <= hastaLimit) {
+                const dayKey = cur.toISOString().split('T')[0];
+                dailyDataMap[dayKey] = { ingresos: 0, egresos: 0, balance: 0 };
+                cur.setDate(cur.getDate() + 1);
+            }
+            for (const ab of abonosProforma) {
+                const dayKey = ab.fecha.toISOString().split('T')[0];
+                if (dailyDataMap[dayKey]) {
+                    dailyDataMap[dayKey].ingresos += Number(ab.monto);
+                }
+            }
+            for (const g of dbGastos) {
+                const dayKey = g.fecha.toISOString().split('T')[0];
+                if (dailyDataMap[dayKey]) {
+                    dailyDataMap[dayKey].egresos += Number(g.monto);
+                }
+            }
+            for (const ab of abonosCompra) {
+                const dayKey = ab.fecha.toISOString().split('T')[0];
+                if (dailyDataMap[dayKey]) {
+                    dailyDataMap[dayKey].egresos += Number(ab.monto);
+                }
+            }
+            for (const cxp of cxpDashboard) {
+                const dayKey = cxp.ordenCompra?.fecha.toISOString().split('T')[0];
+                if (dayKey && dailyDataMap[dayKey]) {
+                    dailyDataMap[dayKey].egresos += Number(cxp.saldo);
+                }
+            }
+            const dailyData = Object.entries(dailyDataMap).map(([fecha, val]) => ({
+                fecha,
+                ingresos: val.ingresos,
+                egresos: val.egresos,
+                balance: val.ingresos - val.egresos
+            })).sort((a, b) => a.fecha.localeCompare(b.fecha));
+            // 3. Egresos Breakdown by Category (Distribución de Egresos)
+            const egresosPorCategoria = {};
+            for (const g of dbGastos) {
+                const category = g.categoria || 'Otros';
+                const monto = Number(g.monto);
+                egresosPorCategoria[category] = (egresosPorCategoria[category] || 0) + monto;
+            }
+            const ocTotal = abonosCompra.reduce((sum, ab) => sum + Number(ab.monto), 0) + cxpDashboard.reduce((sum, cxp) => sum + Number(cxp.saldo), 0);
+            if (ocTotal > 0) {
+                egresosPorCategoria['Compras'] = (egresosPorCategoria['Compras'] || 0) + ocTotal;
+            }
+            const totalEgresosCalculado = Object.values(egresosPorCategoria).reduce((a, b) => a + b, 0);
+            const egresosDistribucion = Object.entries(egresosPorCategoria).map(([categoria, valor]) => ({
+                categoria: categoria.charAt(0).toUpperCase() + categoria.slice(1),
+                valor,
+                porcentaje: totalEgresosCalculado > 0 ? Number(((valor / totalEgresosCalculado) * 100).toFixed(1)) : 0
+            })).sort((a, b) => b.valor - a.valor);
+            // 4. Quick Summary Counts
+            const ocsPendientesCount = await prisma.ordenCompra.count({
+                where: {
+                    OR: [
+                        { estado: 'pendiente_aprobacion' },
+                        { estadoPago: { in: ['sin_pagar', 'pago_parcial'] } }
+                    ]
+                }
+            });
+            const proformasAprobadasCount = await prisma.proforma.count({
+                where: { estado: 'Aprobada' }
+            });
+            const tareasPendientesCount = await prisma.tarea.count({
+                where: { estado: { in: ['pendiente', 'en_progreso'] } }
+            });
             // Sort and slice top 5
             recentMovements.sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
             const top5Movements = recentMovements.slice(0, 5);
@@ -1231,7 +1358,12 @@ export class GastosController {
                         pagadas: pagadasCount,
                         proyectosActivos: proyectos.filter(p => p.estado === 'ACTIVO').length,
                         totalProformasPendienteCobro,
-                        totalCxPPendientes
+                        totalCxPPendientes,
+                        changeBalance,
+                        changeIngresos,
+                        changeEgresos,
+                        changeProformasPendienteCobro,
+                        changeCxPPendientes
                     },
                     usersActivity,
                     currentPrintingJob,
@@ -1249,7 +1381,14 @@ export class GastosController {
                         };
                     }),
                     proyectosFaseCount,
-                    recentMovements: top5Movements
+                    recentMovements: top5Movements,
+                    dailyData,
+                    egresosDistribucion,
+                    quickSummary: {
+                        ocsPendientes: ocsPendientesCount,
+                        proformasAprobadas: proformasAprobadasCount,
+                        tareasPendientes: tareasPendientesCount
+                    }
                 }
             });
         }
