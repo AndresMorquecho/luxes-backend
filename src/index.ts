@@ -22,7 +22,7 @@ import { createLandingRoutes } from './features/landing/infrastructure/routes/la
 
 
 async function bootstrap() {
-  // Limpieza de rol "asistencia" residual en base de datos si existiera
+  // Limpieza de rol y usuario "asistencia" residual en base de datos
   try {
     const { prisma } = await import('./config/prismaClient.js');
     const dbRole = await prisma.role.findFirst({
@@ -32,47 +32,23 @@ async function bootstrap() {
       console.log(`[Bootstrap] Eliminando rol residual no deseado: ${dbRole.name}`);
       await prisma.role.delete({ where: { id: dbRole.id } });
     }
-  } catch (error) {
-    console.error('[Bootstrap] Error al limpiar rol asistencia:', error);
-  }
 
-  // Usuario de kiosco: siempre debe existir en producción (sin resetear contraseña si ya existe)
-  try {
-    const { prisma } = await import('./config/prismaClient.js');
-    const bcrypt = await import('bcryptjs');
-    const existing = await prisma.user.findFirst({
-      where: { username: { equals: 'asistencia', mode: 'insensitive' } }
+    const dbUser = await prisma.user.findFirst({
+      where: { username: { equals: 'asistencia', mode: 'insensitive' } },
     });
-
-    if (existing) {
-      await prisma.user.update({
-        where: { id: existing.id },
-        data: {
-          username: 'asistencia',
-          rol: 'asistencia',
-          roleId: null,
-          estado: 'activo'
-        },
-      });
-      console.log('[Bootstrap] Usuario asistencia verificado.');
-    } else {
-      const passwordHash = await bcrypt.default.hash('123456', 10);
-      await prisma.user.create({
-        data: {
-          id: 'USR-ASIS-001',
-          nombre: 'Asistencia Kiosco',
-          email: 'asistencia@luxes.com',
-          username: 'asistencia',
-          rol: 'asistencia',
-          roleId: null,
-          estado: 'activo',
-          passwordHash,
-        },
-      });
-      console.log('[Bootstrap] Usuario asistencia creado (asistencia / 123456).');
+    if (dbUser) {
+      console.log(`[Bootstrap] Eliminando usuario asistencia residual: ${dbUser.username}`);
+      try {
+        await prisma.user.delete({ where: { id: dbUser.id } });
+      } catch (err) {
+        await prisma.user.update({
+          where: { id: dbUser.id },
+          data: { estado: 'inactivo', username: `asistencia_old_${Date.now()}` }
+        });
+      }
     }
   } catch (error) {
-    console.error('[Bootstrap] Error al asegurar usuario asistencia:', error);
+    console.error('[Bootstrap] Error al limpiar rol/usuario asistencia:', error);
   }
 
   // Asegurar usuarios del sistema (activos + contraseña dev conocida) solo si la tabla está vacía
@@ -95,16 +71,6 @@ async function bootstrap() {
         });
 
       const systemUsers = [
-        {
-          username: 'asistencia',
-          data: {
-            id: 'USR-ASIS-001',
-            nombre: 'Asistencia Kiosco',
-            email: 'asistencia@luxes.com',
-            rol: 'asistencia',
-            roleId: null as string | null,
-          },
-        },
         {
           username: 'admin',
           data: {
