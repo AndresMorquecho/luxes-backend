@@ -14,4 +14,8 @@ export const env = {
     vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
     vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
     vapidEmail: process.env.VAPID_EMAIL || 'mailto:admin@luxes.com',
+    // API de comprobantes electrónicos (SRI - CipherByte)
+    sriApiUrl: process.env.SRI_API_URL || 'https://gateway.cipherbyte.ec',
+    sriApiKey: process.env.SRI_API_KEY || '',
+    sriAmbiente: process.env.SRI_AMBIENTE || '1', // 1=pruebas, 2=producción
 };

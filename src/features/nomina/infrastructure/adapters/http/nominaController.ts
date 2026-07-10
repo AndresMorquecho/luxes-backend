@@ -865,9 +865,17 @@ export class NominaController {
             const existingGasto = await prisma.gasto.findUnique({ where: { id: ab.id } });
             if (!existingGasto) {
               const fStart = new Date(data.fechaInicio).toLocaleDateString('es-EC', { month: 'short', year: 'numeric' });
-              // Consultar nombre del método de pago para guardarlo de forma redundante/informativa
               const mp = await prisma.metodoPago.findUnique({ where: { id: ab.metodoPagoId } });
               ab.metodoPagoNombre = mp?.nombre || 'No especificado';
+
+              const userObj = registradoPorUserId
+                ? await prisma.user.findUnique({ where: { id: registradoPorUserId }, select: { nombre: true } })
+                : null;
+              ab.usuarioNombre = userObj?.nombre || 'Usuario';
+
+              const now = new Date();
+              const pad = (n: number) => String(n).padStart(2, '0');
+              ab.fechaHora = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
               await prisma.gasto.create({
                 data: {
