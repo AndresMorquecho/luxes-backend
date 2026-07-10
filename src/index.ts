@@ -19,6 +19,8 @@ import { ProyectosController } from './features/proyectos/infrastructure/adapter
 import { createImpresionesModule } from './features/impresiones/infrastructure/composition/impresionesContainer.js';
 import { createGastosModule } from './features/gastos/infrastructure/composition/gastosContainer.js';
 import { createLandingRoutes } from './features/landing/infrastructure/routes/landingRoutes.js';
+import { createGuiaRemisionModule } from './features/guias-remision/infrastructure/composition/guiaRemisionContainer.js';
+
 
 
 async function bootstrap() {
@@ -287,6 +289,9 @@ async function bootstrap() {
   const { gastosRouter, vehiculosRouter } = await createGastosModule();
   app.use('/api/gastos', gastosRouter);
   app.use('/api/vehiculos', vehiculosRouter);
+
+  const { guiaRemisionRoutes } = await createGuiaRemisionModule();
+  app.use('/api/guias-remision', guiaRemisionRoutes);
 
   app.use('/api/landing', createLandingRoutes());
 
