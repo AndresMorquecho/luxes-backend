@@ -21,6 +21,7 @@ import { createGastosModule } from './features/gastos/infrastructure/composition
 import { createLandingRoutes } from './features/landing/infrastructure/routes/landingRoutes.js';
 
 
+
 async function bootstrap() {
   // Limpieza de rol y usuario "asistencia" residual en base de datos
   try {
