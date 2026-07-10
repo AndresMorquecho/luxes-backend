@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import { prisma } from '../../../../../config/prismaClient.js';
-import { calcSueldoBrutoQuincena, sueldoDiarioEnQuincena, sueldoQuincenaBase, } from '../../../../../shared/utils/sueldoHelpers.js';
+import { calcSueldoBrutoQuincena, sueldoDiarioEnQuincena, } from '../../../../../shared/utils/sueldoHelpers.js';
 import { calcDiasLaborables, calcDiasLaborados, normalizeFeriados, } from '../../../../../shared/utils/nominaPeriodoHelpers.js';
 import { computeDecimosProvisions, ingresosGravadosPeriodo, loadSbuVigente, } from '../../../../../shared/utils/decimosEcuadorHelpers.js';
 const toDateOnly = (value) => {
@@ -23,6 +23,30 @@ async function loadPeriodoFeriados(fInicio, fFin) {
     catch {
         return [];
     }
+}
+async function nextGastoId() {
+    const rows = await prisma.gasto.findMany({ select: { id: true } });
+    const max = rows.reduce((m, r) => {
+        const match = String(r.id).match(/^GTO-(\d+)$/);
+        if (match) {
+            const n = parseInt(match[1], 10);
+            return Number.isFinite(n) && n > m ? n : m;
+        }
+        return m;
+    }, 0);
+    return `GTO-${String(max + 1).padStart(3, '0')}`;
+}
+async function findCierreThatCovers(fecha) {
+    const d = new Date(fecha);
+    d.setHours(0, 0, 0, 0);
+    const dEnd = new Date(d);
+    dEnd.setHours(23, 59, 59, 999);
+    return prisma.cierreCaja.findFirst({
+        where: {
+            fechaInicio: { lte: dEnd },
+            fechaFin: { gte: d },
+        },
+    });
 }
 export class NominaController {
     // ─── Horas Extras (Overtime) Endpoints ───
@@ -388,9 +412,7 @@ export class NominaController {
                 const hasContract = emp.tieneContrato !== false;
                 const { diasLaborados: diasTrabajados } = calcDiasLaborados(empAsistencias, feriados, fInicioStr, fFinStr, hasContract);
                 const sueldoDiario = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diffDias);
-                const defaultSueldoBruto = hasContract
-                    ? sueldoQuincenaBase(Number(emp.sueldoDiario))
-                    : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasTrabajados, diffDias);
+                const defaultSueldoBruto = calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasTrabajados, diffDias);
                 const empHorasExtras = (horasExtrasByEmpleado.get(emp.id) || []).filter((h) => h.aprobacionEstado === 'APROBADA');
                 const horasExtrasSum = empHorasExtras.reduce((s, h) => s + Number(h.total), 0);
                 const empIngresos = ingresosByEmpleado.get(emp.id) || [];
@@ -691,6 +713,93 @@ export class NominaController {
                     error: { code: 'VALIDATION_ERROR', message: 'empleadoId, fechaInicio y fechaFin son requeridos' }
                 });
             }
+            // 1. Obtener la nómina actual para comparar abonos
+            const oldNomina = await prisma.nominaRegistro.findUnique({
+                where: {
+                    empleadoId_fechaInicio_fechaFin: {
+                        empleadoId: String(data.empleadoId),
+                        fechaInicio: new Date(data.fechaInicio),
+                        fechaFin: new Date(data.fechaFin),
+                    }
+                }
+            });
+            const oldAbonos = (oldNomina && Array.isArray(oldNomina.abonos))
+                ? oldNomina.abonos
+                : [];
+            const newAbonos = Array.isArray(data.abonos)
+                ? data.abonos
+                : [];
+            const empleado = await prisma.empleado.findUnique({
+                where: { id: String(data.empleadoId) }
+            });
+            const empleadoNombre = empleado ? empleado.nombre.trim() : 'Empleado';
+            const registradoPorUserId = req.user?.id || null;
+            // 2. Identificar abonos eliminados y validar cierres de caja antes de hacer cambios
+            for (const oldAb of oldAbonos) {
+                if (oldAb.id) {
+                    const existsInNew = newAbonos.some(n => n.id === oldAb.id);
+                    if (!existsInNew) {
+                        const existingGasto = await prisma.gasto.findUnique({ where: { id: oldAb.id } });
+                        if (existingGasto) {
+                            const cierreBloqueante = await findCierreThatCovers(existingGasto.fecha);
+                            if (cierreBloqueante) {
+                                const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+                                const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+                                return res.status(403).json({
+                                    success: false,
+                                    error: {
+                                        code: 'PERIODO_CERRADO',
+                                        message: `No se puede eliminar el abono porque pertenece a un período de caja cerrado (${fi} al ${ff}).`
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            // 3. Identificar abonos nuevos, asignarles ID secuencial si es necesario y crear el Gasto
+            for (const ab of newAbonos) {
+                if (ab.metodoPagoId) {
+                    if (!ab.id || !ab.id.startsWith('GTO-')) {
+                        ab.id = await nextGastoId();
+                    }
+                    const existsInOld = oldAbonos.some(o => o.id === ab.id);
+                    if (!existsInOld) {
+                        const existingGasto = await prisma.gasto.findUnique({ where: { id: ab.id } });
+                        if (!existingGasto) {
+                            const fStart = new Date(data.fechaInicio).toLocaleDateString('es-EC', { month: 'short', year: 'numeric' });
+                            // Consultar nombre del método de pago para guardarlo de forma redundante/informativa
+                            const mp = await prisma.metodoPago.findUnique({ where: { id: ab.metodoPagoId } });
+                            ab.metodoPagoNombre = mp?.nombre || 'No especificado';
+                            await prisma.gasto.create({
+                                data: {
+                                    id: ab.id,
+                                    concepto: `Pago de Nómina - ${empleadoNombre} (${fStart})`,
+                                    categoria: 'nomina',
+                                    fecha: new Date(ab.fecha),
+                                    monto: Number(ab.monto),
+                                    proveedor: empleadoNombre,
+                                    metodoPagoId: ab.metodoPagoId,
+                                    registradoPorUserId: registradoPorUserId ?? undefined,
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            // 4. Eliminar gastos de los abonos que fueron removidos
+            for (const oldAb of oldAbonos) {
+                if (oldAb.id) {
+                    const existsInNew = newAbonos.some(n => n.id === oldAb.id);
+                    if (!existsInNew) {
+                        const existingGasto = await prisma.gasto.findUnique({ where: { id: oldAb.id } });
+                        if (existingGasto) {
+                            await prisma.gasto.delete({ where: { id: oldAb.id } });
+                        }
+                    }
+                }
+            }
+            // 5. Upsert de la nómina con los abonos sincronizados
             const updated = await prisma.nominaRegistro.upsert({
                 where: {
                     empleadoId_fechaInicio_fechaFin: {
@@ -705,7 +814,7 @@ export class NominaController {
                     permisoHoras: Number(data.permisoHoras),
                     ingresos: data.ingresos || {},
                     egresos: data.egresos || {},
-                    abonos: data.abonos || [],
+                    abonos: newAbonos,
                     estado: data.estado || "PENDIENTE",
                 },
                 create: {
@@ -717,7 +826,7 @@ export class NominaController {
                     permisoHoras: Number(data.permisoHoras),
                     ingresos: data.ingresos || {},
                     egresos: data.egresos || {},
-                    abonos: data.abonos || [],
+                    abonos: newAbonos,
                     estado: data.estado || "PENDIENTE",
                 }
             });
@@ -1208,9 +1317,7 @@ export class NominaController {
                 const sueldo = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diasLab);
                 const diasT = rawNomina ? Number(rawNomina.diasLaborados) : 0;
                 const totalB = rawNomina
-                    ? (hasContract
-                        ? sueldoQuincenaBase(Number(emp.sueldoDiario))
-                        : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasT, diasLab))
+                    ? calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasT, diasLab)
                     : 0;
                 // Décimo cuarto: abono manual que puede registrarse en cualquier quincena. Se usa el
                 // valor guardado en la nómina (más abajo); por defecto 0 si no se ha abonado nada.
