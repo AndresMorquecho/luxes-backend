@@ -11,5 +11,6 @@ export function createAsistenciaRoutes(controller) {
     router.get('/empleado/:empleadoId/hoy', authMiddleware, (req, res) => controller.getTodayForEmpleado(req, res));
     router.post('/registrar', authMiddleware, (req, res) => controller.registrar(req, res));
     router.post('/permiso', authMiddleware, (req, res) => controller.registrarPermiso(req, res));
+    router.delete('/permiso', authMiddleware, (req, res) => controller.eliminarPermiso(req, res));
     return router;
 }

@@ -115,7 +115,7 @@ export class PrismaComprasAdapter {
         const detalles = await this.prisma.detalleCompra.findMany({
             where: { ordenCompraId: { in: ordenIds } },
             include: {
-                material: { select: { id: true, nombre: true, codigo: true } },
+                material: { select: { id: true, nombre: true, codigo: true, categoria: true, subtipo: true, descargaStock: true } },
             },
             orderBy: { id: 'asc' },
         });

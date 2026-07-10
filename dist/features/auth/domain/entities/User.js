@@ -15,7 +15,8 @@ export class User {
     permissions;
     sidebarConfig;
     empleadoId;
-    constructor({ id, nombre, email, username, rol, roleId = null, estado, passwordHash, fechaCreacion, ultimoAcceso = null, permissions = [], sidebarConfig = null, empleadoId = null, }) {
+    foto;
+    constructor({ id, nombre, email, username, rol, roleId = null, estado, passwordHash, fechaCreacion, ultimoAcceso = null, permissions = [], sidebarConfig = null, empleadoId = null, foto = null, }) {
         this.id = id;
         this.nombre = nombre;
         this.email = email;
@@ -29,6 +30,7 @@ export class User {
         this.permissions = permissions;
         this.sidebarConfig = sidebarConfig;
         this.empleadoId = empleadoId;
+        this.foto = foto;
     }
     isActive() {
         return this.estado === 'activo';
@@ -47,6 +49,7 @@ export class User {
             permissions: this.permissions || [],
             sidebarConfig: this.sidebarConfig,
             empleadoId: this.empleadoId,
+            foto: this.foto,
         };
     }
 }

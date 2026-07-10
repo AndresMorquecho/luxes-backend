@@ -150,9 +150,11 @@ export class AsistenciaService {
     const end = new Date(targetDate);
     end.setHours(23, 59, 59, 999);
 
-    const existing = await prisma.asistencia.findFirst({
+    // Solo verificamos si ya existe un registro de tipo PERMISO para evitar duplicados
+    const existingPermiso = await prisma.asistencia.findFirst({
       where: {
         empleadoId: input.empleadoId,
+        tipo: 'PERMISO',
         fechaHora: {
           gte: start,
           lte: end,
@@ -160,8 +162,8 @@ export class AsistenciaService {
       },
     });
 
-    if (existing) {
-      throw new Error(`El colaborador ya tiene registros de asistencia o permisos para el día ${input.fecha}.`);
+    if (existingPermiso) {
+      throw new Error(`El colaborador ya tiene un permiso registrado para el día ${input.fecha}.`);
     }
 
     const asistencia = await this.asistenciaRepository.create({
@@ -176,6 +178,28 @@ export class AsistenciaService {
     return new Asistencia({
       ...asistencia.toJSON(),
       nombreEmpleado: empleado.nombre,
+    });
+  }
+
+  async eliminarPermiso(input: {
+    empleadoId: string;
+    fecha: string;
+  }): Promise<void> {
+    const targetDate = new Date(input.fecha + 'T00:00:00');
+    const start = new Date(targetDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(targetDate);
+    end.setHours(23, 59, 59, 999);
+
+    await prisma.asistencia.deleteMany({
+      where: {
+        empleadoId: input.empleadoId,
+        tipo: 'PERMISO',
+        fechaHora: {
+          gte: start,
+          lte: end,
+        },
+      },
     });
   }
 }
