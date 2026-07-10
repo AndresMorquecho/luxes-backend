@@ -448,9 +448,7 @@ export class NominaController {
           hasContract,
         );
         const sueldoDiario = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diffDias);
-        const defaultSueldoBruto = hasContract
-          ? sueldoQuincenaBase(Number(emp.sueldoDiario))
-          : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasTrabajados, diffDias);
+        const defaultSueldoBruto = calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasTrabajados, diffDias);
 
         const empHorasExtras = (horasExtrasByEmpleado.get(emp.id) || []).filter(
           (h) => h.aprobacionEstado === 'APROBADA',
@@ -1353,9 +1351,7 @@ export class NominaController {
         
         const diasT = rawNomina ? Number(rawNomina.diasLaborados) : 0;
         const totalB = rawNomina
-          ? (hasContract
-            ? sueldoQuincenaBase(Number(emp.sueldoDiario))
-            : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasT, diasLab))
+          ? calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasT, diasLab)
           : 0;
         // Décimo cuarto: abono manual que puede registrarse en cualquier quincena. Se usa el
         // valor guardado en la nómina (más abajo); por defecto 0 si no se ha abonado nada.
