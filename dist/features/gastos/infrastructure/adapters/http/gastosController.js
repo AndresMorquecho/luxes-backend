@@ -713,7 +713,7 @@ export class GastosController {
                         fecha: g.fecha,
                         monto: Number(g.monto),
                         descripcion: g.concepto,
-                        referencia: '',
+                        referencia: g.notas || '',
                         metodoPago: g.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: g.metodoPagoId,
                         entidad: g.proveedor || g.categoria || '',
