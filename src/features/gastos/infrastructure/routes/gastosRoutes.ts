@@ -40,5 +40,9 @@ export function createGastosRoutes(
   vehiculosRouter.put('/mantenimientos/:mantenimientoId', authMiddleware, (req, res) => vehiculosController.updateMantenimiento(req, res));
   vehiculosRouter.delete('/mantenimientos/:mantenimientoId', authMiddleware, (req, res) => vehiculosController.removeMantenimiento(req, res));
 
+  // Controles de Checklist
+  vehiculosRouter.get('/:id/controles', authMiddleware, (req, res) => vehiculosController.listControles(req, res));
+  vehiculosRouter.post('/:id/controles', authMiddleware, (req, res) => vehiculosController.createControl(req, res));
+
   return { gastosRouter, vehiculosRouter };
 }

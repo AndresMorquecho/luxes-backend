@@ -356,6 +356,79 @@ export class VehiculosController {
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar mantenimiento' } });
     }
   }
+
+  // --- CONTROLES DE VEHÍCULO ───────────────────────────────────────────────
+
+  async listControles(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id: vehiculoId } = req.params;
+      const controles = await prisma.vehiculoControl.findMany({
+        where: { vehiculoId: String(vehiculoId) },
+        orderBy: { fecha: 'desc' },
+      });
+      return res.status(200).json({ success: true, data: controles });
+    } catch (error) {
+      console.error('[controles/list]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener controles de vehículo' } });
+    }
+  }
+
+  async createControl(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id: vehiculoId } = req.params;
+      const b = req.body || {};
+
+      if (b.kilometraje === undefined || !b.combustible) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Kilometraje y nivel de combustible son requeridos' } });
+      }
+
+      const vehiculo = await prisma.vehiculo.findUnique({
+        where: { id: String(vehiculoId) },
+      });
+
+      if (!vehiculo) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Vehículo no encontrado' } });
+      }
+
+      const usuarioId = (req as any).user?.id || null;
+      const usuarioNom = (req as any).user?.nombre || 'Operador Taller';
+
+      const control = await prisma.vehiculoControl.create({
+        data: {
+          vehiculoId: String(vehiculoId),
+          usuarioId,
+          usuarioNom,
+          fecha: b.fecha ? new Date(b.fecha) : new Date(),
+          kilometraje: Number(b.kilometraje),
+          combustible: String(b.combustible),
+          nivelAceite: Boolean(b.nivelAceite),
+          nivelAgua: Boolean(b.nivelAgua),
+          aceiteHidraulico: Boolean(b.aceiteHidraulico),
+          liquidoFrenos: Boolean(b.liquidoFrenos),
+          gataLlave: Boolean(b.gataLlave),
+          extintorBotiquin: Boolean(b.extintorBotiquin),
+          bandas: Boolean(b.bandas),
+          otroCheckNombre: String(b.otroCheckNombre ?? ''),
+          otroCheckValor: Boolean(b.otroCheckValor),
+          observacion: String(b.observacion ?? ''),
+          sugerencia: String(b.sugerencia ?? ''),
+        },
+      });
+
+      // Actualizar kilometraje del vehículo si el reportado es mayor
+      if (Number(b.kilometraje) > vehiculo.kilometraje) {
+        await prisma.vehiculo.update({
+          where: { id: String(vehiculoId) },
+          data: { kilometraje: Number(b.kilometraje) },
+        });
+      }
+
+      return res.status(201).json({ success: true, data: control });
+    } catch (error) {
+      console.error('[controles/create]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar control de vehículo' } });
+    }
+  }
 }
 
 function maintenance_get_vehiculo_id_helper(m: any): string {

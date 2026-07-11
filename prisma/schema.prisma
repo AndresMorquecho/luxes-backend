@@ -631,8 +631,36 @@ model Vehiculo {
   createdAt      DateTime                @default(now()) @map("created_at")
   updatedAt      DateTime                @updatedAt @map("updated_at")
   mantenimientos VehiculoMantenimiento[]
+  controles      VehiculoControl[]
 
   @@map("vehiculos")
+}
+
+model VehiculoControl {
+  id                    String    @id @default(uuid())
+  vehiculoId            String    @map("vehiculo_id")
+  vehiculo              Vehiculo  @relation(fields: [vehiculoId], references: [id], onDelete: Cascade)
+  usuarioId             String?   @map("usuario_id")
+  usuarioNom            String    @map("usuario_nom")
+  fecha                 DateTime  @default(now())
+  kilometraje           Int
+  combustible           String
+  nivelAceite           Boolean   @default(false) @map("nivel_aceite")
+  nivelAgua             Boolean   @default(false) @map("nivel_agua")
+  aceiteHidraulico      Boolean   @default(false) @map("aceite_hidraulico")
+  liquidoFrenos         Boolean   @default(false) @map("liquido_frenos")
+  gataLlave             Boolean   @default(false) @map("gata_llave")
+  extintorBotiquin      Boolean   @default(false) @map("extintor_botiquin")
+  bandas                Boolean   @default(false)
+  otroCheckNombre       String    @default("") @map("otro_check_nombre")
+  otroCheckValor        Boolean   @default(false) @map("otro_check_valor")
+  observacion           String    @default("")
+  sugerencia            String    @default("")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([vehiculoId])
+  @@map("vehiculo_controles")
 }
 
 model VehiculoMantenimiento {
