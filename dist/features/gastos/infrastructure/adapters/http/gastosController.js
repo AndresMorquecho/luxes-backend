@@ -784,11 +784,16 @@ export class GastosController {
                     orderBy: { fecha: 'desc' },
                 });
                 for (const ing of ingresosManuales) {
+                    const combinedFecha = new Date(ing.fecha);
+                    if (ing.createdAt) {
+                        const timeRef = new Date(ing.createdAt);
+                        combinedFecha.setUTCHours(timeRef.getUTCHours(), timeRef.getUTCMinutes(), timeRef.getUTCSeconds(), timeRef.getUTCMilliseconds());
+                    }
                     movimientos.push({
                         id: ing.id,
                         tipo: 'ingreso',
                         origen: 'ingreso_manual',
-                        fecha: ing.fecha,
+                        fecha: combinedFecha,
                         monto: Number(ing.monto),
                         descripcion: ing.concepto,
                         referencia: ing.notas || '',
@@ -819,6 +824,11 @@ export class GastosController {
                 orderBy: { fecha: 'desc' },
             });
             for (const t of transferencias) {
+                const combinedFecha = new Date(t.fecha);
+                if (t.createdAt) {
+                    const timeRef = new Date(t.createdAt);
+                    combinedFecha.setUTCHours(timeRef.getUTCHours(), timeRef.getUTCMinutes(), timeRef.getUTCSeconds(), timeRef.getUTCMilliseconds());
+                }
                 if (metodoPagoId) {
                     const isOrigin = t.origenMetodoId === String(metodoPagoId);
                     const isDest = t.destinoMetodoId === String(metodoPagoId);
@@ -827,7 +837,7 @@ export class GastosController {
                             id: `${t.id}-egreso`,
                             tipo: 'egreso',
                             origen: 'transferencia',
-                            fecha: t.fecha,
+                            fecha: combinedFecha,
                             monto: Number(t.monto),
                             descripcion: `Transferencia enviada a ${t.destinoMetodo?.nombre || 'Cuenta Destino'}`,
                             referencia: t.referencia || '',
@@ -842,7 +852,7 @@ export class GastosController {
                             id: `${t.id}-ingreso`,
                             tipo: 'ingreso',
                             origen: 'transferencia',
-                            fecha: t.fecha,
+                            fecha: combinedFecha,
                             monto: Number(t.monto),
                             descripcion: `Transferencia recibida de ${t.origenMetodo?.nombre || 'Cuenta Origen'}`,
                             referencia: t.referencia || '',
@@ -859,7 +869,7 @@ export class GastosController {
                             id: `${t.id}-egreso`,
                             tipo: 'egreso',
                             origen: 'transferencia',
-                            fecha: t.fecha,
+                            fecha: combinedFecha,
                             monto: Number(t.monto),
                             descripcion: `Transferencia enviada a ${t.destinoMetodo?.nombre || 'Cuenta Destino'}`,
                             referencia: t.referencia || '',
@@ -874,7 +884,7 @@ export class GastosController {
                             id: `${t.id}-ingreso`,
                             tipo: 'ingreso',
                             origen: 'transferencia',
-                            fecha: t.fecha,
+                            fecha: combinedFecha,
                             monto: Number(t.monto),
                             descripcion: `Transferencia recibida de ${t.origenMetodo?.nombre || 'Cuenta Origen'}`,
                             referencia: t.referencia || '',
@@ -902,11 +912,16 @@ export class GastosController {
                     orderBy: { fecha: 'desc' },
                 });
                 for (const g of gastos) {
+                    const combinedFecha = new Date(g.fecha);
+                    if (g.createdAt) {
+                        const timeRef = new Date(g.createdAt);
+                        combinedFecha.setUTCHours(timeRef.getUTCHours(), timeRef.getUTCMinutes(), timeRef.getUTCSeconds(), timeRef.getUTCMilliseconds());
+                    }
                     movimientos.push({
                         id: g.id,
                         tipo: 'egreso',
                         origen: 'gasto',
-                        fecha: g.fecha,
+                        fecha: combinedFecha,
                         monto: Number(g.monto),
                         descripcion: g.concepto,
                         referencia: g.notas || '',
