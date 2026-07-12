@@ -875,10 +875,28 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       _sum: { monto: true }
     } as any);
 
+    const ingresosAllTime = await this.prisma.ingreso.groupBy({
+      by: ['metodoPagoId'],
+      _sum: { monto: true }
+    } as any);
+
+    const transEnviadasAllTime = await this.prisma.transferencia.groupBy({
+      by: ['origenMetodoId'],
+      _sum: { monto: true }
+    } as any);
+
+    const transRecibidasAllTime = await this.prisma.transferencia.groupBy({
+      by: ['destinoMetodoId'],
+      _sum: { monto: true }
+    } as any);
+
     // 2. Fetch period-specific aggregates if dates are provided
     let abonosProformaPeriod: any[] = [];
     let gastosPeriod: any[] = [];
     let abonosCompraPeriod: any[] = [];
+    let ingresosPeriod: any[] = [];
+    let transEnviadasPeriod: any[] = [];
+    let transRecibidasPeriod: any[] = [];
 
     if (desde && hasta) {
       abonosProformaPeriod = await this.prisma.abonoProforma.groupBy({
@@ -898,36 +916,63 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
         _sum: { monto: true },
         where: { fecha: { gte: desde, lte: hasta } }
       } as any);
+
+      ingresosPeriod = await this.prisma.ingreso.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { gte: desde, lte: hasta } }
+      } as any);
+
+      transEnviadasPeriod = await this.prisma.transferencia.groupBy({
+        by: ['origenMetodoId'],
+        _sum: { monto: true },
+        where: { fecha: { gte: desde, lte: hasta } }
+      } as any);
+
+      transRecibidasPeriod = await this.prisma.transferencia.groupBy({
+        by: ['destinoMetodoId'],
+        _sum: { monto: true },
+        where: { fecha: { gte: desde, lte: hasta } }
+      } as any);
     }
 
-    const mapById = (arr: any[]) => {
+    const mapById = (arr: any[], key = 'metodoPagoId') => {
       const map: Record<string, number> = {};
       for (const item of arr) {
-        if (item.metodoPagoId) {
-          map[item.metodoPagoId] = Number(item._sum.monto || 0);
+        const id = item[key];
+        if (id) {
+          map[id] = Number(item._sum.monto || 0);
         }
       }
       return map;
     };
 
     const ingAllTimeMap = mapById(abonosProformaAllTime);
+    const ingManualAllTimeMap = mapById(ingresosAllTime);
+    const transEnviadasAllTimeMap = mapById(transEnviadasAllTime, 'origenMetodoId');
+    const transRecibidasAllTimeMap = mapById(transRecibidasAllTime, 'destinoMetodoId');
     const gasAllTimeMap = mapById(gastosAllTime);
     const egrAllTimeMap = mapById(abonosCompraAllTime);
 
     const ingPeriodMap = (desde && hasta) ? mapById(abonosProformaPeriod) : ingAllTimeMap;
+    const ingManualPeriodMap = (desde && hasta) ? mapById(ingresosPeriod) : ingManualAllTimeMap;
+    const transEnviadasPeriodMap = (desde && hasta) ? mapById(transEnviadasPeriod, 'origenMetodoId') : transEnviadasAllTimeMap;
+    const transRecibidasPeriodMap = (desde && hasta) ? mapById(transRecibidasPeriod, 'destinoMetodoId') : transRecibidasAllTimeMap;
     const gasPeriodMap = (desde && hasta) ? mapById(gastosPeriod) : gasAllTimeMap;
     const egrPeriodMap = (desde && hasta) ? mapById(abonosCompraPeriod) : egrAllTimeMap;
 
     return metodos.map(m => {
-      const ingAllTime = ingAllTimeMap[m.id] || 0;
+      const ingAllTime = (ingAllTimeMap[m.id] || 0) + (ingManualAllTimeMap[m.id] || 0) + (transRecibidasAllTimeMap[m.id] || 0);
       const gasAllTime = gasAllTimeMap[m.id] || 0;
       const egrAllTime = egrAllTimeMap[m.id] || 0;
-      const saldoActual = ingAllTime - (gasAllTime + egrAllTime);
+      const transEnviadasAllTime = transEnviadasAllTimeMap[m.id] || 0;
+      const saldoActual = ingAllTime - (gasAllTime + egrAllTime + transEnviadasAllTime);
 
-      const ingPeriod = ingPeriodMap[m.id] || 0;
+      const ingPeriod = (ingPeriodMap[m.id] || 0) + (ingManualPeriodMap[m.id] || 0) + (transRecibidasPeriodMap[m.id] || 0);
       const gasPeriod = gasPeriodMap[m.id] || 0;
       const egrPeriod = egrPeriodMap[m.id] || 0;
-      const egresosPeriod = gasPeriod + egrPeriod;
+      const transEnviadasPeriod = transEnviadasPeriodMap[m.id] || 0;
+      const egresosPeriod = gasPeriod + egrPeriod + transEnviadasPeriod;
 
       return {
         id: m.id,

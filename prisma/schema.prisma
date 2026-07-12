@@ -32,6 +32,8 @@ model User {
   abonosProformaRegistrados AbonoProforma[] @relation("AbonoProformaRegistradoPor")
   gastosRegistrados         Gasto[]         @relation("GastoRegistradoPor")
   abonosCompraRegistrados   AbonoCompra[]   @relation("AbonoCompraRegistradoPor")
+  ingresosCajaRegistrados   Ingreso[]       @relation("IngresoRegistradoPor")
+  transferenciasRegistradas Transferencia[] @relation("TransferenciasRegistradas")
   empleadoId          String?       @unique @map("empleado_id")
   empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
 
@@ -185,6 +187,9 @@ model MetodoPago {
   gastos      Gasto[]
   proformas   Proforma[]
   abonosProforma AbonoProforma[]
+  ingresosCaja             Ingreso[]
+  transferenciasEnviadas   Transferencia[] @relation("TransferenciasEnviadas")
+  transferenciasRecibidas  Transferencia[] @relation("TransferenciasRecibidas")
 
   @@map("metodos_pago")
 }
@@ -840,4 +845,44 @@ model SiteSetting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("site_settings")
+}
+
+model Ingreso {
+  id                  String      @id
+  concepto            String
+  categoria           String      @default("Otros")
+  fecha               DateTime    @db.Date
+  monto               Decimal     @db.Decimal(12, 2)
+  cliente             String      @default("")
+  notas               String      @default("")
+  metodoPagoId        String?     @map("metodo_pago_id")
+  metodoPago          MetodoPago? @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
+  registradoPorUserId String?     @map("registrado_por_user_id")
+  registradoPor       User?       @relation("IngresoRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  @@index([metodoPagoId])
+  @@index([registradoPorUserId])
+  @@map("ingresos_caja")
+}
+
+model Transferencia {
+  id                  String      @id
+  origenMetodoId      String      @map("origen_metodo_id")
+  origenMetodo        MetodoPago  @relation("TransferenciasEnviadas", fields: [origenMetodoId], references: [id])
+  destinoMetodoId     String      @map("destino_metodo_id")
+  destinoMetodo       MetodoPago  @relation("TransferenciasRecibidas", fields: [destinoMetodoId], references: [id])
+  monto               Decimal     @db.Decimal(12, 2)
+  fecha               DateTime    @db.Date
+  referencia          String?
+  registradoPorUserId String?     @map("registrado_por_user_id")
+  registradoPor       User?       @relation("TransferenciasRegistradas", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  @@index([origenMetodoId])
+  @@index([destinoMetodoId])
+  @@index([registradoPorUserId])
+  @@map("transferencias_cuentas")
 }

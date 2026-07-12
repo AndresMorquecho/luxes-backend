@@ -15,6 +15,32 @@ async function nextGastoId(): Promise<string> {
   return `GTO-${String(max + 1).padStart(3, '0')}`;
 }
 
+async function nextIngresoId(): Promise<string> {
+  const rows = await prisma.ingreso.findMany({ select: { id: true } });
+  const max = rows.reduce((m, r) => {
+    const match = String(r.id).match(/^ING-(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      return Number.isFinite(n) && n > m ? n : m;
+    }
+    return m;
+  }, 0);
+  return `ING-${String(max + 1).padStart(3, '0')}`;
+}
+
+async function nextTransferenciaId(): Promise<string> {
+  const rows = await prisma.transferencia.findMany({ select: { id: true } });
+  const max = rows.reduce((m, r) => {
+    const match = String(r.id).match(/^TRF-(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      return Number.isFinite(n) && n > m ? n : m;
+    }
+    return m;
+  }, 0);
+  return `TRF-${String(max + 1).padStart(3, '0')}`;
+}
+
 /**
  * Checks if a given date falls within any closed cash-register period.
  * Returns the overlapping CierreCaja record or null.
@@ -395,6 +421,28 @@ export class GastosController {
         },
       });
 
+      // 1.5 Obtener ingresos manuales de caja
+      const ingresosManuales = await prisma.ingreso.findMany({
+        where: {
+          fecha: { gte: desdeDate, lte: hastaLimit },
+        },
+        include: {
+          metodoPago: true,
+          registradoPor: { select: { id: true, nombre: true } }
+        }
+      });
+
+      // 1.6 Obtener transferencias entre cuentas
+      const transferencias = await prisma.transferencia.findMany({
+        where: {
+          fecha: { gte: desdeDate, lte: hastaLimit }
+        },
+        include: {
+          origenMetodo: true,
+          destinoMetodo: true,
+        }
+      });
+
       // Calcular montos de ingresos por método de pago
       const ingresosDetalle: Record<string, { id: string; nombre: string; total: number }> = {};
       let totalIngresos = 0;
@@ -405,6 +453,18 @@ export class GastosController {
 
         const methodId = ab.metodoPagoId || 'no_especificado';
         const methodName = ab.metodoPago?.nombre || 'No especificado';
+        if (!ingresosDetalle[methodId]) {
+          ingresosDetalle[methodId] = { id: methodId, nombre: methodName, total: 0 };
+        }
+        ingresosDetalle[methodId].total += total;
+      }
+
+      for (const ing of ingresosManuales) {
+        const total = Number(ing.monto);
+        totalIngresos += total;
+
+        const methodId = ing.metodoPagoId || 'no_especificado';
+        const methodName = ing.metodoPago?.nombre || 'No especificado';
         if (!ingresosDetalle[methodId]) {
           ingresosDetalle[methodId] = { id: methodId, nombre: methodName, total: 0 };
         }
@@ -496,6 +556,27 @@ export class GastosController {
         }
       });
 
+      // Registrar transferencias internas en los desgloses de cuentas individuales
+      for (const t of transferencias) {
+        const monto = Number(t.monto);
+        
+        // Destino (Ingreso)
+        const destId = t.destinoMetodoId;
+        const destName = t.destinoMetodo?.nombre || 'Destino no especificado';
+        if (!ingresosDetalle[destId]) {
+          ingresosDetalle[destId] = { id: destId, nombre: destName, total: 0 };
+        }
+        ingresosDetalle[destId].total += monto;
+
+        // Origen (Egreso)
+        const origId = t.origenMetodoId;
+        const origName = t.origenMetodo?.nombre || 'Origen no especificado';
+        if (!egresosDetalle[origId]) {
+          egresosDetalle[origId] = { id: origId, nombre: origName, total: 0 };
+        }
+        egresosDetalle[origId].total += monto;
+      }
+
       // 3. Consolidar por métodos de pago
       const metodosPago = await prisma.metodoPago.findMany();
       const metodosDetalleList = metodosPago.map(m => {
@@ -526,6 +607,7 @@ export class GastosController {
       // 4. Segmentación por Secciones de Ingresos (Abonos Iniciales vs Posteriores)
       let abonosInicialesSum = 0;
       let abonosPosterioresSum = 0;
+      let ingresosManualesSum = 0;
 
       if (abonosProforma.length > 0) {
         const proformaIds = [...new Set(abonosProforma.map(ab => ab.proformaId))];
@@ -551,6 +633,10 @@ export class GastosController {
             abonosPosterioresSum += Number(ab.monto);
           }
         }
+      }
+
+      for (const ing of ingresosManuales) {
+        ingresosManualesSum += Number(ing.monto);
       }
 
       // 5. Segmentación por Secciones de Egresos
@@ -598,6 +684,9 @@ export class GastosController {
       for (const ab of abonosProforma) {
         addUsuarioTx(ab.registradoPorUserId, ab.registradoPor?.nombre || 'No especificado', Number(ab.monto), 'ingreso');
       }
+      for (const ing of ingresosManuales) {
+        addUsuarioTx(ing.registradoPorUserId, ing.registradoPor?.nombre || 'No especificado', Number(ing.monto), 'ingreso');
+      }
       for (const g of gastos) {
         addUsuarioTx(g.registradoPorUserId, g.registradoPor?.nombre || 'No especificado', Number(g.monto), 'egreso');
       }
@@ -616,13 +705,14 @@ export class GastosController {
           totalEgresos,
           balance: totalIngresos - totalEgresos,
           metodosDetalle: metodosDetalleList,
-          ingresosConteo: abonosProforma.length,
+          ingresosConteo: abonosProforma.length + ingresosManuales.length,
           egresosConteo: gastos.length + abonos.length,
 
           // Secciones de Ingresos
           seccionIngresos: {
             abonosIniciales: abonosInicialesSum,
             abonosPosteriores: abonosPosterioresSum,
+            otrosIngresos: ingresosManualesSum,
           },
 
           // Secciones de Egresos
@@ -734,7 +824,7 @@ export class GastosController {
       interface Movimiento {
         id: string;
         tipo: 'ingreso' | 'egreso';
-        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar' | 'pago_nomina' | 'anticipo_empleado';
+        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar' | 'pago_nomina' | 'anticipo_empleado' | 'ingreso_manual' | 'transferencia';
         fecha: Date;
         monto: number;
         descripcion: string;
@@ -751,7 +841,7 @@ export class GastosController {
 
       const movimientos: Movimiento[] = [];
 
-      // 1. INGRESOS — AbonoProforma
+      // 1. INGRESOS — AbonoProforma Y Ingreso Manual
       if (!tipo || tipo === 'todos' || tipo === 'ingreso') {
         const whereIngreso: any = {
           fecha: { gte: desdeDate, lte: hastaLimit },
@@ -786,6 +876,128 @@ export class GastosController {
             entidad: ab.proforma?.clienteNombre || ab.proforma?.cliente?.nombre || 'Cliente no especificado',
             usuario: ab.registradoPor?.nombre || '—',
           });
+        }
+
+        // Ingresos manuales
+        const whereIngresoManual: any = {
+          fecha: { gte: desdeDate, lte: hastaLimit },
+        };
+        if (metodoPagoId) whereIngresoManual.metodoPagoId = String(metodoPagoId);
+
+        const ingresosManuales = await prisma.ingreso.findMany({
+          where: whereIngresoManual,
+          include: {
+            metodoPago: true,
+            registradoPor: { select: { nombre: true } },
+          },
+          orderBy: { fecha: 'desc' },
+        });
+
+        for (const ing of ingresosManuales) {
+          movimientos.push({
+            id: ing.id,
+            tipo: 'ingreso',
+            origen: 'ingreso_manual',
+            fecha: ing.fecha,
+            monto: Number(ing.monto),
+            descripcion: ing.concepto,
+            referencia: ing.notas || '',
+            metodoPago: ing.metodoPago?.nombre || 'No especificado',
+            metodoPagoId: ing.metodoPagoId,
+            entidad: ing.cliente || ing.categoria || 'Ingreso manual',
+            usuario: ing.registradoPor?.nombre || '—',
+          });
+        }
+      }
+
+      // 1.7 TRANSFERENCIAS entre cuentas (afectan origen como egreso y destino como ingreso)
+      const whereTransferencia: any = {
+        fecha: { gte: desdeDate, lte: hastaLimit },
+      };
+      
+      if (metodoPagoId) {
+        whereTransferencia.OR = [
+          { origenMetodoId: String(metodoPagoId) },
+          { destinoMetodoId: String(metodoPagoId) },
+        ];
+      }
+
+      const transferencias = await prisma.transferencia.findMany({
+        where: whereTransferencia,
+        include: {
+          origenMetodo: true,
+          destinoMetodo: true,
+          registradoPor: { select: { nombre: true } },
+        },
+        orderBy: { fecha: 'desc' },
+      });
+
+      for (const t of transferencias) {
+        if (metodoPagoId) {
+          const isOrigin = t.origenMetodoId === String(metodoPagoId);
+          const isDest = t.destinoMetodoId === String(metodoPagoId);
+          
+          if (isOrigin && (!tipo || tipo === 'todos' || tipo === 'egreso')) {
+            movimientos.push({
+              id: `${t.id}-egreso`,
+              tipo: 'egreso',
+              origen: 'transferencia',
+              fecha: t.fecha,
+              monto: Number(t.monto),
+              descripcion: `Transferencia enviada a ${t.destinoMetodo?.nombre || 'Cuenta Destino'}`,
+              referencia: t.referencia || '',
+              metodoPago: t.origenMetodo?.nombre || 'No especificado',
+              metodoPagoId: t.origenMetodoId,
+              entidad: 'Transferencia interna',
+              usuario: t.registradoPor?.nombre || '—',
+            });
+          }
+          if (isDest && (!tipo || tipo === 'todos' || tipo === 'ingreso')) {
+            movimientos.push({
+              id: `${t.id}-ingreso`,
+              tipo: 'ingreso',
+              origen: 'transferencia',
+              fecha: t.fecha,
+              monto: Number(t.monto),
+              descripcion: `Transferencia recibida de ${t.origenMetodo?.nombre || 'Cuenta Origen'}`,
+              referencia: t.referencia || '',
+              metodoPago: t.destinoMetodo?.nombre || 'No especificado',
+              metodoPagoId: t.destinoMetodoId,
+              entidad: 'Transferencia interna',
+              usuario: t.registradoPor?.nombre || '—',
+            });
+          }
+        } else {
+          if (!tipo || tipo === 'todos' || tipo === 'egreso') {
+            movimientos.push({
+              id: `${t.id}-egreso`,
+              tipo: 'egreso',
+              origen: 'transferencia',
+              fecha: t.fecha,
+              monto: Number(t.monto),
+              descripcion: `Transferencia enviada a ${t.destinoMetodo?.nombre || 'Cuenta Destino'}`,
+              referencia: t.referencia || '',
+              metodoPago: t.origenMetodo?.nombre || 'No especificado',
+              metodoPagoId: t.origenMetodoId,
+              entidad: 'Transferencia interna',
+              usuario: t.registradoPor?.nombre || '—',
+            });
+          }
+          if (!tipo || tipo === 'todos' || tipo === 'ingreso') {
+            movimientos.push({
+              id: `${t.id}-ingreso`,
+              tipo: 'ingreso',
+              origen: 'transferencia',
+              fecha: t.fecha,
+              monto: Number(t.monto),
+              descripcion: `Transferencia recibida de ${t.origenMetodo?.nombre || 'Cuenta Origen'}`,
+              referencia: t.referencia || '',
+              metodoPago: t.destinoMetodo?.nombre || 'No especificado',
+              metodoPagoId: t.destinoMetodoId,
+              entidad: 'Transferencia interna',
+              usuario: t.registradoPor?.nombre || '—',
+            });
+          }
         }
       }
 
@@ -1229,6 +1441,14 @@ export class GastosController {
         },
       });
 
+      const dbIngresos = await prisma.ingreso.findMany({
+        where: { fecha: { gte: desdeDate, lte: hastaLimit } },
+        include: {
+          metodoPago: true,
+          registradoPor: { select: { nombre: true } },
+        },
+      });
+
       const dbGastos = await prisma.gasto.findMany({
         where: { fecha: { gte: desdeDate, lte: hastaLimit } },
         include: {
@@ -1256,7 +1476,7 @@ export class GastosController {
       interface Movement {
         id: string;
         tipo: 'ingreso' | 'egreso';
-        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar';
+        origen: 'proforma' | 'gasto' | 'orden_compra' | 'cuenta_por_pagar' | 'ingreso_manual';
         fecha: Date;
         monto: number;
         descripcion: string;
@@ -1285,6 +1505,24 @@ export class GastosController {
           metodoPago: ab.metodoPago?.nombre || 'No especificado',
           entidad: ab.proforma?.clienteNombre || 'Cliente no especificado',
           usuario: ab.registradoPor?.nombre || '—',
+        });
+      }
+
+      // Manual Incomes
+      for (const ing of dbIngresos) {
+        const monto = Number(ing.monto);
+        totalIngresos += monto;
+        recentMovements.push({
+          id: ing.id,
+          tipo: 'ingreso',
+          origen: 'ingreso_manual',
+          fecha: ing.fecha,
+          monto,
+          descripcion: ing.concepto,
+          referencia: ing.notas || '',
+          metodoPago: ing.metodoPago?.nombre || 'No especificado',
+          entidad: ing.cliente || ing.categoria || 'Otros',
+          usuario: ing.registradoPor?.nombre || '—',
         });
       }
 
@@ -1371,7 +1609,11 @@ export class GastosController {
         where: { fecha: { gte: desdePrevDate, lte: hastaPrevDate } },
         select: { monto: true }
       });
-      const totalIngresosPrev = prevAbonosProforma.reduce((sum, ab) => sum + Number(ab.monto), 0);
+      const prevIngresos = await prisma.ingreso.findMany({
+        where: { fecha: { gte: desdePrevDate, lte: hastaPrevDate } },
+        select: { monto: true }
+      });
+      const totalIngresosPrev = prevAbonosProforma.reduce((sum, ab) => sum + Number(ab.monto), 0) + prevIngresos.reduce((sum, ab) => sum + Number(ab.monto), 0);
 
       const prevGastos = await prisma.gasto.findMany({
         where: { fecha: { gte: desdePrevDate, lte: hastaPrevDate } },
@@ -1437,6 +1679,12 @@ export class GastosController {
         const dayKey = ab.fecha.toISOString().split('T')[0];
         if (dailyDataMap[dayKey]) {
           dailyDataMap[dayKey].ingresos += Number(ab.monto);
+        }
+      }
+      for (const ing of dbIngresos) {
+        const dayKey = ing.fecha.toISOString().split('T')[0];
+        if (dailyDataMap[dayKey]) {
+          dailyDataMap[dayKey].ingresos += Number(ing.monto);
         }
       }
       for (const g of dbGastos) {
@@ -1559,6 +1807,305 @@ export class GastosController {
     } catch (error) {
       console.error('[reportes/dashboard-summary]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al generar resumen consolidado del dashboard' } });
+    }
+  }
+
+  // --- INGRESO MANUAL CRUD ---
+
+  async listIngresos(req: Request, res: Response): Promise<Response> {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 25;
+      const search = (req.query.search as string || '').toLowerCase();
+      const metodoPagoIdFiltro = req.query.metodoPagoId as string || '';
+      const startDateFiltro = req.query.startDate as string || '';
+      const endDateFiltro = req.query.endDate as string || '';
+
+      const where: any = {};
+      if (metodoPagoIdFiltro) where.metodoPagoId = metodoPagoIdFiltro;
+      
+      if (startDateFiltro || endDateFiltro) {
+        where.fecha = {};
+        if (startDateFiltro) where.fecha.gte = new Date(startDateFiltro);
+        if (endDateFiltro) where.fecha.lte = new Date(endDateFiltro + 'T23:59:59.999');
+      }
+
+      if (search) {
+        where.OR = [
+          { concepto: { contains: search, mode: 'insensitive' } },
+          { notas: { contains: search, mode: 'insensitive' } },
+          { cliente: { contains: search, mode: 'insensitive' } },
+        ];
+      }
+
+      const [ingresos, totalCount] = await Promise.all([
+        prisma.ingreso.findMany({
+          where,
+          include: {
+            metodoPago: true,
+            registradoPor: { select: { id: true, nombre: true } },
+          },
+          orderBy: { fecha: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.ingreso.count({ where }),
+      ]);
+
+      const data = ingresos.map(ing => ({
+        ...ing,
+        monto: Number(ing.monto),
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data,
+        pagination: { totalCount, totalPages: Math.ceil(totalCount / limit), currentPage: page, limit }
+      });
+    } catch (error) {
+      console.error('[ingresos/list]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener ingresos' } });
+    }
+  }
+
+  async createIngreso(req: Request, res: Response): Promise<Response> {
+    try {
+      const b = req.body || {};
+      if (!b.concepto || !b.fecha || b.monto === undefined || !b.metodoPagoId) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Concepto, fecha, monto y método de pago son requeridos' } });
+      }
+
+      // Verificar si la fecha cae en un período cerrado
+      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden registrar ingresos en un período cerrado (${fi} al ${ff}). Elimine el cierre de caja primero.` } });
+      }
+
+      const id = await nextIngresoId();
+      const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
+
+      const ingreso = await prisma.ingreso.create({
+        data: {
+          id,
+          concepto: b.concepto,
+          categoria: b.categoria ?? 'Otros',
+          fecha: new Date(b.fecha),
+          monto: Number(b.monto),
+          cliente: b.cliente ?? '',
+          notas: b.notas ?? '',
+          metodoPagoId: b.metodoPagoId,
+          registradoPorUserId,
+        },
+        include: { metodoPago: true },
+      });
+
+      return res.status(201).json({ success: true, data: { ...ingreso, monto: Number(ingreso.monto) } });
+    } catch (error) {
+      console.error('[ingresos/create]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar ingreso' } });
+    }
+  }
+
+  async updateIngreso(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+      const b = req.body || {};
+
+      if (!b.concepto || !b.fecha || b.monto === undefined || !b.metodoPagoId) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Concepto, fecha, monto y método de pago son requeridos' } });
+      }
+
+      // Verificar si la fecha cae en un período cerrado
+      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden editar ingresos en un período cerrado (${fi} al ${ff}).` } });
+      }
+
+      // Verificar el ingreso original también por si cambiaron de fecha a un periodo cerrado
+      const existente = await prisma.ingreso.findUnique({ where: { id: String(id) } });
+      if (!existente) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Ingreso no encontrado' } });
+      }
+      const cierreBloqueanteExistente = await findCierreThatCovers(existente.fecha);
+      if (cierreBloqueanteExistente) {
+        const fi = cierreBloqueanteExistente.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueanteExistente.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden editar ingresos registrados originalmente en un período cerrado (${fi} al ${ff}).` } });
+      }
+
+      const ingreso = await prisma.ingreso.update({
+        where: { id: String(id) },
+        data: {
+          concepto: b.concepto,
+          categoria: b.categoria ?? 'Otros',
+          fecha: new Date(b.fecha),
+          monto: Number(b.monto),
+          cliente: b.cliente ?? '',
+          notas: b.notas ?? '',
+          metodoPagoId: b.metodoPagoId,
+        },
+        include: { metodoPago: true },
+      });
+
+      return res.status(200).json({ success: true, data: { ...ingreso, monto: Number(ingreso.monto) } });
+    } catch (error) {
+      console.error('[ingresos/update]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al actualizar ingreso' } });
+    }
+  }
+
+  async removeIngreso(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+      const existente = await prisma.ingreso.findUnique({ where: { id: String(id) } });
+      if (!existente) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Ingreso no encontrado' } });
+      }
+
+      // Verificar si cae en un período cerrado
+      const cierreBloqueante = await findCierreThatCovers(existente.fecha);
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden eliminar ingresos en un período cerrado (${fi} al ${ff}).` } });
+      }
+
+      await prisma.ingreso.delete({ where: { id: String(id) } });
+      return res.status(200).json({ success: true, data: { id } });
+    } catch (error) {
+      console.error('[ingresos/remove]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar ingreso' } });
+    }
+  }
+
+  // --- TRANSFERENCIA CRUD ---
+
+  async listTransferencias(req: Request, res: Response): Promise<Response> {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 25;
+      const search = (req.query.search as string || '').toLowerCase();
+      const originId = req.query.origenMetodoId as string || '';
+      const destId = req.query.destinoMetodoId as string || '';
+      const startDateFiltro = req.query.startDate as string || '';
+      const endDateFiltro = req.query.endDate as string || '';
+
+      const where: any = {};
+      if (originId) where.origenMetodoId = originId;
+      if (destId) where.destinoMetodoId = destId;
+      
+      if (startDateFiltro || endDateFiltro) {
+        where.fecha = {};
+        if (startDateFiltro) where.fecha.gte = new Date(startDateFiltro);
+        if (endDateFiltro) where.fecha.lte = new Date(endDateFiltro + 'T23:59:59.999');
+      }
+
+      if (search) {
+        where.referencia = { contains: search, mode: 'insensitive' };
+      }
+
+      const [transferencias, totalCount] = await Promise.all([
+        prisma.transferencia.findMany({
+          where,
+          include: {
+            origenMetodo: true,
+            destinoMetodo: true,
+            registradoPor: { select: { id: true, nombre: true } },
+          },
+          orderBy: { fecha: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.transferencia.count({ where }),
+      ]);
+
+      const data = transferencias.map(t => ({
+        ...t,
+        monto: Number(t.monto),
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data,
+        pagination: { totalCount, totalPages: Math.ceil(totalCount / limit), currentPage: page, limit }
+      });
+    } catch (error) {
+      console.error('[transferencias/list]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener transferencias' } });
+    }
+  }
+
+  async createTransferencia(req: Request, res: Response): Promise<Response> {
+    try {
+      const b = req.body || {};
+      if (!b.origenMetodoId || !b.destinoMetodoId || b.monto === undefined || !b.fecha) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Cuenta origen, cuenta destino, monto y fecha son requeridos' } });
+      }
+
+      if (b.origenMetodoId === b.destinoMetodoId) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'La cuenta origen y destino deben ser diferentes' } });
+      }
+
+      if (Number(b.monto) <= 0) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto de la transferencia debe ser mayor a cero' } });
+      }
+
+      // Verificar si la fecha cae en un período cerrado
+      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden registrar transferencias en un período cerrado (${fi} al ${ff}).` } });
+      }
+
+      const id = await nextTransferenciaId();
+      const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
+
+      const transferencia = await prisma.transferencia.create({
+        data: {
+          id,
+          origenMetodoId: b.origenMetodoId,
+          destinoMetodoId: b.destinoMetodoId,
+          monto: Number(b.monto),
+          fecha: new Date(b.fecha),
+          referencia: b.referencia ?? '',
+          registradoPorUserId,
+        },
+        include: { origenMetodo: true, destinoMetodo: true },
+      });
+
+      return res.status(201).json({ success: true, data: { ...transferencia, monto: Number(transferencia.monto) } });
+    } catch (error) {
+      console.error('[transferencias/create]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar transferencia' } });
+    }
+  }
+
+  async removeTransferencia(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+      const existente = await prisma.transferencia.findUnique({ where: { id: String(id) } });
+      if (!existente) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Transferencia no encontrada' } });
+      }
+
+      // Verificar si cae en un período cerrado
+      const cierreBloqueante = await findCierreThatCovers(existente.fecha);
+      if (cierreBloqueante) {
+        const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+        const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+        return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden eliminar transferencias en un período cerrado (${fi} al ${ff}).` } });
+      }
+
+      await prisma.transferencia.delete({ where: { id: String(id) } });
+      return res.status(200).json({ success: true, data: { id } });
+    } catch (error) {
+      console.error('[transferencias/remove]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar transferencia' } });
     }
   }
 }

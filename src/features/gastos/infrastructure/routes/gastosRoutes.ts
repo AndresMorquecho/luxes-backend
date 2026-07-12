@@ -16,6 +16,17 @@ export function createGastosRoutes(
   gastosRouter.put('/:id', authMiddleware, (req, res) => gastosController.update(req, res));
   gastosRouter.delete('/:id', authMiddleware, (req, res) => gastosController.remove(req, res));
 
+  // Ingresos manuales
+  gastosRouter.get('/ingresos', authMiddleware, (req, res) => gastosController.listIngresos(req, res));
+  gastosRouter.post('/ingresos', authMiddleware, (req, res) => gastosController.createIngreso(req, res));
+  gastosRouter.put('/ingresos/:id', authMiddleware, (req, res) => gastosController.updateIngreso(req, res));
+  gastosRouter.delete('/ingresos/:id', authMiddleware, (req, res) => gastosController.removeIngreso(req, res));
+
+  // Transferencias entre cuentas
+  gastosRouter.get('/transferencias', authMiddleware, (req, res) => gastosController.listTransferencias(req, res));
+  gastosRouter.post('/transferencias', authMiddleware, (req, res) => gastosController.createTransferencia(req, res));
+  gastosRouter.delete('/transferencias/:id', authMiddleware, (req, res) => gastosController.removeTransferencia(req, res));
+
   // Movimientos financieros (vista unificada)
   gastosRouter.get('/movimientos', authMiddleware, (req, res) => gastosController.listMovimientos(req, res));
 
