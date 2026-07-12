@@ -1,7 +1,7 @@
 import webpush from 'web-push';
 import { prisma } from '../../config/prismaClient.js';
 import { env } from '../../config/env.js';
-// Configure VAPID details
+// Configure VAPID detailss
 if (env.vapidPublicKey && env.vapidPrivateKey) {
     webpush.setVapidDetails('mailto:' + env.vapidEmail, env.vapidPublicKey, env.vapidPrivateKey);
 }

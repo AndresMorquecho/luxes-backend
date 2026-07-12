@@ -38,6 +38,7 @@ export function createGastosRoutes(
 
   // Reportes
   gastosRouter.get('/reportes/dashboard-summary', authMiddleware, (req, res) => gastosController.getDashboardSummary(req, res));
+  gastosRouter.get('/test-debug', (req, res) => gastosController.testDebug(req, res));
 
   // Vehículos
   vehiculosRouter.get('/', authMiddleware, (req, res) => vehiculosController.listVehiculos(req, res));

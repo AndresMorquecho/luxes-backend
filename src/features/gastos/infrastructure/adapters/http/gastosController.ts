@@ -2108,4 +2108,33 @@ export class GastosController {
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar transferencia' } });
     }
   }
+
+  async testDebug(req: Request, res: Response): Promise<Response> {
+    try {
+      const totalIngresosCount = await prisma.ingreso.count();
+      const totalTransferenciasCount = await prisma.transferencia.count();
+      const top5Ingresos = await prisma.ingreso.findMany({
+        take: 5,
+        orderBy: { fecha: 'desc' },
+        include: { metodoPago: true }
+      });
+      const top5Transferencias = await prisma.transferencia.findMany({
+        take: 5,
+        orderBy: { fecha: 'desc' },
+        include: { origenMetodo: true, destinoMetodo: true }
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          totalIngresosCount,
+          totalTransferenciasCount,
+          top5Ingresos: top5Ingresos.map(i => ({ ...i, monto: Number(i.monto) })),
+          top5Transferencias: top5Transferencias.map(t => ({ ...t, monto: Number(t.monto) }))
+        }
+      });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
 }

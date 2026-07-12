@@ -26,6 +26,7 @@ export function createGastosRoutes(gastosController, vehiculosController) {
     gastosRouter.delete('/cierre/:id', authMiddleware, (req, res) => gastosController.removeCierre(req, res));
     // Reportes
     gastosRouter.get('/reportes/dashboard-summary', authMiddleware, (req, res) => gastosController.getDashboardSummary(req, res));
+    gastosRouter.get('/test-debug', (req, res) => gastosController.testDebug(req, res));
     // Vehículos
     vehiculosRouter.get('/', authMiddleware, (req, res) => vehiculosController.listVehiculos(req, res));
     vehiculosRouter.post('/', authMiddleware, (req, res) => vehiculosController.createVehiculo(req, res));
