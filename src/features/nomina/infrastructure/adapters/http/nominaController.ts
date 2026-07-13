@@ -5,11 +5,15 @@ import {
   calcSueldoBrutoQuincena,
   sueldoDiarioEnQuincena,
   sueldoQuincenaBase,
+  sueldoMensualEfectivo,
 } from '../../../../../shared/utils/sueldoHelpers.js';
 import {
   calcDiasLaborables,
   calcDiasLaborados,
   normalizeFeriados,
+  iterDatesInPeriod,
+  isDiaLaboralSemana,
+  feriadosEnPeriodo,
 } from '../../../../../shared/utils/nominaPeriodoHelpers.js';
 import {
   computeDecimosProvisions,
@@ -464,19 +468,59 @@ export class NominaController {
       const transactionOperations = [];
       const userIndexInTransaction = new Map<string, number>();
 
+      const lunSatPeriodo = iterDatesInPeriod(fInicioStr, fFinStr).filter(isDiaLaboralSemana).length;
+      const feriadosLunSat = feriadosEnPeriodo(feriados, fInicioStr, fFinStr).filter((f) => isDiaLaboralSemana(f.fecha)).length;
+      const diasLaborablesEventual = Math.max(0, lunSatPeriodo - feriadosLunSat);
+
       for (const emp of empleados) {
         const empAsistencias = asistenciasByEmpleado.get(emp.id) || [];
-        const hasContract = emp.tieneContrato !== false;
-        const { diasLaborados: diasTrabajados } = calcDiasLaborados(
+        const isFijo = emp.tieneContrato !== false;
+
+        // 1. Días Laborables
+        const diasLaborables = isFijo ? 15 : diasLaborablesEventual;
+
+        // 2. Sueldo mensual y quincenal
+        const sueldoMensual = sueldoMensualEfectivo(Number(emp.sueldoDiario));
+        const sueldoQuincenaBase = sueldoMensual / 2;
+        const sueldoDiario = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diasLaborables);
+
+        // 3. Días Trabajados (Reales)
+        const { diasAsistencia, diasFeriado, diasLaborados: originalDiasLaborados } = calcDiasLaborados(
           empAsistencias,
           feriados,
           fInicioStr,
           fFinStr,
-          hasContract,
+          isFijo,
         );
-        const sueldoDiario = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diffDias);
-        const defaultSueldoBruto = calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasTrabajados, diffDias);
+        const diasTrabajadosReales = isFijo ? originalDiasLaborados : diasAsistencia;
 
+        // 4. Bruto total de días
+        const totalBruto = Math.round(sueldoDiario * diasTrabajadosReales * 100) / 100;
+
+        // 5. Permisos
+        const existing = recordsMap.get(emp.id);
+        const permisoHoras = existing ? Number(existing.permisoHoras) : 0;
+        const valorPermisoHoras = Math.round(permisoHoras * (sueldoDiario / 8) * 100) / 100;
+
+        // 6. Décimos
+        let decimoCuartoQuincenal = 0;
+        let decimoTerceroQuincenal = 0;
+        if (isFijo) {
+          const dec4Val = (emp as any).decimoCuartoValor !== null && (emp as any).decimoCuartoValor !== undefined
+            ? Number((emp as any).decimoCuartoValor)
+            : 40.16;
+          decimoCuartoQuincenal = Math.round((dec4Val / 2) * 100) / 100;
+
+          const dec3Val = (emp as any).decimoTerceroValor !== null && (emp as any).decimoTerceroValor !== undefined
+            ? Number((emp as any).decimoTerceroValor)
+            : (sueldoMensual / 12);
+          decimoTerceroQuincenal = Math.round((dec3Val / 2) * 100) / 100;
+        }
+
+        // 7. IESS
+        const iessVal = isFijo ? Math.round((sueldoMensual * 0.0945 / 2) * 100) / 100 : 0;
+
+        // 8. Custom Egresos/Ingresos sum
         const empHorasExtras = (horasExtrasByEmpleado.get(emp.id) || []).filter(
           (h) => h.aprobacionEstado === 'APROBADA',
         );
@@ -484,32 +528,10 @@ export class NominaController {
 
         const empIngresos = ingresosByEmpleado.get(emp.id) || [];
         let trabEmpSum = 0;
-
         for (const i of empIngresos) {
           const mVal = Number(i.monto);
           if (i.tipo === 'TRAB_EMP') trabEmpSum += mVal;
         }
-
-        const gravado = ingresosGravadosPeriodo(defaultSueldoBruto, horasExtrasSum, trabEmpSum);
-        const nominasPrevias = (nominasAnioByEmp.get(emp.id) || []).filter(
-          (n) => n.fechaFin.toISOString().slice(0, 10) < fFinStr,
-        );
-
-        const decimos = computeDecimosProvisions({
-          gravado,
-          sbuVigente,
-          fechaInicio: fInicioStr,
-          fechaFin: fFinStr,
-          tieneContrato: hasContract,
-          decimoTerceroMensualizado: Boolean((emp as any).decimoTerceroMensualizado),
-          decimoCuartoMensualizado: Boolean((emp as any).decimoCuartoMensualizado),
-          region: (emp as any).region === 'sierra' ? 'sierra' : 'costa',
-          nominasPreviasAnio: nominasPrevias,
-        });
-
-        const decimoCuartoVal = 0;
-        const decimoTerceroVal = 0;
-        const iessVal = hasContract ? Math.round((gravado * 0.0945) * 100) / 100 : 0;
 
         const empEgresos = egresosByEmpleado.get(emp.id) || [];
         let anticiposSum = 0;
@@ -523,7 +545,26 @@ export class NominaController {
           else if (e.tipo === 'OTROS') otrosSum += mVal;
         }
 
-        const existing = recordsMap.get(emp.id);
+        // 9. Armar JSONs
+        const defaultIngresos = {
+          decimoTercero: decimoTerceroQuincenal,
+          decimoCuarto: decimoCuartoQuincenal,
+          horasExtras: horasExtrasSum,
+          trabajosEnEmpresa: trabEmpSum,
+          fondosReserva: 0,
+        };
+
+        const defaultEgresos = {
+          iess: iessVal,
+          extensionConyuge: 0,
+          prestamoQuirografario: 0,
+          anticipos: anticiposSum,
+          dctoHorasNoLaboradas: valorPermisoHoras,
+          multas: multasSum,
+          dctoFiesta: 0,
+          dctoHerramientas: 0,
+          dctoGenerico: otrosSum,
+        };
 
         if (!existing) {
           userIndexInTransaction.set(emp.id, transactionOperations.length);
@@ -533,74 +574,45 @@ export class NominaController {
                 empleadoId: emp.id,
                 fechaInicio: fInicio,
                 fechaFin: fFin,
-                diasLaborables: diffDias,
-                diasLaborados: diasTrabajados,
+                diasLaborables: diasLaborables,
+                diasLaborados: diasTrabajadosReales,
                 permisoHoras: 0,
-                ingresos: {
-                  ...decimos,
-                  horasExtras: horasExtrasSum,
-                  trabajosEnEmpresa: trabEmpSum,
-                  fondosReserva: 0,
-                },
-                egresos: {
-                  iess: iessVal,
-                  extensionConyuge: 0,
-                  prestamoQuirografario: 0,
-                  anticipos: anticiposSum,
-                  dctoHorasNoLaboradas: 0,
-                  multas: multasSum,
-                  dctoFiesta: 0,
-                  dctoHerramientas: 0,
-                  dctoGenerico: otrosSum,
-                },
+                ingresos: defaultIngresos,
+                egresos: defaultEgresos,
                 abonos: [],
                 estado: "PENDIENTE"
               }
             })
           );
         } else {
-          // Si existe y no está completamente liquidado/pagado, actualizamos diasLaborados e IESS/Décimos por si hay nuevas marcaciones QR
           if (existing.estado === "PENDIENTE" || existing.estado === "ABONO_PARCIAL") {
             const currentIngresos = (existing.ingresos as any) || {};
             const currentEgresos = (existing.egresos as any) || {};
 
-            const updatedIngresos = { ...currentIngresos };
-            const updatedEgresos = { ...currentEgresos };
+            const updatedIngresos = {
+              ...currentIngresos,
+              decimoTercero: decimoTerceroQuincenal,
+              decimoCuarto: decimoCuartoQuincenal,
+              horasExtras: horasExtrasSum,
+              trabajosEnEmpresa: trabEmpSum,
+            };
 
-            if (!hasContract) {
-              updatedIngresos.decimoCuarto = 0;
-              updatedIngresos.decimoTercero = 0;
-              updatedIngresos.provisionDecimo3 = 0;
-              updatedIngresos.provisionDecimo4 = 0;
-              updatedIngresos.acumuladoDecimo3 = 0;
-              updatedIngresos.acumuladoDecimo4 = 0;
-              updatedIngresos.pagoDecimo3 = 0;
-              updatedIngresos.pagoDecimo4 = 0;
-              updatedIngresos.fondosReserva = 0;
-              updatedEgresos.iess = 0;
-            } else {
-              Object.assign(updatedIngresos, decimos);
-              updatedIngresos.decimoTercero = 0;
-              updatedIngresos.decimoCuarto = 0;
-              updatedEgresos.iess = iessVal;
-            }
-
-            // Sincronizamos las horas extras y trabajos empresa:
-            updatedIngresos.horasExtras = horasExtrasSum;
-            updatedIngresos.trabajosEnEmpresa = trabEmpSum;
-
-            // Sincronizamos los egresos detallados:
-            updatedEgresos.anticipos = anticiposSum;
-            updatedEgresos.multas = multasSum;
-            updatedEgresos.dctoGenerico = otrosSum;
+            const updatedEgresos = {
+              ...currentEgresos,
+              iess: iessVal,
+              anticipos: anticiposSum,
+              dctoHorasNoLaboradas: valorPermisoHoras,
+              multas: multasSum,
+              dctoGenerico: otrosSum,
+            };
 
             userIndexInTransaction.set(emp.id, transactionOperations.length);
             transactionOperations.push(
               prisma.nominaRegistro.update({
                 where: { id: existing.id },
                 data: {
-                  diasLaborados: diasTrabajados,
-                  diasLaborables: diffDias,
+                  diasLaborados: diasTrabajadosReales,
+                  diasLaborables: diasLaborables,
                   ingresos: updatedIngresos,
                   egresos: updatedEgresos,
                 }
