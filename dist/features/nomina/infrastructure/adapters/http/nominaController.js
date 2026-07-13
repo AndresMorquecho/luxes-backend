@@ -442,7 +442,13 @@ export class NominaController {
                     decimoTerceroQuincenal = Math.round((dec3Val / 2) * 100) / 100;
                 }
                 // 7. IESS
-                const iessVal = isFijo ? Math.round((sueldoMensual * 0.0945 / 2) * 100) / 100 : 0;
+                let iessVal = 0;
+                if (isFijo) {
+                    const iessConfig = emp.iessValor !== null && emp.iessValor !== undefined
+                        ? Number(emp.iessValor)
+                        : (sueldoMensual * 0.0945);
+                    iessVal = Math.round((iessConfig / 2) * 100) / 100;
+                }
                 // 8. Custom Egresos/Ingresos sum
                 const empHorasExtras = (horasExtrasByEmpleado.get(emp.id) || []).filter((h) => h.aprobacionEstado === 'APROBADA');
                 const horasExtrasSum = empHorasExtras.reduce((s, h) => s + Number(h.total), 0);

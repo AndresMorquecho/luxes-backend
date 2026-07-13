@@ -357,6 +357,7 @@ model Empleado {
   sueldoDiario Decimal            @default(0) @map("sueldo_diario") @db.Decimal(10, 2)
   decimoTerceroValor Decimal?     @map("decimo_tercero_valor") @db.Decimal(10, 2)
   decimoCuartoValor  Decimal?     @map("decimo_cuarto_valor") @db.Decimal(10, 2)
+  iessValor          Decimal?     @map("iess_valor") @db.Decimal(10, 2)
   direccion    String             @default("")
   foto         String?
   passwordHash String             @default("") @map("password_hash")

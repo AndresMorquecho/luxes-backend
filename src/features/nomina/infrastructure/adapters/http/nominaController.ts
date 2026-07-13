@@ -518,7 +518,13 @@ export class NominaController {
         }
 
         // 7. IESS
-        const iessVal = isFijo ? Math.round((sueldoMensual * 0.0945 / 2) * 100) / 100 : 0;
+        let iessVal = 0;
+        if (isFijo) {
+          const iessConfig = (emp as any).iessValor !== null && (emp as any).iessValor !== undefined
+            ? Number((emp as any).iessValor)
+            : (sueldoMensual * 0.0945);
+          iessVal = Math.round((iessConfig / 2) * 100) / 100;
+        }
 
         // 8. Custom Egresos/Ingresos sum
         const empHorasExtras = (horasExtrasByEmpleado.get(emp.id) || []).filter(

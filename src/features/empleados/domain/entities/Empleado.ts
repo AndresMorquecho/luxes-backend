@@ -12,6 +12,9 @@ export interface EmpleadoProps {
   decimoTerceroMensualizado: boolean;
   decimoCuartoMensualizado: boolean;
   sueldoDiario: number;
+  decimoTerceroValor?: number | null;
+  decimoCuartoValor?: number | null;
+  iessValor?: number | null;
   direccion: string;
   foto?: string | null;
   rol?: string;
@@ -31,6 +34,9 @@ export class Empleado {
   readonly decimoTerceroMensualizado: boolean;
   readonly decimoCuartoMensualizado: boolean;
   readonly sueldoDiario: number;
+  readonly decimoTerceroValor: number | null;
+  readonly decimoCuartoValor: number | null;
+  readonly iessValor: number | null;
   readonly direccion: string;
   readonly foto: string | null;
   readonly rol?: string;
@@ -49,6 +55,9 @@ export class Empleado {
     this.decimoTerceroMensualizado = props.decimoTerceroMensualizado ?? false;
     this.decimoCuartoMensualizado = props.decimoCuartoMensualizado ?? false;
     this.sueldoDiario = props.sueldoDiario;
+    this.decimoTerceroValor = props.decimoTerceroValor !== undefined ? props.decimoTerceroValor : null;
+    this.decimoCuartoValor = props.decimoCuartoValor !== undefined ? props.decimoCuartoValor : null;
+    this.iessValor = props.iessValor !== undefined ? props.iessValor : null;
     this.direccion = props.direccion;
     this.foto = props.foto ?? null;
     this.rol = props.rol;
@@ -69,6 +78,9 @@ export class Empleado {
       decimoTerceroMensualizado: this.decimoTerceroMensualizado,
       decimoCuartoMensualizado: this.decimoCuartoMensualizado,
       sueldoDiario: this.sueldoDiario,
+      decimoTerceroValor: this.decimoTerceroValor,
+      decimoCuartoValor: this.decimoCuartoValor,
+      iessValor: this.iessValor,
       direccion: this.direccion,
       foto: this.foto ?? '',
       rol: this.rol,
