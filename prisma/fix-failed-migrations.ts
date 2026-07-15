@@ -53,6 +53,78 @@ const REPAIRS: Record<string, string[]> = {
       VALUES ('default', 470, CURRENT_TIMESTAMP)
       ON CONFLICT ("id") DO NOTHING`,
   ],
+  '20260703180000_add_inventario_subtipo_descarga_prestable': [
+    `ALTER TABLE "materiales" ADD COLUMN IF NOT EXISTS "subtipo" TEXT DEFAULT 'consumible_descargable'`,
+    `ALTER TABLE "materiales" ADD COLUMN IF NOT EXISTS "descarga_stock" BOOLEAN NOT NULL DEFAULT true`,
+    `ALTER TABLE "materiales" ADD COLUMN IF NOT EXISTS "es_prestable" BOOLEAN NOT NULL DEFAULT false`,
+    `UPDATE "materiales" 
+      SET subtipo = 'herramienta', 
+          descarga_stock = false, 
+          es_prestable = true 
+      WHERE tipo = 'herramienta' AND subtipo IS NULL`,
+    `UPDATE "materiales" 
+      SET subtipo = 'consumible_registro', 
+          descarga_stock = false, 
+          es_prestable = false 
+      WHERE tipo = 'consumible' AND categoria = 'Taller' AND subtipo IS NULL`,
+    `UPDATE "materiales" 
+      SET subtipo = 'activo_fijo', 
+          descarga_stock = false, 
+          es_prestable = false 
+      WHERE tipo = 'consumible' AND categoria = 'Oficina' AND subtipo IS NULL`,
+    `UPDATE "materiales" 
+      SET subtipo = 'consumible_registro', 
+          descarga_stock = false, 
+          es_prestable = false 
+      WHERE tipo = 'consumible' 
+        AND categoria = 'Impresión' 
+        AND LOWER(nombre) LIKE '%tinta%' AND subtipo IS NULL`,
+    `UPDATE "materiales" 
+      SET subtipo = 'consumible_descargable', 
+          descarga_stock = true, 
+          es_prestable = false 
+      WHERE tipo = 'consumible' 
+        AND categoria = 'Impresión' 
+        AND LOWER(nombre) NOT LIKE '%tinta%' AND subtipo IS NULL`,
+  ],
+  '20260706150000_add_registrado_por_movimientos': [
+    `ALTER TABLE "abonos_proforma" ADD COLUMN IF NOT EXISTS "registrado_por_user_id" TEXT`,
+    `ALTER TABLE "gastos" ADD COLUMN IF NOT EXISTS "registrado_por_user_id" TEXT`,
+    `ALTER TABLE "abonos_compra" ADD COLUMN IF NOT EXISTS "registrado_por_user_id" TEXT`,
+    `CREATE INDEX IF NOT EXISTS "abonos_proforma_registrado_por_user_id_idx" ON "abonos_proforma"("registrado_por_user_id")`,
+    `CREATE INDEX IF NOT EXISTS "gastos_registrado_por_user_id_idx" ON "gastos"("registrado_por_user_id")`,
+    `CREATE INDEX IF NOT EXISTS "abonos_compra_registrado_por_user_id_idx" ON "abonos_compra"("registrado_por_user_id")`,
+    `DO $$ 
+      BEGIN 
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints 
+          WHERE constraint_name = 'abonos_proforma_registrado_por_user_id_fkey'
+        ) THEN 
+          ALTER TABLE "abonos_proforma" ADD CONSTRAINT "abonos_proforma_registrado_por_user_id_fkey" 
+          FOREIGN KEY ("registrado_por_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+      END $$`,
+    `DO $$ 
+      BEGIN 
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints 
+          WHERE constraint_name = 'gastos_registrado_por_user_id_fkey'
+        ) THEN 
+          ALTER TABLE "gastos" ADD CONSTRAINT "gastos_registrado_por_user_id_fkey" 
+          FOREIGN KEY ("registrado_por_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+      END $$`,
+    `DO $$ 
+      BEGIN 
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.table_constraints 
+          WHERE constraint_name = 'abonos_compra_registrado_por_user_id_fkey'
+        ) THEN 
+          ALTER TABLE "abonos_compra" ADD CONSTRAINT "abonos_compra_registrado_por_user_id_fkey" 
+          FOREIGN KEY ("registrado_por_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+      END $$`,
+  ],
 };
 
 function loadStatementsFromFile(migrationName: string): string[] {

@@ -1,26 +1,100 @@
 import { Asistencia } from '../../domain/entities/Asistencia.js';
-import { SECUENCIA_MARCACIONES, resolveProximaMarcacion, resolveTipoRegistro, getOpcionesMarcacion, calcularHorasExtrasDesdeSalida, puedeRegistrarMarcacion, } from '../../domain/marcacionLogic.js';
+import { SECUENCIA_MARCACIONES, resolveProximaMarcacion, resolveTipoRegistro, getOpcionesMarcacion, calcularHorasExtrasDesdeConfig, redondearAMediaHora, puedeRegistrarMarcacion, } from '../../domain/marcacionLogic.js';
 import { prisma } from '../../../../config/prismaClient.js';
 import { notifyHorasExtrasPendiente } from '../../../../shared/services/horasExtrasNotificationService.js';
+import { getHorarioDelDia } from '../../infrastructure/adapters/persistence/horarioLaboralStore.js';
 export { SECUENCIA_MARCACIONES };
 const VALOR_HORA_EXTRA_DEFAULT = 2.5;
+const VALOR_MEDIA_HORA_EXTRA_DEFAULT = 1.5;
+// ── Helper: quincena period for a UTC Date ──────────────────────────────────
+function getQuincenaPeriod(date) {
+    const ec = new Date(date.getTime() - 5 * 60 * 60 * 1000);
+    const yy = ec.getUTCFullYear();
+    const mm = ec.getUTCMonth() + 1;
+    const dd = ec.getUTCDate();
+    const pad = (n) => String(n).padStart(2, '0');
+    if (dd <= 15) {
+        return { fechaInicio: `${yy}-${pad(mm)}-01`, fechaFin: `${yy}-${pad(mm)}-15` };
+    }
+    else {
+        const lastDay = new Date(yy, mm, 0).getDate();
+        return { fechaInicio: `${yy}-${pad(mm)}-16`, fechaFin: `${yy}-${pad(mm)}-${pad(lastDay)}` };
+    }
+}
+// ── Helper: increment diasLaborados for employee's current quincena ──────────
+async function incrementarDiasLaborados(empleadoId, ahora) {
+    const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
+    const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
+    const periodEnd = new Date(`${fechaFin}T00:00:00.000Z`);
+    console.log(`[QR-DIAS] Incrementando diasLaborados para ${empleadoId} — quincena: ${fechaInicio} / ${fechaFin}`);
+    const existing = await prisma.nominaRegistro.findFirst({
+        where: { empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+    });
+    if (existing) {
+        const nuevoDias = existing.diasLaborados + 1;
+        await prisma.nominaRegistro.update({
+            where: { id: existing.id },
+            data: { diasLaborados: nuevoDias },
+        });
+        console.log(`[QR-DIAS] diasLaborados: ${existing.diasLaborados} → ${nuevoDias}`);
+    }
+    else {
+        const defIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
+        const defEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
+        await prisma.nominaRegistro.create({
+            data: {
+                empleadoId,
+                fechaInicio: periodStart,
+                fechaFin: periodEnd,
+                diasLaborables: 15,
+                diasLaborados: 1,
+                permisoHoras: 0,
+                ingresos: defIng,
+                egresos: defEgr,
+                abonos: [],
+                estado: 'PENDIENTE',
+            },
+        });
+        console.log(`[QR-DIAS] Registro creado con diasLaborados: 1`);
+    }
+}
+function calculateLateHoursEcuador(fechaHora) {
+    const ecDate = new Date(fechaHora.getTime() - 5 * 60 * 60 * 1000);
+    const day = ecDate.getUTCDay();
+    if (day === 0)
+        return 0; // Sundays don't count
+    const hours = ecDate.getUTCHours();
+    const minutes = ecDate.getUTCMinutes();
+    const timeInMinutes = hours * 60 + minutes;
+    const expectedTime = (day === 6) ? (9 * 60) : (8 * 60);
+    const diff = timeInMinutes - expectedTime;
+    if (diff <= 5)
+        return 0;
+    const halfHours = Math.round(diff / 30);
+    return Math.max(0.5, halfHours * 0.5);
+}
 export class AsistenciaService {
     asistenciaRepository;
     constructor(asistenciaRepository) {
         this.asistenciaRepository = asistenciaRepository;
     }
     async listAsistencias(desdeStr, hastaStr) {
-        const desde = new Date(desdeStr);
-        desde.setHours(0, 0, 0, 0);
-        const hasta = new Date(hastaStr);
-        hasta.setHours(23, 59, 59, 999);
+        const desde = new Date(`${desdeStr}T00:00:00.000-05:00`);
+        const hasta = new Date(`${hastaStr}T23:59:59.999-05:00`);
         return this.asistenciaRepository.findAll(desde, hasta);
     }
     async getProximaMarcacion(empleadoId) {
-        const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(empleadoId);
-        const opciones = getOpcionesMarcacion(todayMarks);
-        const base = resolveProximaMarcacion(todayMarks);
-        return { ...base, opciones };
+        const [todayMarks, emp] = await Promise.all([
+            this.asistenciaRepository.findTodayByEmpleado(empleadoId),
+            prisma.empleado.findUnique({ where: { id: empleadoId }, select: { tipoContrato: true } }),
+        ]);
+        const tipoContrato = emp?.tipoContrato || 'Tiempo Completo';
+        const nowEcuador = new Date(Date.now() - 5 * 60 * 60 * 1000);
+        const dateStr = nowEcuador.toISOString().split('T')[0];
+        const { diaConfig } = await getHorarioDelDia(dateStr);
+        const opciones = getOpcionesMarcacion(todayMarks, tipoContrato, diaConfig);
+        const base = resolveProximaMarcacion(todayMarks, tipoContrato, diaConfig);
+        return { ...base, opciones, tipoContrato };
     }
     async getTodayForEmpleado(empleadoId) {
         return this.asistenciaRepository.findTodayByEmpleado(empleadoId);
@@ -28,13 +102,17 @@ export class AsistenciaService {
     async registrarAsistencia(input) {
         const empleado = await prisma.empleado.findUnique({
             where: { id: input.empleadoId },
-            select: { nombre: true },
+            select: { nombre: true, tipoContrato: true },
         });
         if (!empleado) {
             throw new Error(`Empleado con ID '${input.empleadoId}' no encontrado en el sistema.`);
         }
+        const tipoContrato = empleado.tipoContrato || 'Tiempo Completo';
+        const nowEcuador = new Date(Date.now() - 5 * 60 * 60 * 1000);
+        const dateStr = nowEcuador.toISOString().split('T')[0];
+        const { diaConfig } = await getHorarioDelDia(dateStr);
         const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(input.empleadoId);
-        if (!puedeRegistrarMarcacion(todayMarks)) {
+        if (!puedeRegistrarMarcacion(todayMarks, tipoContrato, diaConfig)) {
             throw new Error(`El colaborador ${empleado.nombre} ya completó las marcaciones del día.`);
         }
         const ahora = new Date();
@@ -42,6 +120,8 @@ export class AsistenciaService {
             omitirAlmuerzo: input.omitirAlmuerzo,
             horaActual: ahora,
             tipo: input.tipo,
+            tipoContrato,
+            diaConfig,
         });
         const asistencia = await this.asistenciaRepository.create({
             empleadoId: input.empleadoId,
@@ -52,21 +132,104 @@ export class AsistenciaService {
             ubicacionLng: input.ubicacionLng,
         });
         let horasExtra;
+        // ── SALIDA ────────────────────────────────────────────────────────────────
+        if (proxima.tipo === 'SALIDA') {
+            // Overtime is NOT created automatically on SALIDA.
+            // Employees explicitly mark FIN_HORAS_EXTRA after the 30-min tolerance window.
+            await incrementarDiasLaborados(input.empleadoId, ahora);
+        }
+        // ── FIN_ALMUERZO (atraso) ────────────────────────────────────────────────
+        if (proxima.tipo === 'FIN_ALMUERZO') {
+            const inicioAlmMark = todayMarks.find((m) => m.tipo === 'INICIO_ALMUERZO');
+            if (inicioAlmMark && diaConfig?.inicioAlmuerzo && diaConfig?.finAlmuerzo) {
+                const salidaAlmTime = new Date(inicioAlmMark.fechaHora);
+                const actualDurationMinutes = (ahora.getTime() - salidaAlmTime.getTime()) / 60000;
+                const [ish, ism] = diaConfig.inicioAlmuerzo.split(':').map(Number);
+                const [fsh, fsm] = diaConfig.finAlmuerzo.split(':').map(Number);
+                const configuredDurationMinutes = (fsh * 60 + fsm) - (ish * 60 + ism);
+                if (actualDurationMinutes > (configuredDurationMinutes + 5)) {
+                    const lateMinutes = Math.round(actualDurationMinutes - configuredDurationMinutes);
+                    const halfHours = Math.round(lateMinutes / 30);
+                    const lateHours = Math.max(0.5, halfHours * 0.5);
+                    if (lateHours > 0) {
+                        const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
+                        const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
+                        const periodEnd = new Date(`${fechaFin}T00:00:00.000Z`);
+                        const defaultIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
+                        const defaultEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
+                        const existingNomina = await prisma.nominaRegistro.findFirst({
+                            where: { empleadoId: input.empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+                        });
+                        const egresosObj = existingNomina
+                            ? (typeof existingNomina.egresos === 'string' ? JSON.parse(existingNomina.egresos) : (existingNomina.egresos || {}))
+                            : defaultEgr;
+                        const permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? egresosObj.permisosDetalle : [];
+                        const newPermission = {
+                            id: `qr-almuerzo-atraso-${Date.now()}-${Math.random()}`,
+                            fecha: dateStr,
+                            horas: lateHours,
+                            motivo: `Atraso Regreso Almuerzo (${lateMinutes} min tarde)`,
+                            tipo: 'ATRASO_QR',
+                        };
+                        const updatedPermisos = [...permisosDetalle, newPermission];
+                        const newPermisoHoras = updatedPermisos.reduce((sum, item) => sum + Number(item.horas || 0), 0);
+                        await prisma.nominaRegistro.upsert({
+                            where: {
+                                empleadoId_fechaInicio_fechaFin: {
+                                    empleadoId: input.empleadoId,
+                                    fechaInicio: periodStart,
+                                    fechaFin: periodEnd,
+                                },
+                            },
+                            create: {
+                                empleadoId: input.empleadoId,
+                                fechaInicio: periodStart,
+                                fechaFin: periodEnd,
+                                diasLaborables: 15,
+                                diasLaborados: 0,
+                                permisoHoras: newPermisoHoras,
+                                ingresos: defaultIng,
+                                egresos: { ...defaultEgr, permisosDetalle: updatedPermisos },
+                                abonos: [],
+                                estado: 'PENDIENTE',
+                            },
+                            update: {
+                                permisoHoras: newPermisoHoras,
+                                egresos: { ...egresosObj, permisosDetalle: updatedPermisos },
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        // ── FIN_HORAS_EXTRA ──────────────────────────────────────────────────────
         if (proxima.tipo === 'FIN_HORAS_EXTRA') {
-            const { horas, detalleHorario } = calcularHorasExtrasDesdeSalida(todayMarks, ahora);
-            const valorPorHora = VALOR_HORA_EXTRA_DEFAULT;
-            const total = Math.round(horas * valorPorHora * 100) / 100;
+            if (!diaConfig?.salida) {
+                throw new Error('No se encontró la hora de salida configurada para calcular horas extras.');
+            }
+            // Get configurable rates (fall back to defaults if not set)
+            const horariosConfig = (await (await import('../../infrastructure/adapters/persistence/horarioLaboralStore.js')).loadHorariosLaborales());
+            const valorHoraExtra = Number(horariosConfig.valorHoraExtra ?? VALOR_HORA_EXTRA_DEFAULT);
+            const valorMediaHoraExtra = Number(horariosConfig.valorMediaHoraExtra ?? VALOR_MEDIA_HORA_EXTRA_DEFAULT);
+            // Calculate from scheduled exit (17:30), not from when SALIDA was stamped
+            const { horas: horasExactas, detalleHorario } = calcularHorasExtrasDesdeConfig(diaConfig, ahora, dateStr);
+            // Round to nearest half-hour for billing
+            const horasRedondeadas = redondearAMediaHora(horasExactas);
+            // Suggested billing value: half-hours × 1.5, full hours × (2.5 − 1.5) additional
+            // i.e. each 0.5h = valorMediaHoraExtra, each full hour adds another valorMediaHoraExtra
+            const medias = horasRedondeadas * 2; // number of 0.5-hour slots
+            const suggestedTotal = Math.round(medias * valorMediaHoraExtra * 100) / 100;
             const fechaDia = new Date(ahora);
             fechaDia.setHours(0, 0, 0, 0);
             const created = await prisma.horaExtra.create({
                 data: {
                     fecha: fechaDia,
                     colaboradorId: input.empleadoId,
-                    horas,
+                    horas: horasExactas, // exact minutes for reference
                     detalleHorario,
-                    descripcion: 'Horas extras registradas desde asistencia (pendiente validación)',
-                    valorPorHora,
-                    total,
+                    descripcion: `Horas extras — ${detalleHorario} (${horasRedondeadas}h facturado)`,
+                    valorPorHora: valorHoraExtra,
+                    total: suggestedTotal, // pre-filled; admin can edit before approving
                     estado: 'DEUDOR',
                     aprobacionEstado: 'PENDIENTE',
                     origen: 'ASISTENCIA',
@@ -76,19 +239,162 @@ export class AsistenciaService {
             horasExtra = {
                 id: created.id,
                 horas: Number(created.horas),
+                horasFacturadas: horasRedondeadas,
                 detalleHorario: created.detalleHorario,
                 valorPorHora: Number(created.valorPorHora),
+                valorMediaHora: valorMediaHoraExtra,
                 total: Number(created.total),
                 aprobacionEstado: created.aprobacionEstado,
             };
             void notifyHorasExtrasPendiente({
                 colaboradorNombre: empleado.nombre,
-                horas: Number(created.horas),
-                total: Number(created.total),
+                horas: horasExactas,
+                total: suggestedTotal,
                 fecha: fechaDia.toISOString().split('T')[0],
-                detalleHorario: created.detalleHorario,
+                detalleHorario,
                 createdBy: 'Quiosco de asistencia',
             });
+        }
+        // ── SALIDA_PERMISO ───────────────────────────────────────────────────────
+        if (proxima.tipo === 'SALIDA_PERMISO') {
+            const entradaMark = todayMarks.find((m) => m.tipo === 'ENTRADA');
+            if (entradaMark) {
+                const entradaTime = new Date(entradaMark.fechaHora).getTime();
+                const hoursWorked = Math.max(0, (ahora.getTime() - entradaTime) / 3600000);
+                // Determine the expected full-shift hours from diaConfig
+                // For Medio Día employees OR Sábado config: use entrance→exit minus optional lunch
+                let expectedShiftHours = 8; // default for full-time weekday
+                if (diaConfig?.entrada && diaConfig?.salida) {
+                    const [eh, em] = diaConfig.entrada.split(':').map(Number);
+                    const [sh, sm] = diaConfig.salida.split(':').map(Number);
+                    const rawMinutes = (sh * 60 + sm) - (eh * 60 + em);
+                    let lunchMinutes = 0;
+                    if (!diaConfig.almuerzoOpcional && diaConfig.inicioAlmuerzo && diaConfig.finAlmuerzo) {
+                        const [lih, lim] = diaConfig.inicioAlmuerzo.split(':').map(Number);
+                        const [lfh, lfm] = diaConfig.finAlmuerzo.split(':').map(Number);
+                        lunchMinutes = (lfh * 60 + lfm) - (lih * 60 + lim);
+                    }
+                    expectedShiftHours = Math.max(1, (rawMinutes - lunchMinutes) / 60);
+                }
+                else if (tipoContrato === 'Medio Día') {
+                    expectedShiftHours = 4;
+                }
+                const remainingHours = Math.round(Math.max(0, expectedShiftHours - hoursWorked) * 100) / 100;
+                console.log(`[QR-SP] SALIDA_PERMISO ${input.empleadoId} | tipo=${tipoContrato} | expected=${expectedShiftHours}h | worked=${hoursWorked.toFixed(2)}h | remaining=${remainingHours}h`);
+                // Si trabajó menos que su jornada completa → registrar descuento de horas
+                if (remainingHours > 0) {
+                    const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
+                    const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
+                    const periodEnd = new Date(`${fechaFin}T00:00:00.000Z`);
+                    const defaultIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
+                    const defaultEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
+                    const existing = await prisma.nominaRegistro.findFirst({
+                        where: { empleadoId: input.empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+                    });
+                    const egresosObj = existing
+                        ? (typeof existing.egresos === 'string' ? JSON.parse(existing.egresos) : (existing.egresos || {}))
+                        : defaultEgr;
+                    const permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? egresosObj.permisosDetalle : [];
+                    const newPermission = {
+                        id: `qr-permiso-${Date.now()}-${Math.random()}`,
+                        fecha: dateStr,
+                        horas: remainingHours,
+                        motivo: `Salida con permiso registrada por QR (Trabajó ${hoursWorked.toFixed(1)}h)`,
+                        tipo: 'PERMISO_SALIDA',
+                    };
+                    const updatedPermisos = [...permisosDetalle, newPermission];
+                    const newPermisoHoras = updatedPermisos.reduce((sum, item) => sum + Number(item.horas || 0), 0);
+                    if (existing) {
+                        await prisma.nominaRegistro.update({
+                            where: { id: existing.id },
+                            data: {
+                                diasLaborados: existing.diasLaborados + 1,
+                                permisoHoras: newPermisoHoras,
+                                egresos: { ...egresosObj, permisosDetalle: updatedPermisos },
+                            },
+                        });
+                        console.log(`[QR-SP] diasLaborados: ${existing.diasLaborados} → ${existing.diasLaborados + 1} | permisoHoras: ${newPermisoHoras}`);
+                    }
+                    else {
+                        await prisma.nominaRegistro.create({
+                            data: {
+                                empleadoId: input.empleadoId,
+                                fechaInicio: periodStart,
+                                fechaFin: periodEnd,
+                                diasLaborables: 15,
+                                diasLaborados: 1,
+                                permisoHoras: newPermisoHoras,
+                                ingresos: defaultIng,
+                                egresos: { ...defaultEgr, permisosDetalle: updatedPermisos },
+                                abonos: [],
+                                estado: 'PENDIENTE',
+                            },
+                        });
+                        console.log(`[QR-SP] Registro creado con diasLaborados: 1 | permisoHoras: ${newPermisoHoras}`);
+                    }
+                }
+                else {
+                    // Trabajó jornada completa → solo incrementar días
+                    await incrementarDiasLaborados(input.empleadoId, ahora);
+                }
+            }
+        }
+        // ── ENTRADA con atraso ───────────────────────────────────────────────────
+        if (proxima.tipo === 'ENTRADA') {
+            const lateHours = calculateLateHoursEcuador(ahora);
+            if (lateHours > 0) {
+                const locTime = new Date(ahora.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(11, 16);
+                const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
+                const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
+                const periodEnd = new Date(`${fechaFin}T00:00:00.000Z`);
+                const defaultIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
+                const defaultEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
+                const existing = await prisma.nominaRegistro.findFirst({
+                    where: { empleadoId: input.empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+                });
+                const egresosObj = existing
+                    ? (typeof existing.egresos === 'string' ? JSON.parse(existing.egresos) : (existing.egresos || {}))
+                    : defaultEgr;
+                const permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? egresosObj.permisosDetalle : [];
+                // Avoid duplicate late entry for the same day
+                const hasAtrasoToday = permisosDetalle.some((p) => p.fecha === dateStr && p.tipo === 'ATRASO_QR');
+                if (!hasAtrasoToday) {
+                    const newPermission = {
+                        id: `qr-atraso-${Date.now()}-${Math.random()}`,
+                        fecha: dateStr,
+                        horas: lateHours,
+                        motivo: `Atraso QR (${locTime})`,
+                        tipo: 'ATRASO_QR',
+                    };
+                    const updatedPermisos = [...permisosDetalle, newPermission];
+                    const newPermisoHoras = updatedPermisos.reduce((sum, item) => sum + Number(item.horas || 0), 0);
+                    await prisma.nominaRegistro.upsert({
+                        where: {
+                            empleadoId_fechaInicio_fechaFin: {
+                                empleadoId: input.empleadoId,
+                                fechaInicio: periodStart,
+                                fechaFin: periodEnd,
+                            },
+                        },
+                        create: {
+                            empleadoId: input.empleadoId,
+                            fechaInicio: periodStart,
+                            fechaFin: periodEnd,
+                            diasLaborables: 15,
+                            diasLaborados: 0,
+                            permisoHoras: newPermisoHoras,
+                            ingresos: defaultIng,
+                            egresos: { ...defaultEgr, permisosDetalle: updatedPermisos },
+                            abonos: [],
+                            estado: 'PENDIENTE',
+                        },
+                        update: {
+                            permisoHoras: newPermisoHoras,
+                            egresos: { ...egresosObj, permisosDetalle: updatedPermisos },
+                        },
+                    });
+                }
+            }
         }
         const result = new Asistencia({
             ...asistencia.toJSON(),
@@ -107,20 +413,14 @@ export class AsistenciaService {
         if (!empleado) {
             throw new Error(`Empleado con ID '${input.empleadoId}' no encontrado.`);
         }
-        const targetDate = new Date(input.fecha + 'T00:00:00');
-        const start = new Date(targetDate);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(targetDate);
-        end.setHours(23, 59, 59, 999);
+        const start = new Date(`${input.fecha}T00:00:00.000-05:00`);
+        const end = new Date(`${input.fecha}T23:59:59.999-05:00`);
         // Solo verificamos si ya existe un registro de tipo PERMISO para evitar duplicados
         const existingPermiso = await prisma.asistencia.findFirst({
             where: {
                 empleadoId: input.empleadoId,
                 tipo: 'PERMISO',
-                fechaHora: {
-                    gte: start,
-                    lte: end,
-                },
+                fechaHora: { gte: start, lte: end },
             },
         });
         if (existingPermiso) {
@@ -140,19 +440,13 @@ export class AsistenciaService {
         });
     }
     async eliminarPermiso(input) {
-        const targetDate = new Date(input.fecha + 'T00:00:00');
-        const start = new Date(targetDate);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(targetDate);
-        end.setHours(23, 59, 59, 999);
+        const start = new Date(`${input.fecha}T00:00:00.000-05:00`);
+        const end = new Date(`${input.fecha}T23:59:59.999-05:00`);
         await prisma.asistencia.deleteMany({
             where: {
                 empleadoId: input.empleadoId,
                 tipo: 'PERMISO',
-                fechaHora: {
-                    gte: start,
-                    lte: end,
-                },
+                fechaHora: { gte: start, lte: end },
             },
         });
     }

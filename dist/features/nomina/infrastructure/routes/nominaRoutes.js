@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
+import { createUploadMiddleware } from '../../../../shared/middleware/uploadMiddleware.js';
+const comprobanteUpload = createUploadMiddleware('comprobantes');
 export function createNominaRoutes(controller) {
     const router = Router();
     router.get('/horas-extras', authMiddleware, (req, res) => controller.getOvertime(req, res));
@@ -24,5 +26,8 @@ export function createNominaRoutes(controller) {
     router.post('/ingresos', authMiddleware, (req, res) => controller.createDetailedIngreso(req, res));
     router.delete('/ingresos/:id', authMiddleware, (req, res) => controller.deleteDetailedIngreso(req, res));
     router.get('/exportar', authMiddleware, (req, res) => controller.exportToExcel(req, res));
+    // Comprobantes de pago (upload/delete)
+    router.post('/comprobantes/upload', authMiddleware, comprobanteUpload.single('comprobante'), (req, res) => controller.uploadComprobante(req, res));
+    router.delete('/comprobantes/:filename', authMiddleware, (req, res) => controller.deleteComprobante(req, res));
     return router;
 }

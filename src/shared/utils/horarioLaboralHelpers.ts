@@ -11,6 +11,12 @@ export type HorarioDiaConfig = {
 export type HorariosLaboralesConfig = {
   semana: HorarioDiaConfig;
   sabado: HorarioDiaConfig;
+  /** Minutos de tolerancia antes de aplicar multa (aplica a entrada y regreso almuerzo) */
+  toleranciaMinutos: number;
+  /** Valor por hora extra completa (default $2.50) */
+  valorHoraExtra: number;
+  /** Valor por media hora extra (default $1.50) */
+  valorMediaHoraExtra: number;
 };
 
 export type TimeSlot = { hour: number; minute: number; label: string };
@@ -40,6 +46,9 @@ export const DEFAULT_HORARIOS_LABORALES: HorariosLaboralesConfig = {
     almuerzoOpcional: true,
     nota: 'almuerzo opcional',
   },
+  toleranciaMinutos: 8,
+  valorHoraExtra: 2.5,
+  valorMediaHoraExtra: 1.5,
 };
 
 const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
@@ -73,10 +82,52 @@ function normalizeDia(raw: unknown, fallback: HorarioDiaConfig): HorarioDiaConfi
 export function normalizeHorariosLaborales(raw: unknown): HorariosLaboralesConfig {
   if (!raw || typeof raw !== 'object') return DEFAULT_HORARIOS_LABORALES;
   const src = raw as Record<string, unknown>;
+  const rawTol = src.toleranciaMinutos;
+  const toleranciaMinutos =
+    rawTol !== undefined && rawTol !== null && !Number.isNaN(Number(rawTol))
+      ? Math.max(0, Math.round(Number(rawTol)))
+      : DEFAULT_HORARIOS_LABORALES.toleranciaMinutos;
+
+  const rawHE = src.valorHoraExtra;
+  const valorHoraExtra =
+    rawHE !== undefined && rawHE !== null && !Number.isNaN(Number(rawHE))
+      ? Math.max(0, Number(rawHE))
+      : DEFAULT_HORARIOS_LABORALES.valorHoraExtra;
+
+  const rawMHE = src.valorMediaHoraExtra;
+  const valorMediaHoraExtra =
+    rawMHE !== undefined && rawMHE !== null && !Number.isNaN(Number(rawMHE))
+      ? Math.max(0, Number(rawMHE))
+      : DEFAULT_HORARIOS_LABORALES.valorMediaHoraExtra;
+
   return {
     semana: normalizeDia(src.semana, DEFAULT_HORARIOS_LABORALES.semana),
     sabado: normalizeDia(src.sabado, DEFAULT_HORARIOS_LABORALES.sabado),
+    toleranciaMinutos,
+    valorHoraExtra,
+    valorMediaHoraExtra,
   };
+}
+
+/**
+ * Calcula el valor de multa en dólares según los minutos de atraso y la tolerancia configurada.
+ * Aplica tanto para la entrada como para el regreso de almuerzo.
+ *
+ * Tramos (sobre el tiempo de tolerancia):
+ *   0 – tolerancia          → $0.00 (sin multa)
+ *   1 – 8 sobre tolerancia  → $2.00
+ *   9 – 16 sobre tolerancia → $3.00
+ *   ≥ 17 sobre tolerancia   → $4.00
+ */
+export function calcularMultaAtraso(
+  minutosAtraso: number,
+  toleranciaMinutos: number = DEFAULT_HORARIOS_LABORALES.toleranciaMinutos,
+): number {
+  if (minutosAtraso <= toleranciaMinutos) return 0;
+  const sobre = minutosAtraso - toleranciaMinutos;
+  if (sobre <= 8) return 2.0;
+  if (sobre <= 16) return 3.0;
+  return 4.0;
 }
 
 export function isSabado(dateStr: string): boolean {

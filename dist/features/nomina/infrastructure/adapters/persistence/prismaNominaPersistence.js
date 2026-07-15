@@ -246,8 +246,8 @@ export class PrismaNominaPersistence {
                     empleadoId: empleado.id,
                     fechaInicio: inicio,
                     fechaFin: fin,
-                    diasLaborables: diffDias,
-                    diasLaborados: diffDias,
+                    diasLaborables: diffDias, // días teóricos del contrato (no tocar)
+                    diasLaborados: 0, // días reales trabajados — el QR lo incrementa
                     ingresos: defaultIngresos(),
                     egresos: defaultEgresos(),
                     abonos: [],

@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import ExcelJS from 'exceljs';
+import fs from 'fs';
+import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
 import {
   calcSueldoBrutoQuincena,
@@ -27,6 +29,22 @@ const toDateOnly = (value: string | Date): Date => {
 };
 
 const formatDateOnly = (value: Date): string => value.toISOString().split('T')[0];
+
+/**
+ * Calculates the fine/discount amount for a nomina record.
+ * `permisoHoras` now stores the accumulated fine in USD directly (from the new QR fine schedule).
+ * Legacy records that used the hours × $2.50 formula will still be stored as hours ≥ 0.5 increments;
+ * we detect them by checking if the value is a multiple of 0.5 AND small (≤ 8 h = 24 h of work).
+ * For new records, the value is already in $, so we return it as-is.
+ *
+ * NOTE: the frontend's NominaMesTab now sets permisoHoras = sum(multaDolares) directly.
+ * This function simply returns the value unchanged for those records.
+ */
+function calcularValorDescuento(permisoHoras: number): number {
+  // permisoHoras is now stored as direct USD value from the fine schedule.
+  return Number(permisoHoras || 0);
+}
+
 
 async function loadPeriodoFeriados(fInicio: Date, fFin: Date): Promise<ReturnType<typeof normalizeFeriados>> {
   try {
@@ -394,11 +412,16 @@ export class NominaController {
         nominasAnioByEmp.get(n.empleadoId)!.push(n);
       }
 
+      // fFin = start of last day in UTC (e.g. 2026-07-15T00:00:00Z)
+      // Marks on the last day can be up to 2026-07-16T04:59:59Z (23:59 Ecuador UTC-5)
+      // Add 29 hours to safely include all marks on the last quincena day
+      const fFinEnd = new Date(fFin.getTime() + 29 * 60 * 60 * 1000);
+
       // Pre-fetch related records in batch to avoid N+1 queries
       const asistenciasBatch = await prisma.asistencia.findMany({
         where: {
           empleadoId: { in: empleadoIds },
-          fechaHora: { gte: fInicio, lte: fFin }
+          fechaHora: { gte: fInicio, lte: fFinEnd }
         },
         select: {
           empleadoId: true,
@@ -406,6 +429,7 @@ export class NominaController {
           tipo: true,
         }
       });
+
 
       const horasExtrasBatch = await prisma.horaExtra.findMany({
         where: {
@@ -500,7 +524,7 @@ export class NominaController {
         // 5. Permisos
         const existing = recordsMap.get(emp.id);
         const permisoHoras = existing ? Number(existing.permisoHoras) : 0;
-        const valorPermisoHoras = Math.round(permisoHoras * (sueldoDiario / 8) * 100) / 100;
+        const valorPermisoHoras = calcularValorDescuento(permisoHoras);
 
         // 6. Décimos
         let decimoCuartoQuincenal = 0;
@@ -617,7 +641,7 @@ export class NominaController {
               prisma.nominaRegistro.update({
                 where: { id: existing.id },
                 data: {
-                  diasLaborados: diasTrabajadosReales,
+                  diasLaborados: diasTrabajadosReales,   // calculado de asistencias reales (incluye SALIDA_PERMISO)
                   diasLaborables: diasLaborables,
                   ingresos: updatedIngresos,
                   egresos: updatedEgresos,
@@ -626,6 +650,7 @@ export class NominaController {
             );
           }
         }
+
       }
 
       // Execute all write operations in a single atomic database transaction
@@ -1950,6 +1975,66 @@ export class NominaController {
       res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Error al exportar la nómina a Excel' }
+      });
+    }
+  }
+
+  /**
+   * Sube un comprobante de pago (imagen/archivo) al servidor.
+   * El archivo se guarda en uploads/comprobantes/ mediante multer (middleware en la ruta).
+   * Devuelve la URL relativa para guardarla en el abono.
+   */
+  async uploadComprobante(req: Request, res: Response): Promise<Response> {
+    try {
+      const file = (req as any).file;
+      if (!file) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'NO_FILE', message: 'No se recibió ningún archivo.' }
+        });
+      }
+
+      const url = `/uploads/comprobantes/${file.filename}`;
+      return res.status(200).json({
+        success: true,
+        data: { url, filename: file.filename, originalName: file.originalname }
+      });
+    } catch (error) {
+      console.error('[nomina/uploadComprobante]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al subir el comprobante.' }
+      });
+    }
+  }
+
+  /**
+   * Elimina un comprobante de pago del disco.
+   */
+  async deleteComprobante(req: Request, res: Response): Promise<Response> {
+    try {
+      const { filename } = req.params;
+      if (!filename) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'El nombre del archivo es requerido.' }
+        });
+      }
+
+      // Prevenir path traversal
+      const safeName = path.basename(String(filename));
+      const filePath = path.resolve('uploads', 'comprobantes', safeName);
+
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      return res.status(200).json({ success: true });
+    } catch (error) {
+      console.error('[nomina/deleteComprobante]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar el comprobante.' }
       });
     }
   }

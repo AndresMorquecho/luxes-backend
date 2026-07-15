@@ -349,7 +349,16 @@ export class VehiculosController {
                 return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Vehículo no encontrado' } });
             }
             const usuarioId = req.user?.id || null;
-            const usuarioNom = req.user?.nombre || 'Operador Taller';
+            // Look up real user name from DB since JWT doesn't include nombre
+            let usuarioNom = 'Usuario';
+            if (usuarioId) {
+                const userRecord = await prisma.user.findUnique({
+                    where: { id: String(usuarioId) },
+                    select: { nombre: true },
+                });
+                if (userRecord?.nombre)
+                    usuarioNom = userRecord.nombre;
+            }
             const control = await prisma.vehiculoControl.create({
                 data: {
                     vehiculoId: String(vehiculoId),

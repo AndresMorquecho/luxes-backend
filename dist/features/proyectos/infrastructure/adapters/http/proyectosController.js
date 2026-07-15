@@ -267,6 +267,7 @@ function mapProyecto(p) {
         descripcion: p.descripcion,
         etiquetas: p.etiquetas ? p.etiquetas.split(',').map((t) => t.trim()).filter(Boolean) : [],
         notas: p.notas,
+        medio: p.medio,
         fases: (p.fases || []).reduce((acc, f) => {
             let datos = f.datos ? JSON.parse(f.datos) : {};
             if (f.fase === 'INSTALACION' &&
@@ -433,7 +434,7 @@ export class ProyectosController {
                 data: {
                     id,
                     nombre: b.nombre || '',
-                    clienteId: b.clienteId || null,
+                    cliente: b.clienteId ? { connect: { id: b.clienteId } } : undefined,
                     clienteNombre: b.cliente?.nombre || b.clienteNombre || '',
                     clienteEmpresa: b.cliente?.empresa || b.clienteEmpresa || '',
                     clienteTelefono: b.cliente?.telefono || b.clienteTelefono || '',
@@ -451,6 +452,7 @@ export class ProyectosController {
                     descripcion: b.descripcion || '',
                     etiquetas: Array.isArray(b.etiquetas) ? b.etiquetas.join(',') : (b.etiquetas || ''),
                     notas: b.notas || '',
+                    medio: b.medio || 'LUXES',
                 },
                 include: proyectoInclude,
             });
@@ -501,8 +503,11 @@ export class ProyectosController {
             const updateData = {};
             if (b.nombre !== undefined)
                 updateData.nombre = b.nombre;
-            if (b.clienteId !== undefined)
-                updateData.clienteId = b.clienteId || null;
+            if (b.clienteId !== undefined) {
+                updateData.cliente = b.clienteId
+                    ? { connect: { id: b.clienteId } }
+                    : { disconnect: true };
+            }
             if (b.cliente?.nombre !== undefined || b.clienteNombre !== undefined) {
                 updateData.clienteNombre = b.cliente?.nombre || b.clienteNombre || '';
             }
@@ -550,6 +555,8 @@ export class ProyectosController {
             }
             if (b.notas !== undefined)
                 updateData.notas = b.notas;
+            if (b.medio !== undefined)
+                updateData.medio = b.medio;
             // Sincronizar gastos manuales del proyecto si vienen en el body
             if (b.gastos !== undefined && Array.isArray(b.gastos)) {
                 try {
@@ -1322,6 +1329,164 @@ export class ProyectosController {
                 success: false,
                 error: { code: 'INTERNAL_ERROR', message: 'Error al guardar encuesta' },
             });
+        }
+    }
+    async getProjectStats(req, res) {
+        try {
+            const { desde, hasta } = req.query;
+            let dateFilter = {};
+            if (desde)
+                dateFilter.gte = new Date(String(desde));
+            if (hasta)
+                dateFilter.lte = new Date(String(hasta));
+            const hasDateFilter = desde || hasta;
+            // 1. Proyectos completados (Tiempos de entrega)
+            const completedWhere = { estado: 'COMPLETADO' };
+            if (hasDateFilter)
+                completedWhere.fechaCompletado = dateFilter;
+            const completedProjects = await prisma.proyecto.findMany({
+                where: completedWhere,
+                select: {
+                    id: true,
+                    nombre: true,
+                    fechaCreacion: true,
+                    fechaEntregaEstimada: true,
+                    fechaCompletado: true,
+                    montoEstimado: true,
+                }
+            });
+            let completadosATiempo = 0;
+            let completadosTarde = 0;
+            for (const p of completedProjects) {
+                if (!p.fechaEntregaEstimada || !p.fechaCompletado) {
+                    completadosATiempo++;
+                }
+                else {
+                    const entrega = new Date(p.fechaEntregaEstimada);
+                    const completado = new Date(p.fechaCompletado);
+                    if (completado <= entrega) {
+                        completadosATiempo++;
+                    }
+                    else {
+                        completadosTarde++;
+                    }
+                }
+            }
+            // 2. Trabajos pendientes (Carga de trabajo activa)
+            const activeWhere = {
+                NOT: { estado: { in: ['COMPLETADO', 'CANCELADO'] } }
+            };
+            if (hasDateFilter)
+                activeWhere.fechaCreacion = dateFilter;
+            const activeProjects = await prisma.proyecto.findMany({
+                where: activeWhere,
+                select: {
+                    id: true,
+                    nombre: true,
+                    faseActual: true,
+                    fechaEntregaEstimada: true,
+                }
+            });
+            const faseCounts = {
+                COTIZACION: 0,
+                'DISEÑO': 0,
+                PRODUCCION: 0,
+                INSTALACION: 0,
+                ENTREGA: 0,
+            };
+            let pendientesVencidos = 0;
+            const now = new Date();
+            for (const p of activeProjects) {
+                if (faseCounts[p.faseActual] !== undefined) {
+                    faseCounts[p.faseActual]++;
+                }
+                else {
+                    faseCounts[p.faseActual] = 1;
+                }
+                if (p.fechaEntregaEstimada) {
+                    const entrega = new Date(p.fechaEntregaEstimada);
+                    if (entrega < now) {
+                        pendientesVencidos++;
+                    }
+                }
+            }
+            // 3. Encuestas de satisfacción
+            const phasesWithSurvey = await prisma.proyectoFase.findMany({
+                where: {
+                    fase: { in: ['INSTALACION', 'COMPLETADO'] },
+                    datos: { contains: 'encuestaSatisfaccion' }
+                },
+                include: {
+                    proyecto: {
+                        select: {
+                            id: true,
+                            nombre: true,
+                            fechaCreacion: true,
+                        }
+                    }
+                }
+            });
+            let totalEncuestas = 0;
+            let satisfechos = 0;
+            let neutros = 0;
+            let inconformes = 0;
+            let sumaCalificacion = 0;
+            for (const f of phasesWithSurvey) {
+                try {
+                    const json = JSON.parse(f.datos);
+                    const encuesta = json.encuestaSatisfaccion;
+                    if (encuesta && encuesta.completada) {
+                        const fechaSurvey = encuesta.fechaRespuesta ? new Date(encuesta.fechaRespuesta) : null;
+                        // Si hay filtro de fecha, validar contra la fecha de respuesta de la encuesta
+                        if (hasDateFilter && fechaSurvey) {
+                            if (desde && fechaSurvey < new Date(String(desde)))
+                                continue;
+                            if (hasta && fechaSurvey > new Date(String(hasta)))
+                                continue;
+                        }
+                        totalEncuestas++;
+                        const rating = Number(encuesta.calificacionGeneral);
+                        sumaCalificacion += rating;
+                        if (rating >= 4) {
+                            satisfechos++;
+                        }
+                        else if (rating === 3) {
+                            neutros++;
+                        }
+                        else {
+                            inconformes++;
+                        }
+                    }
+                }
+                catch { }
+            }
+            const promedioCalificacion = totalEncuestas > 0 ? (sumaCalificacion / totalEncuestas) : 0;
+            return res.status(200).json({
+                success: true,
+                data: {
+                    tiemposEntrega: {
+                        totalCompletados: completedProjects.length,
+                        completadosATiempo,
+                        completadosTarde,
+                    },
+                    trabajosPendientes: {
+                        totalPendientes: activeProjects.length,
+                        pendientesVencidos,
+                        porFase: faseCounts,
+                    },
+                    satisfaccionCliente: {
+                        totalEncuestas,
+                        satisfechos,
+                        neutros,
+                        inconformes,
+                        promedioCalificacion: Number(promedioCalificacion.toFixed(2)),
+                    }
+                }
+            });
+        }
+        catch (error) {
+            console.error('[proyectos/reportes/stats]', error);
+            return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener estadísticas de proyectos' } });
         }
     }
 }

@@ -12,8 +12,9 @@ export class AsistenciaController {
 
   async list(req: Request, res: Response): Promise<Response> {
     try {
-      const desde = String(req.query.desde ?? new Date().toISOString().split('T')[0]);
-      const hasta = String(req.query.hasta ?? new Date().toISOString().split('T')[0]);
+      const getTodayEcuador = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const desde = String(req.query.desde ?? getTodayEcuador());
+      const hasta = String(req.query.hasta ?? getTodayEcuador());
 
       const asistencias = await this.asistenciaService.listAsistencias(desde, hasta);
       return res.status(200).json({
@@ -142,7 +143,8 @@ export class AsistenciaController {
 
   async getHorarioDelDia(req: Request, res: Response): Promise<Response> {
     try {
-      const fecha = String(req.query.fecha ?? new Date().toISOString().split('T')[0]);
+      const getTodayEcuador = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const fecha = String(req.query.fecha ?? getTodayEcuador());
       const data = await getHorarioDelDia(fecha);
       return res.status(200).json({ success: true, data });
     } catch (error) {

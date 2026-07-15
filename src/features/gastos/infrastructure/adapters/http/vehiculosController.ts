@@ -391,7 +391,15 @@ export class VehiculosController {
       }
 
       const usuarioId = (req as any).user?.id || null;
-      const usuarioNom = (req as any).user?.nombre || 'Operador Taller';
+      // Look up real user name from DB since JWT doesn't include nombre
+      let usuarioNom = 'Usuario';
+      if (usuarioId) {
+        const userRecord = await prisma.user.findUnique({
+          where: { id: String(usuarioId) },
+          select: { nombre: true },
+        });
+        if (userRecord?.nombre) usuarioNom = userRecord.nombre;
+      }
 
       const control = await prisma.vehiculoControl.create({
         data: {

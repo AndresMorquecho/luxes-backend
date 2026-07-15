@@ -719,6 +719,7 @@ model Proyecto {
   descripcion            String            @default("")
   etiquetas              String            @default("") // JSON array de strings o separadas por coma
   notas                  String            @default("")
+  medio                  String            @default("LUXES")
   
   // Relaciones
   fases                  ProyectoFase[]
