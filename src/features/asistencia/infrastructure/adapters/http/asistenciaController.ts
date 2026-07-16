@@ -5,7 +5,9 @@ import {
   loadHorariosLaborales,
   saveHorariosLaborales,
 } from '../persistence/horarioLaboralStore.js';
+import { PrismaClient } from '@prisma/client';
 
+const prisma = new PrismaClient();
 
 export class AsistenciaController {
   constructor(private readonly asistenciaService: AsistenciaService) {}

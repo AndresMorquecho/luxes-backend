@@ -108,17 +108,20 @@ export class AsistenciaService {
             throw new Error(`Empleado con ID '${input.empleadoId}' no encontrado en el sistema.`);
         }
         const tipoContrato = empleado.tipoContrato || 'Tiempo Completo';
-        const nowEcuador = new Date(Date.now() - 5 * 60 * 60 * 1000);
-        const dateStr = nowEcuador.toISOString().split('T')[0];
+        // ── Tiempo canónico ──────────────────────────────────────────────────────
+        // ahora  = UTC real (para guardar en DB)
+        // ahoraEC = Ecuador (UTC-5) para cálculos de hora local y dateStr
+        const ahora = new Date();
+        const ahoraEC = new Date(ahora.getTime() - 5 * 60 * 60 * 1000);
+        const dateStr = ahoraEC.toISOString().split('T')[0]; // 'YYYY-MM-DD' en hora Ecuador
         const { diaConfig } = await getHorarioDelDia(dateStr);
         const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(input.empleadoId);
         if (!puedeRegistrarMarcacion(todayMarks, tipoContrato, diaConfig)) {
             throw new Error(`El colaborador ${empleado.nombre} ya completó las marcaciones del día.`);
         }
-        const ahora = new Date();
         const proxima = resolveTipoRegistro(todayMarks, {
             omitirAlmuerzo: input.omitirAlmuerzo,
-            horaActual: ahora,
+            horaActual: ahoraEC, // usa la hora EC (posiblemente simulada) para resolver el paso correcto
             tipo: input.tipo,
             tipoContrato,
             diaConfig,
@@ -147,32 +150,46 @@ export class AsistenciaService {
                 const [ish, ism] = diaConfig.inicioAlmuerzo.split(':').map(Number);
                 const [fsh, fsm] = diaConfig.finAlmuerzo.split(':').map(Number);
                 const configuredDurationMinutes = (fsh * 60 + fsm) - (ish * 60 + ism);
-                if (actualDurationMinutes > (configuredDurationMinutes + 5)) {
-                    const lateMinutes = Math.round(actualDurationMinutes - configuredDurationMinutes);
-                    const halfHours = Math.round(lateMinutes / 30);
-                    const lateHours = Math.max(0.5, halfHours * 0.5);
-                    if (lateHours > 0) {
-                        const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
-                        const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
-                        const periodEnd = new Date(`${fechaFin}T00:00:00.000Z`);
-                        const defaultIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
-                        const defaultEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
-                        const existingNomina = await prisma.nominaRegistro.findFirst({
-                            where: { empleadoId: input.empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
-                        });
-                        const egresosObj = existingNomina
-                            ? (typeof existingNomina.egresos === 'string' ? JSON.parse(existingNomina.egresos) : (existingNomina.egresos || {}))
-                            : defaultEgr;
-                        const permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? egresosObj.permisosDetalle : [];
+                // Minutes the employee overstayed in lunch
+                const lateMinutesAlm = Math.round(actualDurationMinutes - configuredDurationMinutes);
+                // Load tolerance from config
+                const horariosConfigAlm = (await (await import('../../infrastructure/adapters/persistence/horarioLaboralStore.js')).loadHorariosLaborales());
+                const toleranciaAlm = Number(horariosConfigAlm.toleranciaMinutos ?? 8);
+                // Apply bracket system — same as entry fines
+                const { calcularMultaAtraso: calcMultaAlm } = await import('../../../../shared/utils/horarioLaboralHelpers.js');
+                const multaDolaresAlm = calcMultaAlm(lateMinutesAlm, toleranciaAlm);
+                console.log(`[QR-ALM] ${input.empleadoId} | duracion=${actualDurationMinutes.toFixed(1)}min (config=${configuredDurationMinutes}) | tarde=${lateMinutesAlm}min | tol=${toleranciaAlm} | multa=$${multaDolaresAlm}`);
+                if (multaDolaresAlm > 0) {
+                    const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
+                    const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
+                    const periodEnd = new Date(`${fechaFin}T00:00:00.000Z`);
+                    const defaultIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
+                    const defaultEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
+                    const existingNomina = await prisma.nominaRegistro.findFirst({
+                        where: { empleadoId: input.empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+                    });
+                    const egresosObj = existingNomina
+                        ? (typeof existingNomina.egresos === 'string' ? JSON.parse(existingNomina.egresos) : (existingNomina.egresos || {}))
+                        : defaultEgr;
+                    const permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? egresosObj.permisosDetalle : [];
+                    // Avoid duplicates for this day
+                    const hasAlmAtrasoToday = permisosDetalle.some((p) => p.fecha === dateStr && p.tipo === 'ATRASO_QR_ALMUERZO');
+                    if (!hasAlmAtrasoToday) {
+                        const horaMarcacion = new Date(ahora.getTime() - 5 * 3600000).toISOString().slice(11, 16);
                         const newPermission = {
-                            id: `qr-almuerzo-atraso-${Date.now()}-${Math.random()}`,
+                            id: `qr-alm-${Date.now()}-${Math.random()}`,
                             fecha: dateStr,
-                            horas: lateHours,
-                            motivo: `Atraso Regreso Almuerzo (${lateMinutes} min tarde)`,
-                            tipo: 'ATRASO_QR',
+                            horaMarcacion,
+                            horas: multaDolaresAlm,
+                            multaDolares: multaDolaresAlm,
+                            atrasoMinutos: lateMinutesAlm,
+                            motivo: `Atraso reg. almuerzo QR ${horaMarcacion} (+${lateMinutesAlm} min)`,
+                            tipo: 'ATRASO_QR_ALMUERZO',
                         };
                         const updatedPermisos = [...permisosDetalle, newPermission];
-                        const newPermisoHoras = updatedPermisos.reduce((sum, item) => sum + Number(item.horas || 0), 0);
+                        const newPermisoHoras = updatedPermisos
+                            .filter((r) => !r.eliminado)
+                            .reduce((sum, item) => sum + Number(item.multaDolares ?? item.horas ?? 0), 0);
                         await prisma.nominaRegistro.upsert({
                             where: {
                                 empleadoId_fechaInicio_fechaFin: {
@@ -198,6 +215,7 @@ export class AsistenciaService {
                                 egresos: { ...egresosObj, permisosDetalle: updatedPermisos },
                             },
                         });
+                        console.log(`[QR-ALM] multa registrada: $${multaDolaresAlm} | permisoHoras=${newPermisoHoras}`);
                     }
                 }
             }
@@ -341,59 +359,90 @@ export class AsistenciaService {
         }
         // ── ENTRADA con atraso ───────────────────────────────────────────────────
         if (proxima.tipo === 'ENTRADA') {
-            const lateHours = calculateLateHoursEcuador(ahora);
-            if (lateHours > 0) {
-                const locTime = new Date(ahora.getTime() - 5 * 60 * 60 * 1000).toISOString().slice(11, 16);
+            // Load config for tolerance and bracket calculation
+            const horariosConfigEnt = (await (await import('../../infrastructure/adapters/persistence/horarioLaboralStore.js')).loadHorariosLaborales());
+            const toleranciaEnt = Number(horariosConfigEnt.toleranciaMinutos ?? 8);
+            const { calcularMultaAtraso: calcMultaEnt } = await import('../../../../shared/utils/horarioLaboralHelpers.js');
+            // Calculate minutes late from the configured entrada time
+            const entradaHora = diaConfig?.entrada ?? '08:00';
+            const [eh, em] = entradaHora.split(':').map(Number);
+            const minutosActual = ahoraEC.getUTCHours() * 60 + ahoraEC.getUTCMinutes();
+            const minutosEntrada = eh * 60 + em;
+            const atrasoMinutosEnt = Math.max(0, minutosActual - minutosEntrada);
+            const horaMarcacion = `${String(ahoraEC.getUTCHours()).padStart(2, '0')}:${String(ahoraEC.getUTCMinutes()).padStart(2, '0')}`;
+            // Apply bracket system — respects toleranciaMinutos
+            const multaDolaresEnt = calcMultaEnt(atrasoMinutosEnt, toleranciaEnt);
+            console.log(`[QR-ENT] ${input.empleadoId} | hora=${horaMarcacion} | atraso=${atrasoMinutosEnt}min | tol=${toleranciaEnt} | multa=$${multaDolaresEnt}`);
+            if (multaDolaresEnt > 0) {
                 const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
                 const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
                 const periodEnd = new Date(`${fechaFin}T00:00:00.000Z`);
                 const defaultIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
                 const defaultEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
+                // ── Buscar el NominaRegistro de la quincena usando rango de fechas (robusto a timezone) ──
                 const existing = await prisma.nominaRegistro.findFirst({
-                    where: { empleadoId: input.empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+                    where: {
+                        empleadoId: input.empleadoId,
+                        fechaInicio: { lte: periodEnd },
+                        fechaFin: { gte: periodStart },
+                    },
                 });
                 const egresosObj = existing
                     ? (typeof existing.egresos === 'string' ? JSON.parse(existing.egresos) : (existing.egresos || {}))
                     : defaultEgr;
                 const permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? egresosObj.permisosDetalle : [];
-                // Avoid duplicate late entry for the same day
+                // Evitar duplicado del mismo día
                 const hasAtrasoToday = permisosDetalle.some((p) => p.fecha === dateStr && p.tipo === 'ATRASO_QR');
                 if (!hasAtrasoToday) {
                     const newPermission = {
                         id: `qr-atraso-${Date.now()}-${Math.random()}`,
                         fecha: dateStr,
-                        horas: lateHours,
-                        motivo: `Atraso QR (${locTime})`,
+                        horaMarcacion,
+                        horas: multaDolaresEnt,
+                        multaDolares: multaDolaresEnt,
+                        atrasoMinutos: atrasoMinutosEnt,
+                        motivo: `Atraso entrada QR ${horaMarcacion} (+${atrasoMinutosEnt} min)`,
                         tipo: 'ATRASO_QR',
                     };
                     const updatedPermisos = [...permisosDetalle, newPermission];
-                    const newPermisoHoras = updatedPermisos.reduce((sum, item) => sum + Number(item.horas || 0), 0);
-                    await prisma.nominaRegistro.upsert({
-                        where: {
-                            empleadoId_fechaInicio_fechaFin: {
+                    const newPermisoHoras = updatedPermisos
+                        .filter((r) => !r.eliminado)
+                        .reduce((sum, item) => sum + Number(item.multaDolares ?? item.horas ?? 0), 0);
+                    if (existing) {
+                        // Actualizar por id — nunca falla por timezone
+                        await prisma.nominaRegistro.update({
+                            where: { id: existing.id },
+                            data: {
+                                permisoHoras: newPermisoHoras,
+                                egresos: { ...egresosObj, permisosDetalle: updatedPermisos },
+                            },
+                        });
+                    }
+                    else {
+                        // No existe aún — crear con la fecha correcta de la quincena
+                        await prisma.nominaRegistro.create({
+                            data: {
                                 empleadoId: input.empleadoId,
                                 fechaInicio: periodStart,
                                 fechaFin: periodEnd,
+                                diasLaborables: 15,
+                                diasLaborados: 0,
+                                permisoHoras: newPermisoHoras,
+                                ingresos: defaultIng,
+                                egresos: { ...defaultEgr, permisosDetalle: updatedPermisos },
+                                abonos: [],
+                                estado: 'PENDIENTE',
                             },
-                        },
-                        create: {
-                            empleadoId: input.empleadoId,
-                            fechaInicio: periodStart,
-                            fechaFin: periodEnd,
-                            diasLaborables: 15,
-                            diasLaborados: 0,
-                            permisoHoras: newPermisoHoras,
-                            ingresos: defaultIng,
-                            egresos: { ...defaultEgr, permisosDetalle: updatedPermisos },
-                            abonos: [],
-                            estado: 'PENDIENTE',
-                        },
-                        update: {
-                            permisoHoras: newPermisoHoras,
-                            egresos: { ...egresosObj, permisosDetalle: updatedPermisos },
-                        },
-                    });
+                        });
+                    }
+                    console.log(`[QR-ENT] multa registrada: $${multaDolaresEnt} | permisoHoras=${newPermisoHoras} | registro=${existing ? 'updated:' + existing.id : 'created'}`);
                 }
+                else {
+                    console.log(`[QR-ENT] ${input.empleadoId} | ATRASO_QR ya registrado para ${dateStr} — skipping duplicate`);
+                }
+            }
+            else {
+                console.log(`[QR-ENT] ${input.empleadoId} | atraso=${atrasoMinutosEnt}min ≤ tol=${toleranciaEnt} → SIN multa`);
             }
         }
         const result = new Asistencia({

@@ -446,7 +446,21 @@ export class NominaController {
                 const totalBruto = Math.round(sueldoDiario * diasTrabajadosReales * 100) / 100;
                 // 5. Permisos
                 const existing = recordsMap.get(emp.id);
-                const permisoHoras = existing ? Number(existing.permisoHoras) : 0;
+                const existingEgresos = existing ? (typeof existing.egresos === 'string' ? JSON.parse(existing.egresos) : (existing.egresos || {})) : {};
+                const permisosDetalleArr = Array.isArray(existingEgresos.permisosDetalle) ? existingEgresos.permisosDetalle : [];
+                // Fuente de verdad: recalcular desde permisosDetalle si existen registros activos
+                const permisoHorasFromDetail = permisosDetalleArr.length > 0
+                    ? Math.round(permisosDetalleArr
+                        .filter((r) => !r.eliminado)
+                        .reduce((s, r) => {
+                        if (r.multaDolares !== undefined)
+                            return s + Number(r.multaDolares);
+                        const h = Number(r.horas || 0);
+                        return s + Math.floor(h) * 2.50 + ((h % 1) >= 0.499 ? 1.50 : 0);
+                    }, 0) * 100) / 100
+                    : null;
+                const permisoHorasDB = existing ? Number(existing.permisoHoras) : 0;
+                const permisoHoras = permisoHorasFromDetail !== null ? permisoHorasFromDetail : permisoHorasDB;
                 const valorPermisoHoras = calcularValorDescuento(permisoHoras);
                 // 6. Décimos
                 let decimoCuartoQuincenal = 0;
@@ -530,8 +544,8 @@ export class NominaController {
                 }
                 else {
                     if (existing.estado === "PENDIENTE" || existing.estado === "ABONO_PARCIAL") {
-                        const currentIngresos = existing.ingresos || {};
-                        const currentEgresos = existing.egresos || {};
+                        const currentIngresos = typeof existing.ingresos === 'string' ? JSON.parse(existing.ingresos) : (existing.ingresos || {});
+                        const currentEgresos = existingEgresos; // already safely parsed above (preserves permisosDetalle)
                         const updatedIngresos = {
                             ...currentIngresos,
                             decimoTercero: decimoTerceroQuincenal,
@@ -553,6 +567,7 @@ export class NominaController {
                             data: {
                                 diasLaborados: diasTrabajadosReales, // calculado de asistencias reales (incluye SALIDA_PERMISO)
                                 diasLaborables: diasLaborables,
+                                permisoHoras: permisoHoras, // auto-heal: recalculated from permisosDetalle
                                 ingresos: updatedIngresos,
                                 egresos: updatedEgresos,
                             }
@@ -837,6 +852,23 @@ export class NominaController {
                 }
             }
             // 5. Upsert de la nómina con los abonos sincronizados
+            // Recalculate permisoHoras and dctoHorasNoLaboradas from permisosDetalle to keep DB consistent
+            const egresosFromBody = data.egresos || {};
+            const detalleList = Array.isArray(egresosFromBody.permisosDetalle) ? egresosFromBody.permisosDetalle : [];
+            const recalcPermisoHoras = detalleList.length > 0
+                ? Math.round(detalleList
+                    .filter((r) => !r.eliminado)
+                    .reduce((s, r) => {
+                    if (r.multaDolares !== undefined)
+                        return s + Number(r.multaDolares);
+                    const h = Number(r.horas || 0);
+                    return s + Math.floor(h) * 2.50 + ((h % 1) >= 0.499 ? 1.50 : 0);
+                }, 0) * 100) / 100
+                : Number(data.permisoHoras || 0);
+            const egresosToSave = {
+                ...egresosFromBody,
+                dctoHorasNoLaboradas: recalcPermisoHoras,
+            };
             const updated = await prisma.nominaRegistro.upsert({
                 where: {
                     empleadoId_fechaInicio_fechaFin: {
@@ -848,9 +880,9 @@ export class NominaController {
                 update: {
                     diasLaborables: Number(data.diasLaborables),
                     diasLaborados: Number(data.diasLaborados),
-                    permisoHoras: Number(data.permisoHoras),
+                    permisoHoras: recalcPermisoHoras,
                     ingresos: data.ingresos || {},
-                    egresos: data.egresos || {},
+                    egresos: egresosToSave,
                     abonos: newAbonos,
                     estado: data.estado || "PENDIENTE",
                 },
@@ -860,9 +892,9 @@ export class NominaController {
                     fechaFin: new Date(data.fechaFin),
                     diasLaborables: Number(data.diasLaborables),
                     diasLaborados: Number(data.diasLaborados),
-                    permisoHoras: Number(data.permisoHoras),
+                    permisoHoras: recalcPermisoHoras,
                     ingresos: data.ingresos || {},
-                    egresos: data.egresos || {},
+                    egresos: egresosToSave,
                     abonos: newAbonos,
                     estado: data.estado || "PENDIENTE",
                 }
