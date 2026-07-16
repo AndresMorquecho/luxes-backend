@@ -180,7 +180,13 @@ export class ProformasController {
         estado = '',
         fechaDesde = '',
         fechaHasta = '',
+<<<<<<< Updated upstream
         clienteId = ''
+=======
+        clienteId = '',
+        usuario = '',
+        conAbonos = ''
+>>>>>>> Stashed changes
       } = req.query;
 
       const pageNum = Math.max(1, parseInt(String(page), 10));
@@ -236,6 +242,10 @@ export class ProformasController {
 
       if (andFilters.length > 0) {
         where.AND = andFilters;
+      }
+
+      if (conAbonos === 'true') {
+        where.abonos = { some: { monto: { gt: 0 } } };
       }
 
       // Filtro por rango de fechas
@@ -486,7 +496,7 @@ export class ProformasController {
     try {
       const { id } = req.params;
       const b = req.body || {};
-      const { monto, metodoPagoId, referencia } = b;
+      const { monto, metodoPagoId, referencia, aplicarIva } = b;
 
       const userRole = ((req as any).user?.rol || '').toUpperCase();
       const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
@@ -511,16 +521,21 @@ export class ProformasController {
         return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Esta proforma ya fue aprobada previamente' } });
       }
 
+      let ivaToApply = proforma.iva;
+      if (aplicarIva !== undefined) {
+        ivaToApply = aplicarIva ? 0.15 : 0;
+      }
+
       // Calcular total de la proforma
       const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-      const total = subtotal * (1 + Number(proforma.iva));
+      const total = subtotal * (1 + Number(ivaToApply));
 
       // Validar monto
       const abonoMonto = Number(monto);
-      if (abonoMonto <= 0) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
+      if (abonoMonto < 0) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono no puede ser negativo' } });
       }
-      if (abonoMonto > (total + 0.01)) {
+      if (total > 0 && abonoMonto > (total + 0.01)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El abono no puede superar el total de la proforma' } });
       }
 
@@ -529,7 +544,7 @@ export class ProformasController {
 
       const result = await prisma.$transaction(async (tx) => {
         const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
-        // 1. Crear el abono
+        // 1. Crear el abono incluso si es 0, para que quede registro
         await tx.abonoProforma.create({
           data: {
             proformaId: proforma.id,
@@ -547,6 +562,7 @@ export class ProformasController {
             estado: nuevoEstado,
             metodoPagoId: String(metodoPagoId),
             fechaAprobacion: new Date(),
+            iva: ivaToApply,
           },
           include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
         });
@@ -661,7 +677,7 @@ export class ProformasController {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
       }
 
-      if (abonoMonto > (pendiente + 0.01)) {
+      if (pendiente > 0 && abonoMonto > (pendiente + 0.01)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${abonoMonto} supera el saldo pendiente de $${pendiente.toFixed(2)}` } });
       }
 
@@ -746,7 +762,7 @@ export class ProformasController {
       }
 
       const maxPermitted = total - sumOtrosAbonos;
-      if (nuevoMonto > (maxPermitted + 0.01)) {
+      if (maxPermitted > 0 && nuevoMonto > (maxPermitted + 0.01)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${nuevoMonto} supera el saldo pendiente de $${maxPermitted.toFixed(2)}` } });
       }
 
