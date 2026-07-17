@@ -100,7 +100,6 @@ function mapProforma(p) {
         id: p.id,
         clienteId: p.clienteId,
         cliente: p.clienteNombre,
-        clienteCedula: p.cliente?.cedulaRuc || '',
         telefono: p.telefono,
         email: p.email,
         fecha: toDateStr(p.fecha),
@@ -116,7 +115,6 @@ function mapProforma(p) {
         fechaEnvio: toDateStr(p.fechaEnvio),
         fechaAprobacion: toDateTimeStr(p.fechaAprobacion),
         creadoPorUserId: p.creadoPorUserId || null,
-        createdAt: toDateTimeStr(p.createdAt),
         items: (p.items || [])
             .slice()
             .sort((a, b) => a.orden - b.orden)
@@ -157,7 +155,7 @@ async function resolveClienteId(clienteId) {
 export class ProformasController {
     async list(req, res) {
         try {
-            const { page = '1', limit = '20', search = '', estado = '', fechaDesde = '', fechaHasta = '', clienteId = '', usuario = '' } = req.query;
+            const { page = '1', limit = '20', search = '', estado = '', fechaDesde = '', fechaHasta = '', clienteId = '', usuario = '', conAbonos = '' } = req.query;
             const pageNum = Math.max(1, parseInt(String(page), 10));
             const limitNum = Math.max(1, Math.min(1000, parseInt(String(limit), 10))); // Permite límites de hasta 1000 para cargas de listados completos en frontend
             const skip = (pageNum - 1) * limitNum;
@@ -179,12 +177,6 @@ export class ProformasController {
                 }
                 andFilters.push({ OR: clienteOr });
             }
-            // Filtro por usuario (atiende)
-            if (usuario && String(usuario).trim()) {
-                andFilters.push({
-                    atiende: { contains: String(usuario).trim(), mode: 'insensitive' }
-                });
-            }
             // Excluir rechazadas por defecto a menos que se busque específicamente
             if (estado && String(estado).trim()) {
                 const estStr = String(estado).trim();
@@ -198,9 +190,6 @@ export class ProformasController {
                     where.estado = estStr;
                 }
             }
-            else {
-                where.estado = { not: 'Rechazada' };
-            }
             // Búsqueda por texto (cliente, ID, teléfono, email)
             if (search && String(search).trim()) {
                 const searchTerm = String(search).trim();
@@ -210,12 +199,14 @@ export class ProformasController {
                         { id: { contains: searchTerm, mode: 'insensitive' } },
                         { telefono: { contains: searchTerm } },
                         { email: { contains: searchTerm, mode: 'insensitive' } },
-                        { atiende: { contains: searchTerm, mode: 'insensitive' } },
                     ],
                 });
             }
             if (andFilters.length > 0) {
                 where.AND = andFilters;
+            }
+            if (conAbonos === 'true') {
+                where.abonos = { some: { monto: { gt: 0 } } };
             }
             // Filtro por rango de fechas
             if (fechaDesde || fechaHasta) {
@@ -313,6 +304,25 @@ export class ProformasController {
             const { id } = req.params;
             const b = req.body || {};
             const clienteId = await resolveClienteId(b.clienteId);
+            // Obtener el estado actual antes de la actualización para detectar si estaba rechazada
+            const existingProforma = await prisma.proforma.findUnique({
+                where: { id: String(id) },
+                select: { estado: true }
+            });
+            if (!existingProforma) {
+                return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Proforma no encontrada' } });
+            }
+            const userRole = (req.user?.rol || '').toUpperCase();
+            const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
+            const isVentasODisenador = ['VENTAS', 'DISEÑADOR', 'DISENADOR'].includes(userRole);
+            if (!isAdmin) {
+                if (!isVentasODisenador) {
+                    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'No tienes permiso para editar proformas' } });
+                }
+                if (existingProforma.estado !== 'Rechazada') {
+                    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Solo se pueden editar proformas en estado Rechazada' } });
+                }
+            }
             // Reemplazamos los ítems por completo en una sola transacción anidada
             const updated = await prisma.proforma.update({
                 where: { id: String(id) },
@@ -378,6 +388,23 @@ export class ProformasController {
                     console.error(`Error actualizando fase ${fase.id}:`, e);
                 }
             }
+            // Si la proforma estaba Rechazada y ahora pasa a Pendiente
+            if (existingProforma?.estado === 'Rechazada' && updated.estado === 'Pendiente') {
+                try {
+                    const subtotal = updated.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
+                    const totalVal = subtotal * (1 + Number(updated.iva));
+                    const createdByNom = req.user?.nombre || updated.atiende || 'Sistema';
+                    await notifyRoles(['admin', 'administrador'], {
+                        title: 'Proforma Re-enviada para Aprobación',
+                        message: `La proforma rechazada ${updated.id} para el cliente "${updated.clienteNombre}" ha sido editada y re-enviada para aprobación. Total: $${totalVal.toFixed(2)}.`,
+                        createdBy: createdByNom,
+                        url: `/proformas/detalle/${updated.id}`,
+                    });
+                }
+                catch (notifErr) {
+                    console.error('[proformas/update/notify]', notifErr);
+                }
+            }
             return res.status(200).json({ success: true, data: mappedUpdated });
         }
         catch (error) {
@@ -432,7 +459,6 @@ export class ProformasController {
             const proforma = await prisma.proforma.findUnique({
                 where: { id: String(id) },
                 include: {
-                    cliente: true,
                     items: true,
                     metodoPago: true,
                     abonos: {
@@ -454,7 +480,7 @@ export class ProformasController {
         try {
             const { id } = req.params;
             const b = req.body || {};
-            const { monto, metodoPagoId, referencia } = b;
+            const { monto, metodoPagoId, referencia, aplicarIva } = b;
             const userRole = (req.user?.rol || '').toUpperCase();
             const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
             if (!isAdmin) {
@@ -473,22 +499,26 @@ export class ProformasController {
             if (proforma.estado === 'Aprobada' || proforma.estado === 'Pagada') {
                 return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Esta proforma ya fue aprobada previamente' } });
             }
+            let ivaToApply = proforma.iva;
+            if (aplicarIva !== undefined) {
+                ivaToApply = new proforma.iva.constructor(aplicarIva ? 0.15 : 0);
+            }
             // Calcular total de la proforma
             const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-            const total = subtotal * (1 + Number(proforma.iva));
+            const total = subtotal * (1 + Number(ivaToApply));
             // Validar monto
             const abonoMonto = Number(monto);
-            if (abonoMonto <= 0) {
-                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
+            if (abonoMonto < 0) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono no puede ser negativo' } });
             }
-            if (abonoMonto > (total + 0.01)) {
+            if (total > 0 && abonoMonto > (total + 0.01)) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El abono no puede superar el total de la proforma' } });
             }
             // Transacción para guardar abono y actualizar estado de la proforma
             const nuevoEstado = abonoMonto >= (total - 0.01) ? 'Pagada' : 'Aprobada';
             const result = await prisma.$transaction(async (tx) => {
                 const registradoPorUserId = req.user?.id || null;
-                // 1. Crear el abono
+                // 1. Crear el abono incluso si es 0, para que quede registro
                 await tx.abonoProforma.create({
                     data: {
                         proformaId: proforma.id,
@@ -505,6 +535,7 @@ export class ProformasController {
                         estado: nuevoEstado,
                         metodoPagoId: String(metodoPagoId),
                         fechaAprobacion: new Date(),
+                        iva: ivaToApply,
                     },
                     include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
                 });
@@ -579,19 +610,6 @@ export class ProformasController {
             if (monto === undefined || !metodoPagoId) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Monto y método de pago son requeridos' } });
             }
-            // Verificar si la fecha del abono cae en un período cerrado de caja
-            const fechaAbono = b.fecha ? new Date(b.fecha) : new Date();
-            const cierreBloqueante = await prisma.cierreCaja.findFirst({
-                where: {
-                    fechaInicio: { lte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 23, 59, 59, 999) },
-                    fechaFin: { gte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 0, 0, 0, 0) },
-                },
-            });
-            if (cierreBloqueante) {
-                const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
-                const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
-                return res.status(403).json({ success: false, error: { code: 'PERIODO_CERRADO', message: `No se pueden registrar abonos en un período cerrado (${fi} al ${ff}). Elimine el cierre de caja primero.` } });
-            }
             const proforma = await prisma.proforma.findUnique({
                 where: { id: String(id) },
                 include: { items: true, abonos: true },
@@ -612,7 +630,7 @@ export class ProformasController {
             if (abonoMonto <= 0) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
             }
-            if (abonoMonto > (pendiente + 0.01)) {
+            if (pendiente > 0 && abonoMonto > (pendiente + 0.01)) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${abonoMonto} supera el saldo pendiente de $${pendiente.toFixed(2)}` } });
             }
             const nuevoEstado = (yaCobrado + abonoMonto) >= (total - 0.01) ? 'Pagada' : 'Aprobada';
@@ -681,7 +699,7 @@ export class ProformasController {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
             }
             const maxPermitted = total - sumOtrosAbonos;
-            if (nuevoMonto > (maxPermitted + 0.01)) {
+            if (maxPermitted > 0 && nuevoMonto > (maxPermitted + 0.01)) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${nuevoMonto} supera el saldo pendiente de $${maxPermitted.toFixed(2)}` } });
             }
             const nuevoEstado = (sumOtrosAbonos + nuevoMonto) >= (total - 0.01) ? 'Pagada' : 'Aprobada';
@@ -804,6 +822,14 @@ export class ProformasController {
     async remove(req, res) {
         try {
             const { id } = req.params;
+            const userRole = (req.user?.rol || '').toUpperCase();
+            const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
+            if (!isAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Solo los administradores pueden eliminar proformas' },
+                });
+            }
             // 1. Cascade delete in ProyectoFase
             const fases = await prisma.proyectoFase.findMany({
                 where: {

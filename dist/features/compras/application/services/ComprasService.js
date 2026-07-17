@@ -217,13 +217,15 @@ export class ComprasService {
                 });
             }
             if (descargable && item.materialId) {
-                await this.repo.adjustMaterialStock(item.materialId, item.cantidad);
-                await this.repo.createMaterialMovimiento({
-                    materialId: item.materialId,
-                    tipo: 'entrada',
-                    cantidad: item.cantidad,
-                    motivo: `Recepción OC ${orden.numero}${item.observacion ? ` — ${item.observacion}` : ''}`,
+                // Crear un nuevo Material individual (rollo) en lugar de sumar al stock base.
+                // El material original queda intacto como referencia / plantilla.
+                const precioCosto = detalle.precioUnitario ?? 0;
+                await this.repo.createMaterialDesdeRollo({
+                    materialBaseId: item.materialId,
+                    metros: item.cantidad,
+                    ordenNumero: orden.numero,
                     userId: usuarioId,
+                    precioCosto,
                 });
             }
         }

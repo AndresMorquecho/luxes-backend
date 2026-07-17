@@ -1280,4 +1280,103 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       },
     });
   }
+
+  async createMaterialDesdeRollo(data: {
+    materialBaseId: string;
+    metros: number;
+    ordenNumero: string;
+    userId?: string | null;
+    precioCosto?: number;
+  }): Promise<{ id: string; nombre: string }> {
+    // 1. Obtener el material dado (podría ser un derivado o el original)
+    const materialDado = await this.prisma.material.findUnique({
+      where: { id: data.materialBaseId },
+      include: { unidadMedida: true },
+    });
+    if (!materialDado) throw new Error(`Material ${data.materialBaseId} no encontrado.`);
+
+    // 2. Si el material dado es un derivado (tiene materialBaseId), subir al raíz real
+    //    Esto protege el consecutivo si el usuario puso un [R002] en la OC por error.
+    let rootId = data.materialBaseId;
+    let base = materialDado;
+    if (materialDado.materialBaseId) {
+      const raiz = await this.prisma.material.findUnique({
+        where: { id: materialDado.materialBaseId },
+        include: { unidadMedida: true },
+      });
+      if (raiz) {
+        rootId = raiz.id;
+        base = raiz;
+      }
+    }
+
+    // 3. Extraer el nombre base limpio (sin prefijo [Rnn])
+    const nombreBase = base.nombre.replace(/^\[R\d+\]\s*/, '');
+
+    // 4. Contar rollos derivados existentes con nombre base coincidente.
+    //    Usamos búsqueda por nombre (contains) + filtro JS para ser robusto si el
+    //    Prisma client no reconoce materialBaseId en el WHERE (cliente no regenerado).
+    const candidatos = await this.prisma.material.findMany({
+      where: { nombre: { contains: nombreBase } },
+      select: { id: true, nombre: true, materialBaseId: true },
+    });
+
+    // Contar solo los que son rollos derivados del mismo base (prefijo [Rnn] + nombre exacto)
+    const rollosExistentes = candidatos.filter(m => {
+      const esDerivado = /^\[R\d+\]\s*/.test(m.nombre);
+      const mismoNombreBase = m.nombre.replace(/^\[R\d+\]\s*/, '') === nombreBase;
+      const mismoBase = (m as any).materialBaseId === rootId || (m as any).materialBaseId === data.materialBaseId;
+      return esDerivado && mismoNombreBase && (mismoBase || !(m as any).materialBaseId);
+    }).length;
+
+    // 5. El consecutivo siguiente = total de rollos ya existentes + 1
+    const consecutivo = String(rollosExistentes + 1).padStart(3, '0');
+    const nombreNuevo = `[R${consecutivo}] ${nombreBase}`;
+
+    // 6. Crear el nuevo Material (rollo individual) vinculado al raíz
+    const nuevoRollo = await this.prisma.material.create({
+      data: {
+        nombre: nombreNuevo,
+        tipo: base.tipo,
+        unidadMedidaId: base.unidadMedidaId,
+        stockActual: data.metros,
+        stockMinimo: 0,
+        precioCosto: data.precioCosto ?? base.precioCosto ?? 0,
+        codigo: `R${consecutivo}`,
+        categoria: base.categoria,
+        subtipo: base.subtipo,
+        descargaStock: true,
+        ancho: base.ancho,
+        ocultado: false,
+        materialBaseId: rootId,
+      },
+    });
+
+    // 7. Registrar movimiento de entrada
+    await this.prisma.movimientoInventario.create({
+      data: {
+        materialId: nuevoRollo.id,
+        tipo: 'entrada',
+        cantidad: data.metros,
+        motivo: `Recepción OC ${data.ordenNumero} — Rollo ${consecutivo} ingresado al inventario`,
+        userId: data.userId || null,
+      },
+    });
+
+    return { id: nuevoRollo.id, nombre: nombreNuevo };
+  }
+
+
+
+  async ocultarMaterialAgotado(materialId: string): Promise<void> {
+    await this.prisma.material.updateMany({
+      where: {
+        id: materialId,
+        stockActual: { lte: 0 },
+        subtipo: { in: ['consumible_descargable'] },
+      },
+      data: { ocultado: true },
+    });
+  }
 }
+

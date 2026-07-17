@@ -47,7 +47,8 @@ export class InventarioController {
             const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
             const search = this.str(req.query.search);
             const categoria = resolveInventarioCategoria(this.userRol(req), this.str(req.query.categoria));
-            const data = await this.service.getInventario({ tipo, page, limit, search, categoria });
+            const incluirDerivados = req.query.incluirDerivados === 'true';
+            const data = await this.service.getInventario({ tipo, page, limit, search, categoria, incluirDerivados });
             return this.ok(res, data);
         }
         catch (e) {

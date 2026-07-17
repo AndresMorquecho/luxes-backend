@@ -2107,7 +2107,7 @@ export class GastosController {
                     estado: { in: ['Aprobada', 'Pagada', 'Pagado'] },
                     ...(hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : {})
                 },
-                include: { items: true }
+                include: { items: true, abonos: true }
             });
             const ventasPorMes = {};
             const ventasPorSemana = {
@@ -2118,6 +2118,9 @@ export class GastosController {
                 'Semana 5': 0
             };
             for (const prof of activeProformas) {
+                const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
+                if (totalAbonado === 0)
+                    continue; // Si el abono es 0, no entra a ventas
                 const f = new Date(prof.fecha);
                 const MES_V = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
                 const monthLabel = MES_V[f.getUTCMonth()];
@@ -2169,9 +2172,11 @@ export class GastosController {
                     if (f < desdeDate || f > hastaLimit)
                         continue;
                 }
+                const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
+                if (totalAbonado === 0)
+                    continue; // Si el abono es 0, no entra a cuentas por cobrar
                 const profSubtotal = prof.items.reduce((sum, item) => sum + Number(item.cantidad) * Number(item.precioUnitario), 0);
                 const profTotal = profSubtotal * (1 + Number(prof.iva));
-                const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
                 const pendiente = profTotal - totalAbonado;
                 if (pendiente > 0) {
                     const MES_CC = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];

@@ -118,18 +118,32 @@ export function getOpcionesMarcacion(
       if (canLunch) {
         opciones.push(TIPOS_SELECCIONABLES[1]); // Salida almuerzo
       }
-      
-      // Salida only from salidaMin onwards
+
+      // Salida from salidaMin onwards
       if (currentMin >= salidaMin) {
         opciones.push(TIPOS_SELECCIONABLES[3]); // Salida
       }
-      
+
+      // Past 30-min tolerance window → FIN_HORAS_EXTRA directly (no prior SALIDA needed)
+      // Backend will auto-register SALIDA at configured time before creating FIN_HORAS_EXTRA
+      const finHoraExtraMin = salidaMin + 30;
+      if (currentMin >= finHoraExtraMin) {
+        opciones.push(TIPOS_SELECCIONABLES[4]); // Fin horas extras
+      }
+
       opciones.push(TIPOS_SELECCIONABLES[5]); // Salida con permiso
     } else if (tipos.has('FIN_ALMUERZO')) {
-      // Salida only from salidaMin onwards
+      // Salida from salidaMin onwards
       if (currentMin >= salidaMin) {
         opciones.push(TIPOS_SELECCIONABLES[3]); // Salida
       }
+
+      // Past 30-min tolerance window → FIN_HORAS_EXTRA directly (no prior SALIDA needed)
+      const finHoraExtraMin = salidaMin + 30;
+      if (currentMin >= finHoraExtraMin) {
+        opciones.push(TIPOS_SELECCIONABLES[4]); // Fin horas extras
+      }
+
       opciones.push(TIPOS_SELECCIONABLES[5]); // Salida con permiso
     }
     return opciones;

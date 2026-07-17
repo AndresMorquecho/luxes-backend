@@ -225,6 +225,26 @@ export class AsistenciaService {
             if (!diaConfig?.salida) {
                 throw new Error('No se encontró la hora de salida configurada para calcular horas extras.');
             }
+            // ── Auto-register SALIDA at configured exit time if employee never marked it ──
+            // Handles the case where someone stays past salidaMin+30 without marking SALIDA first.
+            const hasSalidaPrevia = todayMarks.some((m) => m.tipo === 'SALIDA');
+            if (!hasSalidaPrevia) {
+                const [sh, sm] = diaConfig.salida.split(':').map(Number);
+                const [yy, mo, dd] = dateStr.split('-').map(Number);
+                // Build the configured exit timestamp in UTC (Ecuador = UTC-5 → +5h offset)
+                const salidaAutoUTC = new Date(Date.UTC(yy, mo - 1, dd, sh + 5, sm, 0));
+                await this.asistenciaRepository.create({
+                    empleadoId: input.empleadoId,
+                    tipo: 'SALIDA',
+                    label: 'Salida (automático)',
+                    fechaHora: salidaAutoUTC.toISOString(),
+                    ubicacionLat: input.ubicacionLat,
+                    ubicacionLng: input.ubicacionLng,
+                });
+                console.log(`[QR-FHE] Auto-created SALIDA at ${diaConfig.salida} for ${input.empleadoId} (no prior SALIDA found)`);
+                // Count as worked day (normally done in the SALIDA block)
+                await incrementarDiasLaborados(input.empleadoId, ahora);
+            }
             // Get configurable rates (fall back to defaults if not set)
             const horariosConfig = (await (await import('../../infrastructure/adapters/persistence/horarioLaboralStore.js')).loadHorariosLaborales());
             const valorHoraExtra = Number(horariosConfig.valorHoraExtra ?? VALOR_HORA_EXTRA_DEFAULT);

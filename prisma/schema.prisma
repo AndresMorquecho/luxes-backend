@@ -108,11 +108,15 @@ model Material {
   aCargoId      String?                @map("a_cargo_id")
   aCargoEmpleado Empleado?             @relation("MaterialACargo", fields: [aCargoId], references: [id], onDelete: SetNull)
   ancho         Float?
+  // Campos para gestión de rollos individuales (impresión)
+  ocultado      Boolean                @default(false) @map("ocultado") // true = agotado, se oculta en listas pero preserva historial
+  materialBaseId String?               @map("material_base_id") // ID del material origen del que se clonó este rollo
   movimientos   MovimientoInventario[]
   prestamos     Prestamo[]
   detallesCompra DetalleCompra[]
 
   @@index([unidadMedidaId])
+  @@index([materialBaseId])
   @@map("materiales")
 }
 
