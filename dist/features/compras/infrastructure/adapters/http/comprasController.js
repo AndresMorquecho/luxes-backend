@@ -352,6 +352,18 @@ export class ComprasController {
             return this.ok(res, { deleted: true });
         }
         catch (e) {
+            const prismaCode = e && typeof e === 'object' && 'code' in e
+                ? String(e.code)
+                : '';
+            const isFkError = prismaCode === 'P2003' || prismaCode === 'P2014';
+            if (isFkError) {
+                return res.status(409).json({
+                    success: false,
+                    error: {
+                        message: 'No se puede eliminar este método de pago porque tiene dinero ingresado o transacciones vinculadas (caja, movimientos, compras o nómina).'
+                    }
+                });
+            }
             return this.fail(res, e);
         }
     }

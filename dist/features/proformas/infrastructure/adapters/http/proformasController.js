@@ -1,4 +1,5 @@
 import { prisma } from '../../../../../config/prismaClient.js';
+import { Decimal } from '@prisma/client/runtime/library';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { logAuditAction } from '../../../../../shared/services/auditLogService.js';
 /** Genera el siguiente ID con formato PRO-### */
@@ -501,7 +502,7 @@ export class ProformasController {
             }
             let ivaToApply = proforma.iva;
             if (aplicarIva !== undefined) {
-                ivaToApply = new proforma.iva.constructor(aplicarIva ? 0.15 : 0);
+                ivaToApply = new Decimal(aplicarIva ? 0.15 : 0);
             }
             // Calcular total de la proforma
             const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
