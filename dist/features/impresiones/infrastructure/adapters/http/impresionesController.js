@@ -153,12 +153,14 @@ export class ImpresionesController {
                 updateData.completedAt = b.completedAt;
             // Status change logic for notifications
             if (b.status !== undefined && b.status !== currentJob.status) {
-                const username = b.responsible || 'Operador';
+                const username = b.responsible || currentJob.responsible || 'Operador';
                 const nowStr = new Date().toISOString();
                 const projSuffix = currentJob.proyectoId ? ` [PROYECTO_ID:${currentJob.proyectoId}]` : '';
                 if (b.status === 'Imprimiendo') {
-                    updateData.startedPrintingAt = nowStr;
-                    updateData.startTime = nowStr;
+                    if (!currentJob.startedPrintingAt) {
+                        updateData.startedPrintingAt = nowStr;
+                        updateData.startTime = nowStr;
+                    }
                     updateData.responsible = username;
                     const consumoMsg = b.consumoDetalle ? ` Materiales a descontar: ${b.consumoDetalle}.` : '';
                     try {
