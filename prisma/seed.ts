@@ -136,17 +136,106 @@ async function main() {
   const passwordHash = await bcrypt.hash('123456', 10);
 
   const rawPeople = [
-    { name: 'MORQUECHO IVETTE', roleName: 'Administrador', roleId: adminRole.id, username: 'MorquechoI' },
-    { name: 'JEFFERSON DELGADO', roleName: 'Administrador', roleId: adminRole.id, username: 'jeffersond' },
-    { name: 'JIMMY EVANGELISTA', roleName: 'Taller', roleId: tallerRole.id, username: 'JimmyE' },
-    { name: 'EDINSON MONCADA', roleName: 'Taller', roleId: tallerRole.id, username: 'EdinsonM' },
-    { name: 'CHRISTHIAN PAREDES', roleName: 'Taller', roleId: tallerRole.id, username: 'ChristhianP' },
-    { name: 'CRISTOFER SUAREZ', roleName: 'Impresión', roleId: impresionRole.id, username: 'CristoferS' },
-    { name: 'MAYBE ORELLANA', roleName: 'Ventas', roleId: ventasRole.id, username: 'MaybeO' },
-    { name: 'NARCISA REINA', roleName: 'Ventas', roleId: ventasRole.id, username: 'NarcisaR' },
-    { name: 'JULEYSI OLVERA', roleName: 'Ventas', roleId: ventasRole.id, username: 'JuleysiO' },
-    { name: 'PAOLA CARRANZA', roleName: 'Ventas', roleId: ventasRole.id, username: 'PaolaC' },
-    { name: 'JOSE ANDRES TAMAYO', roleName: 'Diseñador', roleId: disenadorRole.id, username: 'JoseA' }
+    {
+      name: 'IVETTE STEPHANIA MORQUECHO SEVILLANO',
+      username: 'ivettemorquecho',
+      cedula: '0903953779',
+      celular: '0988791080',
+      tipoContrato: 'Fijo',
+      roleName: 'Administrador',
+      roleId: adminRole.id,
+      correo: 'morquecho_ivette@hotmail.com'
+    },
+    {
+      name: 'CHRISTIAN MANUEL PAREDES ARMIJOS',
+      username: 'christianparedes',
+      cedula: '0942234345',
+      celular: '0959064260',
+      tipoContrato: 'Fijo',
+      roleName: 'Impresión',
+      roleId: impresionRole.id,
+      correo: 'christianparedes@hotmail.com'
+    },
+    {
+      name: 'PAOLA ELIZABETH CARRANZA VILLALTA',
+      username: 'paolacarranza',
+      cedula: '0940814924',
+      celular: '0988975320',
+      tipoContrato: 'Eventual',
+      roleName: 'Ventas',
+      roleId: ventasRole.id,
+      correo: 'paola.1997carranza@gmail.com'
+    },
+    {
+      name: 'MAYBE BRIGGITTE ORELLANA MANOBANDA',
+      username: 'maybeorellana',
+      cedula: '0923900880',
+      celular: '0982861333',
+      tipoContrato: 'Eventual',
+      roleName: 'Ventas',
+      roleId: ventasRole.id,
+      correo: 'maybe_lovebriggi@gmail.com'
+    },
+    {
+      name: 'JULEYSI EFIGENIA OVERA GARCIA',
+      username: 'juleysiovera',
+      cedula: '0105773196',
+      celular: '0963240770',
+      tipoContrato: 'Eventual',
+      roleName: 'Ventas',
+      roleId: ventasRole.id,
+      correo: 'juleysiovera@gmail.com'
+    },
+    {
+      name: 'JOSE ANDRE TAMAYO ORTEGA',
+      username: 'josetamayo',
+      cedula: '0955766639',
+      celular: '0986312327',
+      tipoContrato: 'Eventual',
+      roleName: 'Diseñador',
+      roleId: disenadorRole.id,
+      correo: 'anddretamayo@gmail.com'
+    },
+    {
+      name: 'NARCISA CARMEN REINA PILOZO',
+      username: 'narcisareina',
+      cedula: '0940168065',
+      celular: '0983839545',
+      tipoContrato: 'Eventual',
+      roleName: 'Administrador',
+      roleId: adminRole.id,
+      correo: 'reina-narcisa1@gmail.com'
+    },
+    {
+      name: 'NESTOR JIMMY EVANGELISTA ORTIZ',
+      username: 'jimmyevangelista',
+      cedula: '0926245770',
+      celular: '0987655311',
+      tipoContrato: 'Eventual',
+      roleName: 'Taller',
+      roleId: tallerRole.id,
+      correo: 'njimmy86@hotmail.com'
+    },
+    {
+      name: 'JOSE ANDRES JEREZ VITERI',
+      username: 'josejerez',
+      cedula: '0350317483',
+      celular: '0980821596',
+      tipoContrato: 'Eventual',
+      roleName: 'Taller',
+      roleId: tallerRole.id,
+      correo: 'josejerez1054@gmail.com'
+    },
+    {
+      name: 'DIXON EDINSON MONCADA ATOCHA',
+      username: 'dixonmoncada',
+      cedula: '0940168594',
+      celular: '0997346212',
+      tipoContrato: 'Eventual',
+      roleName: 'Taller',
+      roleId: tallerRole.id,
+      correo: 'edinson.moncada@gmail.com'
+    }
   ];
 
   for (let i = 0; i < rawPeople.length; i++) {
@@ -155,7 +244,6 @@ async function main() {
     const idNum = (i + 1).toString().padStart(3, '0');
     const empId = `EMP-${idNum}`;
     const usrId = `USR-${idNum}`;
-    const mockCedula = `0900000${idNum}`;
 
     console.log(`- Creando Empleado: ${person.name} | Usuario: ${username} (Rol: ${person.roleName})`);
 
@@ -164,10 +252,10 @@ async function main() {
       data: {
         id: empId,
         nombre: person.name,
-        cedula: mockCedula,
-        correo: `${username.toLowerCase()}@luxes.com`,
-        telefono: '0987654321',
-        tipoContrato: 'Fijo',
+        cedula: person.cedula,
+        correo: person.correo,
+        telefono: person.celular,
+        tipoContrato: person.tipoContrato,
         tieneContrato: true,
         region: 'costa',
         passwordHash: passwordHash
@@ -179,7 +267,7 @@ async function main() {
       data: {
         id: usrId,
         nombre: person.name,
-        email: `${username.toLowerCase()}@luxes.com`,
+        email: person.correo,
         username: username,
         rol: person.roleName,
         roleId: person.roleId,
