@@ -32,6 +32,8 @@ model User {
   abonosProformaRegistrados AbonoProforma[] @relation("AbonoProformaRegistradoPor")
   gastosRegistrados         Gasto[]         @relation("GastoRegistradoPor")
   abonosCompraRegistrados   AbonoCompra[]   @relation("AbonoCompraRegistradoPor")
+  ingresosCajaRegistrados   Ingreso[]       @relation("IngresoRegistradoPor")
+  transferenciasRegistradas Transferencia[] @relation("TransferenciasRegistradas")
   empleadoId          String?       @unique @map("empleado_id")
   empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
 
@@ -106,11 +108,15 @@ model Material {
   aCargoId      String?                @map("a_cargo_id")
   aCargoEmpleado Empleado?             @relation("MaterialACargo", fields: [aCargoId], references: [id], onDelete: SetNull)
   ancho         Float?
+  // Campos para gestión de rollos individuales (impresión)
+  ocultado      Boolean                @default(false) @map("ocultado") // true = agotado, se oculta en listas pero preserva historial
+  materialBaseId String?               @map("material_base_id") // ID del material origen del que se clonó este rollo
   movimientos   MovimientoInventario[]
   prestamos     Prestamo[]
   detallesCompra DetalleCompra[]
 
   @@index([unidadMedidaId])
+  @@index([materialBaseId])
   @@map("materiales")
 }
 
@@ -185,6 +191,9 @@ model MetodoPago {
   gastos      Gasto[]
   proformas   Proforma[]
   abonosProforma AbonoProforma[]
+  ingresosCaja             Ingreso[]
+  transferenciasEnviadas   Transferencia[] @relation("TransferenciasEnviadas")
+  transferenciasRecibidas  Transferencia[] @relation("TransferenciasRecibidas")
 
   @@map("metodos_pago")
 }
@@ -350,6 +359,9 @@ model Empleado {
   decimoTerceroMensualizado Boolean @default(false) @map("decimo_tercero_mensualizado")
   decimoCuartoMensualizado  Boolean @default(false) @map("decimo_cuarto_mensualizado")
   sueldoDiario Decimal            @default(0) @map("sueldo_diario") @db.Decimal(10, 2)
+  decimoTerceroValor Decimal?     @map("decimo_tercero_valor") @db.Decimal(10, 2)
+  decimoCuartoValor  Decimal?     @map("decimo_cuarto_valor") @db.Decimal(10, 2)
+  iessValor          Decimal?     @map("iess_valor") @db.Decimal(10, 2)
   direccion    String             @default("")
   foto         String?
   passwordHash String             @default("") @map("password_hash")
@@ -631,8 +643,36 @@ model Vehiculo {
   createdAt      DateTime                @default(now()) @map("created_at")
   updatedAt      DateTime                @updatedAt @map("updated_at")
   mantenimientos VehiculoMantenimiento[]
+  controles      VehiculoControl[]
 
   @@map("vehiculos")
+}
+
+model VehiculoControl {
+  id                    String    @id @default(uuid())
+  vehiculoId            String    @map("vehiculo_id")
+  vehiculo              Vehiculo  @relation(fields: [vehiculoId], references: [id], onDelete: Cascade)
+  usuarioId             String?   @map("usuario_id")
+  usuarioNom            String    @map("usuario_nom")
+  fecha                 DateTime  @default(now())
+  kilometraje           Int
+  combustible           String
+  nivelAceite           Boolean   @default(false) @map("nivel_aceite")
+  nivelAgua             Boolean   @default(false) @map("nivel_agua")
+  aceiteHidraulico      Boolean   @default(false) @map("aceite_hidraulico")
+  liquidoFrenos         Boolean   @default(false) @map("liquido_frenos")
+  gataLlave             Boolean   @default(false) @map("gata_llave")
+  extintorBotiquin      Boolean   @default(false) @map("extintor_botiquin")
+  bandas                Boolean   @default(false)
+  otroCheckNombre       String    @default("") @map("otro_check_nombre")
+  otroCheckValor        Boolean   @default(false) @map("otro_check_valor")
+  observacion           String    @default("")
+  sugerencia            String    @default("")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([vehiculoId])
+  @@map("vehiculo_controles")
 }
 
 model VehiculoMantenimiento {
@@ -683,6 +723,7 @@ model Proyecto {
   descripcion            String            @default("")
   etiquetas              String            @default("") // JSON array de strings o separadas por coma
   notas                  String            @default("")
+  medio                  String            @default("LUXES")
   
   // Relaciones
   fases                  ProyectoFase[]
@@ -812,4 +853,72 @@ model SiteSetting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("site_settings")
+}
+
+model LandingCategory {
+  id        String                 @id @default(uuid())
+  name      String
+  slug      String                 @unique
+  order     Int                    @default(0)
+  active    Boolean                @default(true)
+  images    LandingCategoryImage[]
+  createdAt DateTime               @default(now()) @map("created_at")
+  updatedAt DateTime               @updatedAt @map("updated_at")
+
+  @@map("landing_categories")
+}
+
+model LandingCategoryImage {
+  id          String          @id @default(uuid())
+  categoryId  String          @map("category_id")
+  category    LandingCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  imageUrl    String          @map("image_url")
+  title       String          @default("")
+  description String          @default("")
+  tags        String          @default("[]")
+  order       Int             @default(0)
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@index([categoryId])
+  @@map("landing_category_images")
+}
+
+model Ingreso {
+  id                  String      @id
+  concepto            String
+  categoria           String      @default("Otros")
+  fecha               DateTime    @db.Date
+  monto               Decimal     @db.Decimal(12, 2)
+  cliente             String      @default("")
+  notas               String      @default("")
+  metodoPagoId        String?     @map("metodo_pago_id")
+  metodoPago          MetodoPago? @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
+  registradoPorUserId String?     @map("registrado_por_user_id")
+  registradoPor       User?       @relation("IngresoRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  @@index([metodoPagoId])
+  @@index([registradoPorUserId])
+  @@map("ingresos_caja")
+}
+
+model Transferencia {
+  id                  String      @id
+  origenMetodoId      String      @map("origen_metodo_id")
+  origenMetodo        MetodoPago  @relation("TransferenciasEnviadas", fields: [origenMetodoId], references: [id])
+  destinoMetodoId     String      @map("destino_metodo_id")
+  destinoMetodo       MetodoPago  @relation("TransferenciasRecibidas", fields: [destinoMetodoId], references: [id])
+  monto               Decimal     @db.Decimal(12, 2)
+  fecha               DateTime    @db.Date
+  referencia          String?
+  registradoPorUserId String?     @map("registrado_por_user_id")
+  registradoPor       User?       @relation("TransferenciasRegistradas", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  @@index([origenMetodoId])
+  @@index([destinoMetodoId])
+  @@index([registradoPorUserId])
+  @@map("transferencias_cuentas")
 }

@@ -246,4 +246,16 @@ export interface ComprasRepositoryPort {
     motivo: string;
     userId?: string | null;
   }): Promise<void>;
+  /** Crea un nuevo Material individual (rollo) derivado de un material base.
+   *  Asigna consecutivo [R001], [R002], etc. por material base.
+   *  Devuelve el ID y nombre del nuevo material creado. */
+  createMaterialDesdeRollo(data: {
+    materialBaseId: string;
+    metros: number;
+    ordenNumero: string;
+    userId?: string | null;
+    precioCosto?: number;
+  }): Promise<{ id: string; nombre: string }>;
+  /** Oculta automáticamente materiales descargables con stockActual <= 0 */
+  ocultarMaterialAgotado(materialId: string): Promise<void>;
 }

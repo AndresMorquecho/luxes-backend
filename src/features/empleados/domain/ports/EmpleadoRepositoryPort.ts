@@ -16,6 +16,9 @@ export type EmpleadoInput = {
   decimoTerceroMensualizado?: boolean;
   decimoCuartoMensualizado?: boolean;
   sueldoDiario?: number;
+  decimoTerceroValor?: number | null;
+  decimoCuartoValor?: number | null;
+  iessValor?: number | null;
   direccion?: string;
   foto?: string | null;
   rol?: string;

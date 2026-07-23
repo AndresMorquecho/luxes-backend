@@ -64,10 +64,10 @@ function groupMarcacionesByDay(marcaciones) {
     }
     return map;
 }
-/** Día pagable: salida registrada, permiso pagado, o marcación legacy completa. */
+/** Día pagable: salida registrada (normal o con permiso), permiso pagado, o marcación legacy completa. */
 export function isDiaAsistenciaPagable(marks) {
     const tipos = new Set(marks.map((m) => m.tipo));
-    return tipos.has('SALIDA') || tipos.has('PERMISO') || tipos.has('MARCACION');
+    return tipos.has('SALIDA') || tipos.has('SALIDA_PERMISO') || tipos.has('PERMISO') || tipos.has('MARCACION');
 }
 export function calcDiasLaborados(marcaciones, feriados, fechaInicio, fechaFin, hasContract) {
     const ini = fechaInicio.slice(0, 10);

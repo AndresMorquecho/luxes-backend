@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { NominaController } from '../adapters/http/nominaController.js';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
+import { createUploadMiddleware } from '../../../../shared/middleware/uploadMiddleware.js';
+
+const comprobanteUpload = createUploadMiddleware('comprobantes');
 
 export function createNominaRoutes(controller: NominaController): Router {
   const router = Router();
@@ -10,6 +13,7 @@ export function createNominaRoutes(controller: NominaController): Router {
   router.post('/horas-extras/:id/aprobar', authMiddleware, (req, res) => controller.approveOvertime(req, res));
   router.post('/horas-extras/:id/rechazar', authMiddleware, (req, res) => controller.rejectOvertime(req, res));
   router.patch('/horas-extras/:id', authMiddleware, (req, res) => controller.patchOvertime(req, res));
+  router.delete('/horas-extras/:id', authMiddleware, (req, res) => controller.deleteOvertime(req, res));
   router.post('/horas-extras', authMiddleware, (req, res) => controller.saveOvertimeBulk(req, res));
   router.get('/nominas', authMiddleware, (req, res) => controller.getPayrolls(req, res));
   router.post('/nominas', authMiddleware, (req, res) => controller.savePayroll(req, res));
@@ -28,6 +32,10 @@ export function createNominaRoutes(controller: NominaController): Router {
   router.delete('/ingresos/:id', authMiddleware, (req, res) => controller.deleteDetailedIngreso(req, res));
 
   router.get('/exportar', authMiddleware, (req, res) => controller.exportToExcel(req, res));
+
+  // Comprobantes de pago (upload/delete)
+  router.post('/comprobantes/upload', authMiddleware, comprobanteUpload.single('comprobante'), (req, res) => controller.uploadComprobante(req, res));
+  router.delete('/comprobantes/:filename', authMiddleware, (req, res) => controller.deleteComprobante(req, res));
 
   return router;
 }

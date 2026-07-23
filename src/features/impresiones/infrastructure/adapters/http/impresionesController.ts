@@ -85,8 +85,8 @@ export class ImpresionesController {
           status: 'En espera',
           format: b.format || '',
           sentBy: b.sentBy || 'Desconocido',
-          sentAt: b.sentAt || new Date().toLocaleString(),
-          sentToQueueAt: b.sentToQueueAt || new Date().toLocaleString(),
+          sentAt: b.sentAt || new Date().toISOString(),
+          sentToQueueAt: b.sentToQueueAt || new Date().toISOString(),
           fileUrl: b.fileUrl || null,
           client: b.client || '',
           urgency: b.urgency || 'Media',
@@ -163,14 +163,16 @@ export class ImpresionesController {
 
       // Status change logic for notifications
       if (b.status !== undefined && b.status !== currentJob.status) {
-        const username = b.responsible || 'Operador';
-        const nowStr = new Date().toLocaleString();
+        const username = b.responsible || currentJob.responsible || 'Operador';
+        const nowStr = new Date().toISOString();
 
         const projSuffix = currentJob.proyectoId ? ` [PROYECTO_ID:${currentJob.proyectoId}]` : '';
 
         if (b.status === 'Imprimiendo') {
-          updateData.startedPrintingAt = nowStr;
-          updateData.startTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          if (!currentJob.startedPrintingAt) {
+            updateData.startedPrintingAt = nowStr;
+            updateData.startTime = nowStr;
+          }
           updateData.responsible = username;
           
           const consumoMsg = b.consumoDetalle ? ` Materiales a descontar: ${b.consumoDetalle}.` : '';

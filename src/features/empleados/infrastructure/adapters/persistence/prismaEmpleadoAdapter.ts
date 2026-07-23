@@ -17,6 +17,9 @@ const mapRecord = (record: {
   decimoTerceroMensualizado: boolean;
   decimoCuartoMensualizado: boolean;
   sueldoDiario: Prisma.Decimal;
+  decimoTerceroValor: Prisma.Decimal | null;
+  decimoCuartoValor: Prisma.Decimal | null;
+  iessValor: Prisma.Decimal | null;
   direccion: string;
   foto: string | null;
   passwordHash?: string;
@@ -36,6 +39,9 @@ const mapRecord = (record: {
     decimoTerceroMensualizado: record.decimoTerceroMensualizado ?? false,
     decimoCuartoMensualizado: record.decimoCuartoMensualizado ?? false,
     sueldoDiario: Number(record.sueldoDiario),
+    decimoTerceroValor: record.decimoTerceroValor !== null && record.decimoTerceroValor !== undefined ? Number(record.decimoTerceroValor) : null,
+    decimoCuartoValor: record.decimoCuartoValor !== null && record.decimoCuartoValor !== undefined ? Number(record.decimoCuartoValor) : null,
+    iessValor: record.iessValor !== null && record.iessValor !== undefined ? Number(record.iessValor) : null,
     direccion: record.direccion,
     foto: record.foto,
     rol: record.user?.rol,
@@ -55,6 +61,9 @@ const toDbData = (data: EmpleadoInput) => {
     decimoTerceroMensualizado: data.decimoTerceroMensualizado ?? false,
     decimoCuartoMensualizado: data.decimoCuartoMensualizado ?? false,
     sueldoDiario: data.sueldoDiario ?? 0,
+    decimoTerceroValor: data.decimoTerceroValor !== undefined ? data.decimoTerceroValor : null,
+    decimoCuartoValor: data.decimoCuartoValor !== undefined ? data.decimoCuartoValor : null,
+    iessValor: data.iessValor !== undefined ? data.iessValor : null,
     direccion: data.direccion ?? '',
     foto: data.foto || null,
   };

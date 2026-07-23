@@ -1,0 +1,243 @@
+{
+  "fuente": "INVENTARIO ACTUALIZADO TALLER OFICINA IMPRECION.xlsx",
+  "tallerIgualAlPrimerArchivo": true,
+  "oficinaIgualAlPrimerArchivo": true,
+  "archivos": [
+    {
+      "filename": "listo_importar_taller.xlsx",
+      "count": 165,
+      "outPath": "C:\\Users\\MSI THIN\\Documents\\GitHub\\luxes-backend\\inventario-listo-importar\\listo_importar_taller.xlsx"
+    },
+    {
+      "filename": "listo_importar_oficina.xlsx",
+      "count": 40,
+      "outPath": "C:\\Users\\MSI THIN\\Documents\\GitHub\\luxes-backend\\inventario-listo-importar\\listo_importar_oficina.xlsx"
+    },
+    {
+      "filename": "listo_importar_impresion.xlsx",
+      "count": 9,
+      "outPath": "C:\\Users\\MSI THIN\\Documents\\GitHub\\luxes-backend\\inventario-listo-importar\\listo_importar_impresion.xlsx"
+    }
+  ],
+  "totales": {
+    "taller": 165,
+    "oficina": 40,
+    "impresion": 9
+  },
+  "muestraTaller": [
+    {
+      "subtipo": "Herramienta / Equipo",
+      "nombre": "ALICATE — 7 DIAGONAL CUTTING PLIER",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 25,
+      "stock_minimo": "",
+      "codigo": "ADC001",
+      "marca": "",
+      "modelo": "7 DIAGONAL CUTTING PLIER",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": "JOSE TIMOTEO ESPINOZA CI. 0940819204"
+    },
+    {
+      "subtipo": "Herramienta / Equipo",
+      "nombre": "ATOMIZADOR — 500ML",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 1.15,
+      "stock_minimo": "",
+      "codigo": "ATM001",
+      "marca": "MAVIJU",
+      "modelo": "500ML",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": "JIMMY"
+    },
+    {
+      "subtipo": "Herramienta / Equipo",
+      "nombre": "ATORNILLADOR + CARGADOR — M18 REDLITHIUM M 18 CP1,5",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 420,
+      "stock_minimo": "",
+      "codigo": "ARM001",
+      "marca": "Milwaukee",
+      "modelo": "M18 REDLITHIUM M 18 CP1,5",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    }
+  ],
+  "muestraOficina": [
+    {
+      "subtipo": "Activo fijo",
+      "nombre": "MONITOR",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 400,
+      "stock_minimo": "",
+      "codigo": "PT001",
+      "marca": "TEROS",
+      "modelo": "TE-3020N POWER:DC12V.5A",
+      "serie": "19.5 LED",
+      "estado_uso": "BODEGA",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Activo fijo",
+      "nombre": "CPU",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 400,
+      "stock_minimo": "",
+      "codigo": "CP001",
+      "marca": "SPEEDMIND",
+      "modelo": "FICHA 2030",
+      "serie": "POWER 600",
+      "estado_uso": "BODEGA",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Activo fijo",
+      "nombre": "LAPTO",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 1200,
+      "stock_minimo": "",
+      "codigo": "LLV001",
+      "marca": "LENOVO",
+      "modelo": "24H2 V14G3 IAP 82TS",
+      "serie": "WINDOWS: 11 PRO",
+      "estado_uso": "BODEGA",
+      "responsable": ""
+    }
+  ],
+  "muestraImpresion": [
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "MONITORES + TECLADO MAUSE Y CPU — LENOVO — [CCTM001- CCTM002]",
+      "cantidad": 2,
+      "unidad": "unidades",
+      "precio_costo": 1600,
+      "stock_minimo": "",
+      "codigo": "CCTM001- CCTM002",
+      "marca": "LENOVO",
+      "modelo": "",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "PLOTTER DE IMPRECION — OMAJI — 3.2 — [PTT001]",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 3600,
+      "stock_minimo": "",
+      "codigo": "PTT001",
+      "marca": "OMAJI",
+      "modelo": "3.2",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "PLOTTER DE IMPRECION — MACAMBA — 1.8 — [PTT002]",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 2900,
+      "stock_minimo": "",
+      "codigo": "PTT002",
+      "marca": "MACAMBA",
+      "modelo": "1.8",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "ATROQUELADORA O PLOTTER DE CORTE — 1.3 — [APTT001]",
+      "cantidad": 2,
+      "unidad": "unidades",
+      "precio_costo": 780,
+      "stock_minimo": "",
+      "codigo": "APTT001",
+      "marca": "",
+      "modelo": "1.3",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "LAMINADORA — LEFU — [LM001]",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 1500,
+      "stock_minimo": "",
+      "codigo": "LM001",
+      "marca": "LEFU",
+      "modelo": "",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "SUBLIMADORA DE CAMISETAS — KOSEM — [SB001]",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 500,
+      "stock_minimo": "",
+      "codigo": "SB001",
+      "marca": "KOSEM",
+      "modelo": "",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "SUBLIMADORA DE GORRAS — DSS — [SG001]",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 350,
+      "stock_minimo": "",
+      "codigo": "SG001",
+      "marca": "DSS",
+      "modelo": "",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "SUBLIMADORAS DE TAZAS — FREESUB — [ST001]",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 150,
+      "stock_minimo": "",
+      "codigo": "ST001",
+      "marca": "FREESUB",
+      "modelo": "",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    },
+    {
+      "subtipo": "Material no rastreable (tintas)",
+      "nombre": "OJALERA — DSS — [OJ001]",
+      "cantidad": 1,
+      "unidad": "unidades",
+      "precio_costo": 27.99,
+      "stock_minimo": "",
+      "codigo": "OJ001",
+      "marca": "DSS",
+      "modelo": "",
+      "serie": "",
+      "estado_uso": "EN USO",
+      "responsable": ""
+    }
+  ]
+}

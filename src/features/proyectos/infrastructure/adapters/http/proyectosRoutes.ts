@@ -74,6 +74,7 @@ router.get('/:id/archivos/:filename', (req, res) => controller.serveArchivoProye
 router.use(authMiddleware);
 
 router.get('/', (req, res) => controller.list(req, res));
+router.get('/reportes/stats', (req, res) => controller.getProjectStats(req, res));
 router.post('/sincronizar-devoluciones', (req, res) => controller.sincronizarDevoluciones(req, res));
 router.get('/:id', (req, res) => controller.getById(req, res));
 router.post('/', (req, res) => controller.create(req, res));

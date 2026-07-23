@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../../../../../config/prismaClient.js';
+import { Decimal } from '@prisma/client/runtime/library';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { logAuditAction } from '../../../../../shared/services/auditLogService.js';
 
@@ -180,13 +181,9 @@ export class ProformasController {
         estado = '',
         fechaDesde = '',
         fechaHasta = '',
-<<<<<<< Updated upstream
-        clienteId = ''
-=======
         clienteId = '',
         usuario = '',
         conAbonos = ''
->>>>>>> Stashed changes
       } = req.query;
 
       const pageNum = Math.max(1, parseInt(String(page), 10));
@@ -223,8 +220,6 @@ export class ProformasController {
         } else {
           where.estado = estStr;
         }
-      } else {
-        where.estado = { not: 'Rechazada' };
       }
 
       // Búsqueda por texto (cliente, ID, teléfono, email)
@@ -349,6 +344,29 @@ export class ProformasController {
       const b = req.body || {};
       const clienteId = await resolveClienteId(b.clienteId);
 
+      // Obtener el estado actual antes de la actualización para detectar si estaba rechazada
+      const existingProforma = await prisma.proforma.findUnique({
+        where: { id: String(id) },
+        select: { estado: true }
+      });
+
+      if (!existingProforma) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Proforma no encontrada' } });
+      }
+
+      const userRole = ((req as any).user?.rol || '').toUpperCase();
+      const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
+      const isVentasODisenador = ['VENTAS', 'DISEÑADOR', 'DISENADOR'].includes(userRole);
+
+      if (!isAdmin) {
+        if (!isVentasODisenador) {
+          return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'No tienes permiso para editar proformas' } });
+        }
+        if (existingProforma.estado !== 'Rechazada') {
+          return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Solo se pueden editar proformas en estado Rechazada' } });
+        }
+      }
+
       // Reemplazamos los ítems por completo en una sola transacción anidada
       const updated = await prisma.proforma.update({
         where: { id: String(id) },
@@ -414,6 +432,24 @@ export class ProformasController {
           }
         } catch (e) {
           console.error(`Error actualizando fase ${fase.id}:`, e);
+        }
+      }
+
+      // Si la proforma estaba Rechazada y ahora pasa a Pendiente
+      if (existingProforma?.estado === 'Rechazada' && updated.estado === 'Pendiente') {
+        try {
+          const subtotal = updated.items.reduce((s: number, item: any) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
+          const totalVal = subtotal * (1 + Number(updated.iva));
+          const createdByNom = (req as any).user?.nombre || updated.atiende || 'Sistema';
+
+          await notifyRoles(['admin', 'administrador'], {
+            title: 'Proforma Re-enviada para Aprobación',
+            message: `La proforma rechazada ${updated.id} para el cliente "${updated.clienteNombre}" ha sido editada y re-enviada para aprobación. Total: $${totalVal.toFixed(2)}.`,
+            createdBy: createdByNom,
+            url: `/proformas/detalle/${updated.id}`,
+          });
+        } catch (notifErr) {
+          console.error('[proformas/update/notify]', notifErr);
         }
       }
 
@@ -523,7 +559,7 @@ export class ProformasController {
 
       let ivaToApply = proforma.iva;
       if (aplicarIva !== undefined) {
-        ivaToApply = aplicarIva ? 0.15 : 0;
+        ivaToApply = new Decimal(aplicarIva ? 0.15 : 0);
       }
 
       // Calcular total de la proforma
@@ -911,6 +947,15 @@ export class ProformasController {
   async remove(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
+
+      const userRole = ((req as any).user?.rol || '').toUpperCase();
+      const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
+      if (!isAdmin) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Solo los administradores pueden eliminar proformas' },
+        });
+      }
 
       // 1. Cascade delete in ProyectoFase
       const fases = await prisma.proyectoFase.findMany({

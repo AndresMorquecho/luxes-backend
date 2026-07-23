@@ -1,8 +1,29 @@
 import ExcelJS from 'exceljs';
+import fs from 'fs';
+import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
-import { calcSueldoBrutoQuincena, sueldoDiarioEnQuincena, sueldoQuincenaBase, } from '../../../../../shared/utils/sueldoHelpers.js';
-import { calcDiasLaborables, calcDiasLaborados, normalizeFeriados, } from '../../../../../shared/utils/nominaPeriodoHelpers.js';
-import { computeDecimosProvisions, ingresosGravadosPeriodo, loadSbuVigente, } from '../../../../../shared/utils/decimosEcuadorHelpers.js';
+import { calcSueldoBrutoQuincena, sueldoDiarioEnQuincena, sueldoMensualEfectivo, } from '../../../../../shared/utils/sueldoHelpers.js';
+import { calcDiasLaborables, calcDiasLaborados, normalizeFeriados, iterDatesInPeriod, isDiaLaboralSemana, feriadosEnPeriodo, } from '../../../../../shared/utils/nominaPeriodoHelpers.js';
+import { loadSbuVigente, } from '../../../../../shared/utils/decimosEcuadorHelpers.js';
+const toDateOnly = (value) => {
+    const str = typeof value === 'string' ? value : value.toISOString().split('T')[0];
+    return new Date(`${str}T00:00:00.000Z`);
+};
+const formatDateOnly = (value) => value.toISOString().split('T')[0];
+/**
+ * Calculates the fine/discount amount for a nomina record.
+ * `permisoHoras` now stores the accumulated fine in USD directly (from the new QR fine schedule).
+ * Legacy records that used the hours × $2.50 formula will still be stored as hours ≥ 0.5 increments;
+ * we detect them by checking if the value is a multiple of 0.5 AND small (≤ 8 h = 24 h of work).
+ * For new records, the value is already in $, so we return it as-is.
+ *
+ * NOTE: the frontend's NominaMesTab now sets permisoHoras = sum(multaDolares) directly.
+ * This function simply returns the value unchanged for those records.
+ */
+function calcularValorDescuento(permisoHoras) {
+    // permisoHoras is now stored as direct USD value from the fine schedule.
+    return Number(permisoHoras || 0);
+}
 async function loadPeriodoFeriados(fInicio, fFin) {
     try {
         const config = await prisma.nominaPeriodoConfig?.findUnique?.({
@@ -19,6 +40,30 @@ async function loadPeriodoFeriados(fInicio, fFin) {
         return [];
     }
 }
+async function nextGastoId() {
+    const rows = await prisma.gasto.findMany({ select: { id: true } });
+    const max = rows.reduce((m, r) => {
+        const match = String(r.id).match(/^GTO-(\d+)$/);
+        if (match) {
+            const n = parseInt(match[1], 10);
+            return Number.isFinite(n) && n > m ? n : m;
+        }
+        return m;
+    }, 0);
+    return `GTO-${String(max + 1).padStart(3, '0')}`;
+}
+async function findCierreThatCovers(fecha) {
+    const d = new Date(fecha);
+    d.setHours(0, 0, 0, 0);
+    const dEnd = new Date(d);
+    dEnd.setHours(23, 59, 59, 999);
+    return prisma.cierreCaja.findFirst({
+        where: {
+            fechaInicio: { lte: dEnd },
+            fechaFin: { gte: d },
+        },
+    });
+}
 export class NominaController {
     // ─── Horas Extras (Overtime) Endpoints ───
     async getOvertime(req, res) {
@@ -33,8 +78,8 @@ export class NominaController {
             const records = await prisma.horaExtra.findMany({
                 where: {
                     fecha: {
-                        gte: new Date(String(fechaInicio)),
-                        lte: new Date(String(fechaFin)),
+                        gte: toDateOnly(String(fechaInicio)),
+                        lte: toDateOnly(String(fechaFin)),
                     }
                 },
                 orderBy: { fecha: 'asc' }
@@ -42,7 +87,7 @@ export class NominaController {
             // Map decimal fields to number to avoid JSON big decimal issue
             const formatted = records.map(r => ({
                 id: r.id,
-                fecha: r.fecha.toISOString().split('T')[0],
+                fecha: formatDateOnly(r.fecha),
                 colaboradorId: r.colaboradorId,
                 horas: Number(r.horas),
                 detalleHorario: r.detalleHorario,
@@ -75,44 +120,33 @@ export class NominaController {
                     error: { code: 'VALIDATION_ERROR', message: 'horasExtras debe ser un arreglo' }
                 });
             }
-            // Upsert all received records
+            // Upsert solo los registros recibidos (sin borrar otros del período)
             const saved = [];
-            const receivedIds = [];
             for (const r of horasExtras) {
                 const total = Number(r.horas) * Number(r.valorPorHora);
-                const recordId = r.id && String(r.id).length > 5 && !String(r.id).includes('.') ? String(r.id) : undefined;
-                const upserted = await prisma.horaExtra.upsert({
-                    where: { id: recordId || 'dummy-uuid-to-force-create' },
-                    update: {
-                        fecha: new Date(r.fecha),
-                        colaboradorId: String(r.colaboradorId),
-                        horas: Number(r.horas),
-                        detalleHorario: r.detalleHorario || '',
-                        descripcion: r.descripcion || '',
-                        valorPorHora: Number(r.valorPorHora),
-                        total: total,
-                        estado: r.estado || 'DEUDOR',
-                        aprobacionEstado: r.aprobacionEstado || 'APROBADA',
-                        origen: r.origen || 'MANUAL',
-                    },
-                    create: {
-                        id: recordId,
-                        fecha: new Date(r.fecha),
-                        colaboradorId: String(r.colaboradorId),
-                        horas: Number(r.horas),
-                        detalleHorario: r.detalleHorario || '',
-                        descripcion: r.descripcion || '',
-                        valorPorHora: Number(r.valorPorHora),
-                        total: total,
-                        estado: r.estado || 'DEUDOR',
-                        aprobacionEstado: r.aprobacionEstado || 'APROBADA',
-                        origen: r.origen || 'MANUAL',
-                    }
-                });
-                receivedIds.push(upserted.id);
+                const recordId = r.id ? String(r.id) : undefined;
+                const data = {
+                    fecha: toDateOnly(String(r.fecha)),
+                    colaboradorId: String(r.colaboradorId),
+                    horas: Number(r.horas),
+                    detalleHorario: r.detalleHorario || '',
+                    descripcion: r.descripcion || '',
+                    valorPorHora: Number(r.valorPorHora),
+                    total,
+                    estado: r.estado || 'DEUDOR',
+                    aprobacionEstado: r.aprobacionEstado || 'APROBADA',
+                    origen: r.origen || 'MANUAL',
+                };
+                const upserted = recordId
+                    ? await prisma.horaExtra.upsert({
+                        where: { id: recordId },
+                        update: data,
+                        create: { id: recordId, ...data },
+                    })
+                    : await prisma.horaExtra.create({ data });
                 saved.push({
                     id: upserted.id,
-                    fecha: upserted.fecha.toISOString().split('T')[0],
+                    fecha: formatDateOnly(upserted.fecha),
                     colaboradorId: upserted.colaboradorId,
                     horas: Number(upserted.horas),
                     detalleHorario: upserted.detalleHorario,
@@ -122,20 +156,6 @@ export class NominaController {
                     estado: upserted.estado,
                     aprobacionEstado: upserted.aprobacionEstado,
                     origen: upserted.origen,
-                });
-            }
-            // If range is provided, delete records in the range that are NOT in the receivedIds list
-            if (fechaInicio && fechaFin) {
-                await prisma.horaExtra.deleteMany({
-                    where: {
-                        fecha: {
-                            gte: new Date(String(fechaInicio)),
-                            lte: new Date(String(fechaFin))
-                        },
-                        id: {
-                            notIn: receivedIds
-                        }
-                    }
                 });
             }
             return res.status(200).json({
@@ -224,6 +244,27 @@ export class NominaController {
             return res.status(500).json({
                 success: false,
                 error: { code: 'INTERNAL_ERROR', message: 'Error al rechazar horas extras' },
+            });
+        }
+    }
+    async deleteOvertime(req, res) {
+        try {
+            const id = String(req.params.id);
+            const existing = await prisma.horaExtra.findUnique({ where: { id } });
+            if (!existing) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Registro de horas extras no encontrado' },
+                });
+            }
+            await prisma.horaExtra.delete({ where: { id } });
+            return res.status(200).json({ success: true });
+        }
+        catch (error) {
+            console.error('[nomina/deleteOvertime]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar horas extras' },
             });
         }
     }
@@ -317,11 +358,15 @@ export class NominaController {
                     nominasAnioByEmp.set(n.empleadoId, []);
                 nominasAnioByEmp.get(n.empleadoId).push(n);
             }
+            // fFin = start of last day in UTC (e.g. 2026-07-15T00:00:00Z)
+            // Marks on the last day can be up to 2026-07-16T04:59:59Z (23:59 Ecuador UTC-5)
+            // Add 29 hours to safely include all marks on the last quincena day
+            const fFinEnd = new Date(fFin.getTime() + 29 * 60 * 60 * 1000);
             // Pre-fetch related records in batch to avoid N+1 queries
             const asistenciasBatch = await prisma.asistencia.findMany({
                 where: {
                     empleadoId: { in: empleadoIds },
-                    fechaHora: { gte: fInicio, lte: fFin }
+                    fechaHora: { gte: fInicio, lte: fFinEnd }
                 },
                 select: {
                     empleadoId: true,
@@ -382,14 +427,63 @@ export class NominaController {
             const recordsMap = new Map(records.map(r => [r.empleadoId, r]));
             const transactionOperations = [];
             const userIndexInTransaction = new Map();
+            const lunSatPeriodo = iterDatesInPeriod(fInicioStr, fFinStr).filter(isDiaLaboralSemana).length;
+            const feriadosLunSat = feriadosEnPeriodo(feriados, fInicioStr, fFinStr).filter((f) => isDiaLaboralSemana(f.fecha)).length;
+            const diasLaborablesEventual = Math.max(0, lunSatPeriodo - feriadosLunSat);
             for (const emp of empleados) {
                 const empAsistencias = asistenciasByEmpleado.get(emp.id) || [];
-                const hasContract = emp.tieneContrato !== false;
-                const { diasLaborados: diasTrabajados } = calcDiasLaborados(empAsistencias, feriados, fInicioStr, fFinStr, hasContract);
-                const sueldoDiario = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diffDias);
-                const defaultSueldoBruto = hasContract
-                    ? sueldoQuincenaBase(Number(emp.sueldoDiario))
-                    : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasTrabajados, diffDias);
+                const isFijo = emp.tieneContrato !== false;
+                // 1. Días Laborables
+                const diasLaborables = isFijo ? 15 : diasLaborablesEventual;
+                // 2. Sueldo mensual y quincenal
+                const sueldoMensual = sueldoMensualEfectivo(Number(emp.sueldoDiario));
+                const sueldoQuincenaBase = sueldoMensual / 2;
+                const sueldoDiario = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diasLaborables);
+                // 3. Días Trabajados (Reales)
+                const { diasAsistencia, diasFeriado, diasLaborados: originalDiasLaborados } = calcDiasLaborados(empAsistencias, feriados, fInicioStr, fFinStr, isFijo);
+                const diasTrabajadosReales = isFijo ? originalDiasLaborados : diasAsistencia;
+                // 4. Bruto total de días
+                const totalBruto = Math.round(sueldoDiario * diasTrabajadosReales * 100) / 100;
+                // 5. Permisos
+                const existing = recordsMap.get(emp.id);
+                const existingEgresos = existing ? (typeof existing.egresos === 'string' ? JSON.parse(existing.egresos) : (existing.egresos || {})) : {};
+                const permisosDetalleArr = Array.isArray(existingEgresos.permisosDetalle) ? existingEgresos.permisosDetalle : [];
+                // Fuente de verdad: recalcular desde permisosDetalle si existen registros activos
+                const permisoHorasFromDetail = permisosDetalleArr.length > 0
+                    ? Math.round(permisosDetalleArr
+                        .filter((r) => !r.eliminado)
+                        .reduce((s, r) => {
+                        if (r.multaDolares !== undefined)
+                            return s + Number(r.multaDolares);
+                        const h = Number(r.horas || 0);
+                        return s + Math.floor(h) * 2.50 + ((h % 1) >= 0.499 ? 1.50 : 0);
+                    }, 0) * 100) / 100
+                    : null;
+                const permisoHorasDB = existing ? Number(existing.permisoHoras) : 0;
+                const permisoHoras = permisoHorasFromDetail !== null ? permisoHorasFromDetail : permisoHorasDB;
+                const valorPermisoHoras = calcularValorDescuento(permisoHoras);
+                // 6. Décimos
+                let decimoCuartoQuincenal = 0;
+                let decimoTerceroQuincenal = 0;
+                if (isFijo) {
+                    const dec4Val = emp.decimoCuartoValor !== null && emp.decimoCuartoValor !== undefined
+                        ? Number(emp.decimoCuartoValor)
+                        : 40.16;
+                    decimoCuartoQuincenal = Math.round((dec4Val / 2) * 100) / 100;
+                    const dec3Val = emp.decimoTerceroValor !== null && emp.decimoTerceroValor !== undefined
+                        ? Number(emp.decimoTerceroValor)
+                        : (sueldoMensual / 12);
+                    decimoTerceroQuincenal = Math.round((dec3Val / 2) * 100) / 100;
+                }
+                // 7. IESS
+                let iessVal = 0;
+                if (isFijo) {
+                    const iessConfig = emp.iessValor !== null && emp.iessValor !== undefined
+                        ? Number(emp.iessValor)
+                        : (sueldoMensual * 0.0945);
+                    iessVal = Math.round((iessConfig / 2) * 100) / 100;
+                }
+                // 8. Custom Egresos/Ingresos sum
                 const empHorasExtras = (horasExtrasByEmpleado.get(emp.id) || []).filter((h) => h.aprobacionEstado === 'APROBADA');
                 const horasExtrasSum = empHorasExtras.reduce((s, h) => s + Number(h.total), 0);
                 const empIngresos = ingresosByEmpleado.get(emp.id) || [];
@@ -399,22 +493,6 @@ export class NominaController {
                     if (i.tipo === 'TRAB_EMP')
                         trabEmpSum += mVal;
                 }
-                const gravado = ingresosGravadosPeriodo(defaultSueldoBruto, horasExtrasSum, trabEmpSum);
-                const nominasPrevias = (nominasAnioByEmp.get(emp.id) || []).filter((n) => n.fechaFin.toISOString().slice(0, 10) < fFinStr);
-                const decimos = computeDecimosProvisions({
-                    gravado,
-                    sbuVigente,
-                    fechaInicio: fInicioStr,
-                    fechaFin: fFinStr,
-                    tieneContrato: hasContract,
-                    decimoTerceroMensualizado: Boolean(emp.decimoTerceroMensualizado),
-                    decimoCuartoMensualizado: Boolean(emp.decimoCuartoMensualizado),
-                    region: emp.region === 'sierra' ? 'sierra' : 'costa',
-                    nominasPreviasAnio: nominasPrevias,
-                });
-                const decimoCuartoVal = 0;
-                const decimoTerceroVal = 0;
-                const iessVal = hasContract ? Math.round((gravado * 0.0945) * 100) / 100 : 0;
                 const empEgresos = egresosByEmpleado.get(emp.id) || [];
                 let anticiposSum = 0;
                 let multasSum = 0;
@@ -428,7 +506,25 @@ export class NominaController {
                     else if (e.tipo === 'OTROS')
                         otrosSum += mVal;
                 }
-                const existing = recordsMap.get(emp.id);
+                // 9. Armar JSONs
+                const defaultIngresos = {
+                    decimoTercero: decimoTerceroQuincenal,
+                    decimoCuarto: decimoCuartoQuincenal,
+                    horasExtras: horasExtrasSum,
+                    trabajosEnEmpresa: trabEmpSum,
+                    fondosReserva: 0,
+                };
+                const defaultEgresos = {
+                    iess: iessVal,
+                    extensionConyuge: 0,
+                    prestamoQuirografario: 0,
+                    anticipos: anticiposSum,
+                    dctoHorasNoLaboradas: valorPermisoHoras,
+                    multas: multasSum,
+                    dctoFiesta: 0,
+                    dctoHerramientas: 0,
+                    dctoGenerico: otrosSum,
+                };
                 if (!existing) {
                     userIndexInTransaction.set(emp.id, transactionOperations.length);
                     transactionOperations.push(prisma.nominaRegistro.create({
@@ -436,69 +532,42 @@ export class NominaController {
                             empleadoId: emp.id,
                             fechaInicio: fInicio,
                             fechaFin: fFin,
-                            diasLaborables: diffDias,
-                            diasLaborados: diasTrabajados,
+                            diasLaborables: diasLaborables,
+                            diasLaborados: diasTrabajadosReales,
                             permisoHoras: 0,
-                            ingresos: {
-                                ...decimos,
-                                horasExtras: horasExtrasSum,
-                                trabajosEnEmpresa: trabEmpSum,
-                                fondosReserva: 0,
-                            },
-                            egresos: {
-                                iess: iessVal,
-                                extensionConyuge: 0,
-                                prestamoQuirografario: 0,
-                                anticipos: anticiposSum,
-                                dctoHorasNoLaboradas: 0,
-                                multas: multasSum,
-                                dctoFiesta: 0,
-                                dctoHerramientas: 0,
-                                dctoGenerico: otrosSum,
-                            },
+                            ingresos: defaultIngresos,
+                            egresos: defaultEgresos,
                             abonos: [],
                             estado: "PENDIENTE"
                         }
                     }));
                 }
                 else {
-                    // Si existe y no está completamente liquidado/pagado, actualizamos diasLaborados e IESS/Décimos por si hay nuevas marcaciones QR
                     if (existing.estado === "PENDIENTE" || existing.estado === "ABONO_PARCIAL") {
-                        const currentIngresos = existing.ingresos || {};
-                        const currentEgresos = existing.egresos || {};
-                        const updatedIngresos = { ...currentIngresos };
-                        const updatedEgresos = { ...currentEgresos };
-                        if (!hasContract) {
-                            updatedIngresos.decimoCuarto = 0;
-                            updatedIngresos.decimoTercero = 0;
-                            updatedIngresos.provisionDecimo3 = 0;
-                            updatedIngresos.provisionDecimo4 = 0;
-                            updatedIngresos.acumuladoDecimo3 = 0;
-                            updatedIngresos.acumuladoDecimo4 = 0;
-                            updatedIngresos.pagoDecimo3 = 0;
-                            updatedIngresos.pagoDecimo4 = 0;
-                            updatedIngresos.fondosReserva = 0;
-                            updatedEgresos.iess = 0;
-                        }
-                        else {
-                            Object.assign(updatedIngresos, decimos);
-                            updatedIngresos.decimoTercero = 0;
-                            updatedIngresos.decimoCuarto = 0;
-                            updatedEgresos.iess = iessVal;
-                        }
-                        // Sincronizamos las horas extras y trabajos empresa:
-                        updatedIngresos.horasExtras = horasExtrasSum;
-                        updatedIngresos.trabajosEnEmpresa = trabEmpSum;
-                        // Sincronizamos los egresos detallados:
-                        updatedEgresos.anticipos = anticiposSum;
-                        updatedEgresos.multas = multasSum;
-                        updatedEgresos.dctoGenerico = otrosSum;
+                        const currentIngresos = typeof existing.ingresos === 'string' ? JSON.parse(existing.ingresos) : (existing.ingresos || {});
+                        const currentEgresos = existingEgresos; // already safely parsed above (preserves permisosDetalle)
+                        const updatedIngresos = {
+                            ...currentIngresos,
+                            decimoTercero: decimoTerceroQuincenal,
+                            decimoCuarto: decimoCuartoQuincenal,
+                            horasExtras: horasExtrasSum,
+                            trabajosEnEmpresa: trabEmpSum,
+                        };
+                        const updatedEgresos = {
+                            ...currentEgresos,
+                            iess: iessVal,
+                            anticipos: anticiposSum,
+                            dctoHorasNoLaboradas: valorPermisoHoras,
+                            multas: multasSum,
+                            dctoGenerico: otrosSum,
+                        };
                         userIndexInTransaction.set(emp.id, transactionOperations.length);
                         transactionOperations.push(prisma.nominaRegistro.update({
                             where: { id: existing.id },
                             data: {
-                                diasLaborados: diasTrabajados,
-                                diasLaborables: diffDias,
+                                diasLaborados: diasTrabajadosReales, // calculado de asistencias reales (incluye SALIDA_PERMISO)
+                                diasLaborables: diasLaborables,
+                                permisoHoras: permisoHoras, // auto-heal: recalculated from permisosDetalle
                                 ingresos: updatedIngresos,
                                 egresos: updatedEgresos,
                             }
@@ -690,6 +759,116 @@ export class NominaController {
                     error: { code: 'VALIDATION_ERROR', message: 'empleadoId, fechaInicio y fechaFin son requeridos' }
                 });
             }
+            // 1. Obtener la nómina actual para comparar abonos
+            const oldNomina = await prisma.nominaRegistro.findUnique({
+                where: {
+                    empleadoId_fechaInicio_fechaFin: {
+                        empleadoId: String(data.empleadoId),
+                        fechaInicio: new Date(data.fechaInicio),
+                        fechaFin: new Date(data.fechaFin),
+                    }
+                }
+            });
+            const oldAbonos = (oldNomina && Array.isArray(oldNomina.abonos))
+                ? oldNomina.abonos
+                : [];
+            const newAbonos = Array.isArray(data.abonos)
+                ? data.abonos
+                : [];
+            const empleado = await prisma.empleado.findUnique({
+                where: { id: String(data.empleadoId) }
+            });
+            const empleadoNombre = empleado ? empleado.nombre.trim() : 'Empleado';
+            const registradoPorUserId = req.user?.id || null;
+            // 2. Identificar abonos eliminados y validar cierres de caja antes de hacer cambios
+            for (const oldAb of oldAbonos) {
+                if (oldAb.id) {
+                    const existsInNew = newAbonos.some(n => n.id === oldAb.id);
+                    if (!existsInNew) {
+                        const existingGasto = await prisma.gasto.findUnique({ where: { id: oldAb.id } });
+                        if (existingGasto) {
+                            const cierreBloqueante = await findCierreThatCovers(existingGasto.fecha);
+                            if (cierreBloqueante) {
+                                const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+                                const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+                                return res.status(403).json({
+                                    success: false,
+                                    error: {
+                                        code: 'PERIODO_CERRADO',
+                                        message: `No se puede eliminar el abono porque pertenece a un período de caja cerrado (${fi} al ${ff}).`
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            // 3. Identificar abonos nuevos, asignarles ID secuencial si es necesario y crear el Gasto
+            for (const ab of newAbonos) {
+                if (ab.metodoPagoId) {
+                    if (!ab.id || !ab.id.startsWith('GTO-')) {
+                        ab.id = await nextGastoId();
+                    }
+                    const existsInOld = oldAbonos.some(o => o.id === ab.id);
+                    if (!existsInOld) {
+                        const existingGasto = await prisma.gasto.findUnique({ where: { id: ab.id } });
+                        if (!existingGasto) {
+                            const fStart = new Date(data.fechaInicio).toLocaleDateString('es-EC', { month: 'short', year: 'numeric' });
+                            const mp = await prisma.metodoPago.findUnique({ where: { id: ab.metodoPagoId } });
+                            ab.metodoPagoNombre = mp?.nombre || 'No especificado';
+                            const userObj = registradoPorUserId
+                                ? await prisma.user.findUnique({ where: { id: registradoPorUserId }, select: { nombre: true } })
+                                : null;
+                            ab.usuarioNombre = userObj?.nombre || 'Usuario';
+                            const now = new Date();
+                            const pad = (n) => String(n).padStart(2, '0');
+                            ab.fechaHora = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+                            await prisma.gasto.create({
+                                data: {
+                                    id: ab.id,
+                                    concepto: `Pago de Nómina - ${empleadoNombre} (${fStart})`,
+                                    categoria: 'nomina',
+                                    fecha: new Date(ab.fecha),
+                                    monto: Number(ab.monto),
+                                    proveedor: empleadoNombre,
+                                    metodoPagoId: ab.metodoPagoId,
+                                    registradoPorUserId: registradoPorUserId ?? undefined,
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            // 4. Eliminar gastos de los abonos que fueron removidos
+            for (const oldAb of oldAbonos) {
+                if (oldAb.id) {
+                    const existsInNew = newAbonos.some(n => n.id === oldAb.id);
+                    if (!existsInNew) {
+                        const existingGasto = await prisma.gasto.findUnique({ where: { id: oldAb.id } });
+                        if (existingGasto) {
+                            await prisma.gasto.delete({ where: { id: oldAb.id } });
+                        }
+                    }
+                }
+            }
+            // 5. Upsert de la nómina con los abonos sincronizados
+            // Recalculate permisoHoras and dctoHorasNoLaboradas from permisosDetalle to keep DB consistent
+            const egresosFromBody = data.egresos || {};
+            const detalleList = Array.isArray(egresosFromBody.permisosDetalle) ? egresosFromBody.permisosDetalle : [];
+            const recalcPermisoHoras = detalleList.length > 0
+                ? Math.round(detalleList
+                    .filter((r) => !r.eliminado)
+                    .reduce((s, r) => {
+                    if (r.multaDolares !== undefined)
+                        return s + Number(r.multaDolares);
+                    const h = Number(r.horas || 0);
+                    return s + Math.floor(h) * 2.50 + ((h % 1) >= 0.499 ? 1.50 : 0);
+                }, 0) * 100) / 100
+                : Number(data.permisoHoras || 0);
+            const egresosToSave = {
+                ...egresosFromBody,
+                dctoHorasNoLaboradas: recalcPermisoHoras,
+            };
             const updated = await prisma.nominaRegistro.upsert({
                 where: {
                     empleadoId_fechaInicio_fechaFin: {
@@ -701,10 +880,10 @@ export class NominaController {
                 update: {
                     diasLaborables: Number(data.diasLaborables),
                     diasLaborados: Number(data.diasLaborados),
-                    permisoHoras: Number(data.permisoHoras),
+                    permisoHoras: recalcPermisoHoras,
                     ingresos: data.ingresos || {},
-                    egresos: data.egresos || {},
-                    abonos: data.abonos || [],
+                    egresos: egresosToSave,
+                    abonos: newAbonos,
                     estado: data.estado || "PENDIENTE",
                 },
                 create: {
@@ -713,10 +892,10 @@ export class NominaController {
                     fechaFin: new Date(data.fechaFin),
                     diasLaborables: Number(data.diasLaborables),
                     diasLaborados: Number(data.diasLaborados),
-                    permisoHoras: Number(data.permisoHoras),
+                    permisoHoras: recalcPermisoHoras,
                     ingresos: data.ingresos || {},
-                    egresos: data.egresos || {},
-                    abonos: data.abonos || [],
+                    egresos: egresosToSave,
+                    abonos: newAbonos,
                     estado: data.estado || "PENDIENTE",
                 }
             });
@@ -1207,9 +1386,7 @@ export class NominaController {
                 const sueldo = sueldoDiarioEnQuincena(Number(emp.sueldoDiario), diasLab);
                 const diasT = rawNomina ? Number(rawNomina.diasLaborados) : 0;
                 const totalB = rawNomina
-                    ? (hasContract
-                        ? sueldoQuincenaBase(Number(emp.sueldoDiario))
-                        : calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasT, diasLab))
+                    ? calcSueldoBrutoQuincena(Number(emp.sueldoDiario), diasT, diasLab)
                     : 0;
                 // Décimo cuarto: abono manual que puede registrarse en cualquier quincena. Se usa el
                 // valor guardado en la nómina (más abajo); por defecto 0 si no se ha abonado nada.
@@ -1622,6 +1799,62 @@ export class NominaController {
             res.status(500).json({
                 success: false,
                 error: { code: 'INTERNAL_ERROR', message: 'Error al exportar la nómina a Excel' }
+            });
+        }
+    }
+    /**
+     * Sube un comprobante de pago (imagen/archivo) al servidor.
+     * El archivo se guarda en uploads/comprobantes/ mediante multer (middleware en la ruta).
+     * Devuelve la URL relativa para guardarla en el abono.
+     */
+    async uploadComprobante(req, res) {
+        try {
+            const file = req.file;
+            if (!file) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'NO_FILE', message: 'No se recibió ningún archivo.' }
+                });
+            }
+            const url = `/uploads/comprobantes/${file.filename}`;
+            return res.status(200).json({
+                success: true,
+                data: { url, filename: file.filename, originalName: file.originalname }
+            });
+        }
+        catch (error) {
+            console.error('[nomina/uploadComprobante]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al subir el comprobante.' }
+            });
+        }
+    }
+    /**
+     * Elimina un comprobante de pago del disco.
+     */
+    async deleteComprobante(req, res) {
+        try {
+            const { filename } = req.params;
+            if (!filename) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'VALIDATION_ERROR', message: 'El nombre del archivo es requerido.' }
+                });
+            }
+            // Prevenir path traversal
+            const safeName = path.basename(String(filename));
+            const filePath = path.resolve('uploads', 'comprobantes', safeName);
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+            return res.status(200).json({ success: true });
+        }
+        catch (error) {
+            console.error('[nomina/deleteComprobante]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar el comprobante.' }
             });
         }
     }

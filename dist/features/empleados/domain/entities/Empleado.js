@@ -12,6 +12,9 @@ export class Empleado {
     decimoTerceroMensualizado;
     decimoCuartoMensualizado;
     sueldoDiario;
+    decimoTerceroValor;
+    decimoCuartoValor;
+    iessValor;
     direccion;
     foto;
     rol;
@@ -29,6 +32,9 @@ export class Empleado {
         this.decimoTerceroMensualizado = props.decimoTerceroMensualizado ?? false;
         this.decimoCuartoMensualizado = props.decimoCuartoMensualizado ?? false;
         this.sueldoDiario = props.sueldoDiario;
+        this.decimoTerceroValor = props.decimoTerceroValor !== undefined ? props.decimoTerceroValor : null;
+        this.decimoCuartoValor = props.decimoCuartoValor !== undefined ? props.decimoCuartoValor : null;
+        this.iessValor = props.iessValor !== undefined ? props.iessValor : null;
         this.direccion = props.direccion;
         this.foto = props.foto ?? null;
         this.rol = props.rol;
@@ -48,6 +54,9 @@ export class Empleado {
             decimoTerceroMensualizado: this.decimoTerceroMensualizado,
             decimoCuartoMensualizado: this.decimoCuartoMensualizado,
             sueldoDiario: this.sueldoDiario,
+            decimoTerceroValor: this.decimoTerceroValor,
+            decimoCuartoValor: this.decimoCuartoValor,
+            iessValor: this.iessValor,
             direccion: this.direccion,
             foto: this.foto ?? '',
             rol: this.rol,

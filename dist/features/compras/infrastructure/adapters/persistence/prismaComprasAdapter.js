@@ -39,10 +39,13 @@ export class PrismaComprasAdapter {
         proyecto: { select: { id: true, nombre: true } },
     };
     async findAllOrdenes(options) {
-        const { page = 1, limit = 10, search, estado, estados, estadoPago, creadorRol, creadorId, pendienteRecepcion, proyectoId, } = options || {};
+        const { page = 1, limit = 10, search, estado, estados, estadoPago, proveedorId, creadorRol, creadorId, pendienteRecepcion, proyectoId, } = options || {};
         const where = {};
         if (proyectoId) {
             where.proyectoId = proyectoId;
+        }
+        if (proveedorId) {
+            where.proveedorId = proveedorId;
         }
         if (pendienteRecepcion) {
             where.estado = { in: ['aprobada', 'parcialmente_recibida'] };
@@ -112,7 +115,7 @@ export class PrismaComprasAdapter {
         const detalles = await this.prisma.detalleCompra.findMany({
             where: { ordenCompraId: { in: ordenIds } },
             include: {
-                material: { select: { id: true, nombre: true, codigo: true } },
+                material: { select: { id: true, nombre: true, codigo: true, categoria: true, subtipo: true, descargaStock: true } },
             },
             orderBy: { id: 'asc' },
         });
@@ -723,10 +726,25 @@ export class PrismaComprasAdapter {
             by: ['metodoPagoId'],
             _sum: { monto: true }
         });
+        const ingresosAllTime = await this.prisma.ingreso.groupBy({
+            by: ['metodoPagoId'],
+            _sum: { monto: true }
+        });
+        const transEnviadasAllTime = await this.prisma.transferencia.groupBy({
+            by: ['origenMetodoId'],
+            _sum: { monto: true }
+        });
+        const transRecibidasAllTime = await this.prisma.transferencia.groupBy({
+            by: ['destinoMetodoId'],
+            _sum: { monto: true }
+        });
         // 2. Fetch period-specific aggregates if dates are provided
         let abonosProformaPeriod = [];
         let gastosPeriod = [];
         let abonosCompraPeriod = [];
+        let ingresosPeriod = [];
+        let transEnviadasPeriod = [];
+        let transRecibidasPeriod = [];
         if (desde && hasta) {
             abonosProformaPeriod = await this.prisma.abonoProforma.groupBy({
                 by: ['metodoPagoId'],
@@ -743,31 +761,55 @@ export class PrismaComprasAdapter {
                 _sum: { monto: true },
                 where: { fecha: { gte: desde, lte: hasta } }
             });
+            ingresosPeriod = await this.prisma.ingreso.groupBy({
+                by: ['metodoPagoId'],
+                _sum: { monto: true },
+                where: { fecha: { gte: desde, lte: hasta } }
+            });
+            transEnviadasPeriod = await this.prisma.transferencia.groupBy({
+                by: ['origenMetodoId'],
+                _sum: { monto: true },
+                where: { fecha: { gte: desde, lte: hasta } }
+            });
+            transRecibidasPeriod = await this.prisma.transferencia.groupBy({
+                by: ['destinoMetodoId'],
+                _sum: { monto: true },
+                where: { fecha: { gte: desde, lte: hasta } }
+            });
         }
-        const mapById = (arr) => {
+        const mapById = (arr, key = 'metodoPagoId') => {
             const map = {};
             for (const item of arr) {
-                if (item.metodoPagoId) {
-                    map[item.metodoPagoId] = Number(item._sum.monto || 0);
+                const id = item[key];
+                if (id) {
+                    map[id] = Number(item._sum.monto || 0);
                 }
             }
             return map;
         };
         const ingAllTimeMap = mapById(abonosProformaAllTime);
+        const ingManualAllTimeMap = mapById(ingresosAllTime);
+        const transEnviadasAllTimeMap = mapById(transEnviadasAllTime, 'origenMetodoId');
+        const transRecibidasAllTimeMap = mapById(transRecibidasAllTime, 'destinoMetodoId');
         const gasAllTimeMap = mapById(gastosAllTime);
         const egrAllTimeMap = mapById(abonosCompraAllTime);
         const ingPeriodMap = (desde && hasta) ? mapById(abonosProformaPeriod) : ingAllTimeMap;
+        const ingManualPeriodMap = (desde && hasta) ? mapById(ingresosPeriod) : ingManualAllTimeMap;
+        const transEnviadasPeriodMap = (desde && hasta) ? mapById(transEnviadasPeriod, 'origenMetodoId') : transEnviadasAllTimeMap;
+        const transRecibidasPeriodMap = (desde && hasta) ? mapById(transRecibidasPeriod, 'destinoMetodoId') : transRecibidasAllTimeMap;
         const gasPeriodMap = (desde && hasta) ? mapById(gastosPeriod) : gasAllTimeMap;
         const egrPeriodMap = (desde && hasta) ? mapById(abonosCompraPeriod) : egrAllTimeMap;
         return metodos.map(m => {
-            const ingAllTime = ingAllTimeMap[m.id] || 0;
+            const ingAllTime = (ingAllTimeMap[m.id] || 0) + (ingManualAllTimeMap[m.id] || 0) + (transRecibidasAllTimeMap[m.id] || 0);
             const gasAllTime = gasAllTimeMap[m.id] || 0;
             const egrAllTime = egrAllTimeMap[m.id] || 0;
-            const saldoActual = ingAllTime - (gasAllTime + egrAllTime);
-            const ingPeriod = ingPeriodMap[m.id] || 0;
+            const transEnviadasAllTime = transEnviadasAllTimeMap[m.id] || 0;
+            const saldoActual = ingAllTime - (gasAllTime + egrAllTime + transEnviadasAllTime);
+            const ingPeriod = (ingPeriodMap[m.id] || 0) + (ingManualPeriodMap[m.id] || 0) + (transRecibidasPeriodMap[m.id] || 0);
             const gasPeriod = gasPeriodMap[m.id] || 0;
             const egrPeriod = egrPeriodMap[m.id] || 0;
-            const egresosPeriod = gasPeriod + egrPeriod;
+            const transEnviadasPeriod = transEnviadasPeriodMap[m.id] || 0;
+            const egresosPeriod = gasPeriod + egrPeriod + transEnviadasPeriod;
             return {
                 id: m.id,
                 nombre: m.nombre,
@@ -1012,6 +1054,87 @@ export class PrismaComprasAdapter {
                 motivo: data.motivo,
                 userId: data.userId || null,
             },
+        });
+    }
+    async createMaterialDesdeRollo(data) {
+        // 1. Obtener el material dado (podría ser un derivado o el original)
+        const materialDado = await this.prisma.material.findUnique({
+            where: { id: data.materialBaseId },
+            include: { unidadMedida: true },
+        });
+        if (!materialDado)
+            throw new Error(`Material ${data.materialBaseId} no encontrado.`);
+        // 2. Si el material dado es un derivado (tiene materialBaseId), subir al raíz real
+        //    Esto protege el consecutivo si el usuario puso un [R002] en la OC por error.
+        let rootId = data.materialBaseId;
+        let base = materialDado;
+        if (materialDado.materialBaseId) {
+            const raiz = await this.prisma.material.findUnique({
+                where: { id: materialDado.materialBaseId },
+                include: { unidadMedida: true },
+            });
+            if (raiz) {
+                rootId = raiz.id;
+                base = raiz;
+            }
+        }
+        // 3. Extraer el nombre base limpio (sin prefijo [Rnn])
+        const nombreBase = base.nombre.replace(/^\[R\d+\]\s*/, '');
+        // 4. Contar rollos derivados existentes con nombre base coincidente.
+        //    Usamos búsqueda por nombre (contains) + filtro JS para ser robusto si el
+        //    Prisma client no reconoce materialBaseId en el WHERE (cliente no regenerado).
+        const candidatos = await this.prisma.material.findMany({
+            where: { nombre: { contains: nombreBase } },
+            select: { id: true, nombre: true, materialBaseId: true },
+        });
+        // Contar solo los que son rollos derivados del mismo base (prefijo [Rnn] + nombre exacto)
+        const rollosExistentes = candidatos.filter(m => {
+            const esDerivado = /^\[R\d+\]\s*/.test(m.nombre);
+            const mismoNombreBase = m.nombre.replace(/^\[R\d+\]\s*/, '') === nombreBase;
+            const mismoBase = m.materialBaseId === rootId || m.materialBaseId === data.materialBaseId;
+            return esDerivado && mismoNombreBase && (mismoBase || !m.materialBaseId);
+        }).length;
+        // 5. El consecutivo siguiente = total de rollos ya existentes + 1
+        const consecutivo = String(rollosExistentes + 1).padStart(3, '0');
+        const nombreNuevo = `[R${consecutivo}] ${nombreBase}`;
+        // 6. Crear el nuevo Material (rollo individual) vinculado al raíz
+        const nuevoRollo = await this.prisma.material.create({
+            data: {
+                nombre: nombreNuevo,
+                tipo: base.tipo,
+                unidadMedidaId: base.unidadMedidaId,
+                stockActual: data.metros,
+                stockMinimo: 0,
+                precioCosto: data.precioCosto ?? base.precioCosto ?? 0,
+                codigo: `R${consecutivo}`,
+                categoria: base.categoria,
+                subtipo: base.subtipo,
+                descargaStock: true,
+                ancho: base.ancho,
+                ocultado: false,
+                materialBaseId: rootId,
+            },
+        });
+        // 7. Registrar movimiento de entrada
+        await this.prisma.movimientoInventario.create({
+            data: {
+                materialId: nuevoRollo.id,
+                tipo: 'entrada',
+                cantidad: data.metros,
+                motivo: `Recepción OC ${data.ordenNumero} — Rollo ${consecutivo} ingresado al inventario`,
+                userId: data.userId || null,
+            },
+        });
+        return { id: nuevoRollo.id, nombre: nombreNuevo };
+    }
+    async ocultarMaterialAgotado(materialId) {
+        await this.prisma.material.updateMany({
+            where: {
+                id: materialId,
+                stockActual: { lte: 0 },
+                subtipo: { in: ['consumible_descargable'] },
+            },
+            data: { ocultado: true },
         });
     }
 }

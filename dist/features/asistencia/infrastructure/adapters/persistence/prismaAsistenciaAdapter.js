@@ -33,10 +33,10 @@ export class PrismaAsistenciaAdapter extends AsistenciaRepositoryPort {
         return records.map((record) => mapRecord(record, record.empleado?.nombre));
     }
     async findTodayByEmpleado(empleadoId) {
-        const start = new Date();
-        start.setHours(0, 0, 0, 0);
-        const end = new Date();
-        end.setHours(23, 59, 59, 999);
+        const nowEcuador = new Date(Date.now() - 5 * 60 * 60 * 1000);
+        const dateStr = nowEcuador.toISOString().split('T')[0];
+        const start = new Date(`${dateStr}T00:00:00.000-05:00`);
+        const end = new Date(`${dateStr}T23:59:59.999-05:00`);
         const records = await prisma.asistencia.findMany({
             where: {
                 empleadoId,

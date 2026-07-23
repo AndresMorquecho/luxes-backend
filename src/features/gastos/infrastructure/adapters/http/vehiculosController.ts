@@ -35,7 +35,14 @@ export class VehiculosController {
       const vehiculos = await prisma.vehiculo.findMany({
         include: {
           mantenimientos: {
-            include: { gasto: { include: { metodoPago: true } } },
+            include: { 
+              gasto: { 
+                include: { 
+                  metodoPago: true,
+                  registradoPor: { select: { id: true, nombre: true } }
+                } 
+              } 
+            },
             orderBy: { fechaRealizado: 'desc' },
           },
         },
@@ -55,7 +62,14 @@ export class VehiculosController {
         where: { id: String(id) },
         include: {
           mantenimientos: {
-            include: { gasto: { include: { metodoPago: true } } },
+            include: { 
+              gasto: { 
+                include: { 
+                  metodoPago: true,
+                  registradoPor: { select: { id: true, nombre: true } }
+                } 
+              } 
+            },
             orderBy: { fechaRealizado: 'desc' },
           },
         },
@@ -202,6 +216,7 @@ export class VehiculosController {
 
       // 1. Crear Gasto asociado
       const gastoId = await nextGastoId();
+      const registradoPorUserId = (req as any).user?.id || null;
       await prisma.gasto.create({
         data: {
           id: gastoId,
@@ -212,6 +227,7 @@ export class VehiculosController {
           proveedor: b.proveedor ?? '',
           notas: b.notas ?? '',
           metodoPagoId: b.metodoPagoId || null,
+          registradoPorUserId: registradoPorUserId ?? undefined,
         },
       });
 
@@ -338,6 +354,87 @@ export class VehiculosController {
     } catch (error) {
       console.error('[mantenimientos/remove]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar mantenimiento' } });
+    }
+  }
+
+  // --- CONTROLES DE VEHÍCULO ───────────────────────────────────────────────
+
+  async listControles(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id: vehiculoId } = req.params;
+      const controles = await prisma.vehiculoControl.findMany({
+        where: { vehiculoId: String(vehiculoId) },
+        orderBy: { fecha: 'desc' },
+      });
+      return res.status(200).json({ success: true, data: controles });
+    } catch (error) {
+      console.error('[controles/list]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener controles de vehículo' } });
+    }
+  }
+
+  async createControl(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id: vehiculoId } = req.params;
+      const b = req.body || {};
+
+      if (b.kilometraje === undefined || !b.combustible) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Kilometraje y nivel de combustible son requeridos' } });
+      }
+
+      const vehiculo = await prisma.vehiculo.findUnique({
+        where: { id: String(vehiculoId) },
+      });
+
+      if (!vehiculo) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Vehículo no encontrado' } });
+      }
+
+      const usuarioId = (req as any).user?.id || null;
+      // Look up real user name from DB since JWT doesn't include nombre
+      let usuarioNom = 'Usuario';
+      if (usuarioId) {
+        const userRecord = await prisma.user.findUnique({
+          where: { id: String(usuarioId) },
+          select: { nombre: true },
+        });
+        if (userRecord?.nombre) usuarioNom = userRecord.nombre;
+      }
+
+      const control = await prisma.vehiculoControl.create({
+        data: {
+          vehiculoId: String(vehiculoId),
+          usuarioId,
+          usuarioNom,
+          fecha: b.fecha ? new Date(b.fecha) : new Date(),
+          kilometraje: Number(b.kilometraje),
+          combustible: String(b.combustible),
+          nivelAceite: Boolean(b.nivelAceite),
+          nivelAgua: Boolean(b.nivelAgua),
+          aceiteHidraulico: Boolean(b.aceiteHidraulico),
+          liquidoFrenos: Boolean(b.liquidoFrenos),
+          gataLlave: Boolean(b.gataLlave),
+          extintorBotiquin: Boolean(b.extintorBotiquin),
+          bandas: Boolean(b.bandas),
+          otroCheckNombre: String(b.otroCheckNombre ?? ''),
+          otroCheckValor: Boolean(b.otroCheckValor),
+          observacion: String(b.observacion ?? ''),
+          sugerencia: String(b.sugerencia ?? ''),
+        },
+      });
+
+      // Actualizar kilometraje del vehículo si el reportado es mayor
+      if (Number(b.kilometraje) > vehiculo.kilometraje) {
+        await prisma.vehiculo.update({
+          where: { id: String(vehiculoId) },
+          data: { kilometraje: Number(b.kilometraje) },
+        });
+      }
+
+      return res.status(201).json({ success: true, data: control });
+    } catch (error) {
+      console.error('[controles/create]', error);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al registrar control de vehículo' } });
     }
   }
 }

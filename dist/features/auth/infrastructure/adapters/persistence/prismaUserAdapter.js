@@ -42,6 +42,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 },
             },
         },
+        empleado: true,
     };
     async findByUsernameOrEmail(identifier) {
         const normalized = identifier.toLowerCase();
@@ -70,6 +71,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
             sidebarConfig: dbUser.sidebarConfig,
             empleadoId: dbUser.empleadoId,
+            foto: dbUser.empleado?.foto || null,
         });
     }
     async findByUsername(username) {
@@ -96,6 +98,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
             sidebarConfig: dbUser.sidebarConfig,
             empleadoId: dbUser.empleadoId,
+            foto: dbUser.empleado?.foto || null,
         });
     }
     async findById(id) {
@@ -119,6 +122,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
             sidebarConfig: dbUser.sidebarConfig,
             empleadoId: dbUser.empleadoId,
+            foto: dbUser.empleado?.foto || null,
         });
     }
     async create(user) {
@@ -151,6 +155,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
             sidebarConfig: dbUser.sidebarConfig,
             empleadoId: dbUser.empleadoId,
+            foto: dbUser.empleado?.foto || null,
         });
     }
     async findAll() {
@@ -175,6 +180,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
                 permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
                 sidebarConfig: dbUser.sidebarConfig,
                 empleadoId: dbUser.empleadoId,
+                foto: dbUser.empleado?.foto || null,
             });
         });
     }
@@ -209,6 +215,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
             permissions: dbUser.role?.permissions.map((rp) => rp.permission.key) || [],
             sidebarConfig: dbUser.sidebarConfig,
             empleadoId: dbUser.empleadoId,
+            foto: dbUser.empleado?.foto || null,
         });
     }
     async delete(id) {

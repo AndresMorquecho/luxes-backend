@@ -20,6 +20,7 @@ export class InventarioService {
     limit?: number;
     search?: string;
     categoria?: string;
+    incluirDerivados?: boolean;
   }): Promise<{ items: MaterialData[]; total: number } | MaterialData[]> {
     return this.repo.findAll(options);
   }

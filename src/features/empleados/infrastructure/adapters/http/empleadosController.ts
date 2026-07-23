@@ -33,6 +33,9 @@ const parseBody = (body: Record<string, unknown>): EmpleadoInput => ({
   decimoCuartoMensualizado:
     body.decimoCuartoMensualizado !== undefined ? Boolean(body.decimoCuartoMensualizado) : undefined,
   sueldoDiario: Number(body.sueldoDiario) || 0,
+  decimoTerceroValor: body.decimoTerceroValor !== undefined && body.decimoTerceroValor !== null && body.decimoTerceroValor !== '' ? Number(body.decimoTerceroValor) : null,
+  decimoCuartoValor: body.decimoCuartoValor !== undefined && body.decimoCuartoValor !== null && body.decimoCuartoValor !== '' ? Number(body.decimoCuartoValor) : null,
+  iessValor: body.iessValor !== undefined && body.iessValor !== null && body.iessValor !== '' ? Number(body.iessValor) : null,
   direccion: String(body.direccion ?? ''),
   foto: body.foto ? String(body.foto) : null,
   rol: body.rol ? String(body.rol) : undefined,

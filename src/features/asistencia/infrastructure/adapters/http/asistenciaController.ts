@@ -5,15 +5,18 @@ import {
   loadHorariosLaborales,
   saveHorariosLaborales,
 } from '../persistence/horarioLaboralStore.js';
+import { PrismaClient } from '@prisma/client';
 
+const prisma = new PrismaClient();
 
 export class AsistenciaController {
   constructor(private readonly asistenciaService: AsistenciaService) {}
 
   async list(req: Request, res: Response): Promise<Response> {
     try {
-      const desde = String(req.query.desde ?? new Date().toISOString().split('T')[0]);
-      const hasta = String(req.query.hasta ?? new Date().toISOString().split('T')[0]);
+      const getTodayEcuador = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const desde = String(req.query.desde ?? getTodayEcuador());
+      const hasta = String(req.query.hasta ?? getTodayEcuador());
 
       const asistencias = await this.asistenciaService.listAsistencias(desde, hasta);
       return res.status(200).json({
@@ -142,7 +145,8 @@ export class AsistenciaController {
 
   async getHorarioDelDia(req: Request, res: Response): Promise<Response> {
     try {
-      const fecha = String(req.query.fecha ?? new Date().toISOString().split('T')[0]);
+      const getTodayEcuador = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const fecha = String(req.query.fecha ?? getTodayEcuador());
       const data = await getHorarioDelDia(fecha);
       return res.status(200).json({ success: true, data });
     } catch (error) {
@@ -176,6 +180,36 @@ export class AsistenciaController {
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Error al guardar configuración de horarios' },
+      });
+    }
+  }
+
+  async eliminarPermiso(req: Request, res: Response): Promise<Response> {
+    try {
+      const empleadoId = req.body.empleadoId || req.query.empleadoId;
+      const fecha = req.body.fecha || req.query.fecha;
+
+      if (!empleadoId || !fecha) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'El ID de empleado y la fecha son requeridos' },
+        });
+      }
+
+      await this.asistenciaService.eliminarPermiso({
+        empleadoId: String(empleadoId).trim(),
+        fecha: String(fecha),
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: null,
+      });
+    } catch (error) {
+      console.error('[asistencia/eliminarPermiso]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar el permiso' },
       });
     }
   }

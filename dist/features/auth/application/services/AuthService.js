@@ -120,6 +120,18 @@ export class AuthService {
         if (data.username && data.username.toLowerCase() === 'asistencia') {
             throw new Error('El nombre de usuario "asistencia" está reservado para el kiosco del sistema.');
         }
+        if (data.username && data.username.toLowerCase() !== user.username.toLowerCase()) {
+            const existing = await this.userRepository.findByUsername(data.username);
+            if (existing && existing.id !== id) {
+                throw new Error('El nombre de usuario ya está registrado.');
+            }
+        }
+        if (data.email && data.email.toLowerCase() !== user.email.toLowerCase()) {
+            const existing = await this.userRepository.findByUsernameOrEmail(data.email);
+            if (existing && existing.id !== id) {
+                throw new Error('El correo electrónico ya está registrado.');
+            }
+        }
         user.nombre = data.nombre ?? user.nombre;
         user.email = data.email ?? user.email;
         user.username = data.username ?? user.username;
