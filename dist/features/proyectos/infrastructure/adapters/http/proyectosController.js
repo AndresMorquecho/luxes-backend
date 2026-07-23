@@ -1182,7 +1182,7 @@ export class ProyectosController {
             const instalacionCompletada = !requiereInstalacion
                 || datosTarget.instalacionCompletada === true
                 || proyecto.instalacion?.instalacionCompletada === true;
-            const rowsReclamo = await prisma.$queryRawUnsafe(`SELECT id, proyecto_id AS "proyectoId", cliente_nombre AS "clienteNombre", cliente_telefono AS "clienteTelefono", cliente_email AS "clienteEmail", detalle, estado, fecha_creacion AS "fechaCreacion", fecha_actualizacion AS "fechaActualizacion", notas_resolucion AS "notasResolucion" FROM reclamos_proyectos WHERE proyecto_id = $1 LIMIT 1`, String(id)).catch(() => []);
+            const rowsReclamo = (await prisma.$queryRawUnsafe(`SELECT id, proyecto_id AS "proyectoId", cliente_nombre AS "clienteNombre", cliente_telefono AS "clienteTelefono", cliente_email AS "clienteEmail", detalle, estado, fecha_creacion AS "fechaCreacion", fecha_actualizacion AS "fechaActualizacion", notas_resolucion AS "notasResolucion" FROM reclamos_proyectos WHERE proyecto_id = $1 LIMIT 1`, String(id)).catch(() => []));
             const reclamo = rowsReclamo[0] || null;
             return res.status(200).json({
                 success: true,
@@ -1514,7 +1514,7 @@ export class ProyectosController {
                 });
             }
             // Verificar si ya existe reclamo previo para este proyecto
-            const rowsExistentes = await prisma.$queryRawUnsafe(`SELECT id FROM reclamos_proyectos WHERE proyecto_id = $1 LIMIT 1`, String(id)).catch(() => []);
+            const rowsExistentes = (await prisma.$queryRawUnsafe(`SELECT id FROM reclamos_proyectos WHERE proyecto_id = $1 LIMIT 1`, String(id)).catch(() => []));
             if (rowsExistentes.length > 0) {
                 return res.status(400).json({
                     success: false,
@@ -1598,7 +1598,7 @@ export class ProyectosController {
         LEFT JOIN proyectos p ON p.id = r.proyecto_id
         ${whereClause}
       `;
-            const countResult = await prisma.$queryRawUnsafe(countQuery, ...params);
+            const countResult = (await prisma.$queryRawUnsafe(countQuery, ...params));
             const totalFiltered = countResult[0]?.total || 0;
             // KPIs generales (sobre todos los reclamos en BD)
             const kpisQuery = `
@@ -1609,7 +1609,7 @@ export class ProyectosController {
           COUNT(CASE WHEN estado = 'FINALIZADO' THEN 1 END)::int AS finalizados
         FROM reclamos_proyectos
       `;
-            const kpisResult = await prisma.$queryRawUnsafe(kpisQuery);
+            const kpisResult = (await prisma.$queryRawUnsafe(kpisQuery));
             const kpis = kpisResult[0] || { total: 0, pendientes: 0, enProceso: 0, finalizados: 0 };
             // Consulta paginada
             const dataQuery = `
@@ -1634,7 +1634,7 @@ export class ProyectosController {
         LIMIT $${paramIdx++} OFFSET $${paramIdx++}
       `;
             const dataParams = [...params, limitNum, offset];
-            const reclamos = await prisma.$queryRawUnsafe(dataQuery, ...dataParams);
+            const reclamos = (await prisma.$queryRawUnsafe(dataQuery, ...dataParams));
             const totalPages = Math.ceil(totalFiltered / limitNum) || 1;
             return res.status(200).json({
                 success: true,
