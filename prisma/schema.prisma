@@ -34,6 +34,7 @@ model User {
   abonosCompraRegistrados   AbonoCompra[]   @relation("AbonoCompraRegistradoPor")
   ingresosCajaRegistrados   Ingreso[]       @relation("IngresoRegistradoPor")
   transferenciasRegistradas Transferencia[] @relation("TransferenciasRegistradas")
+  gastosFijosRegistrados    GastoFijo[]     @relation("GastoFijoRegistradoPor")
   empleadoId          String?       @unique @map("empleado_id")
   empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
 
@@ -194,6 +195,7 @@ model MetodoPago {
   ingresosCaja             Ingreso[]
   transferenciasEnviadas   Transferencia[] @relation("TransferenciasEnviadas")
   transferenciasRecibidas  Transferencia[] @relation("TransferenciasRecibidas")
+  gastosFijos              GastoFijo[]
 
   @@map("metodos_pago")
 }
@@ -620,6 +622,7 @@ model Gasto {
   metodoPago     MetodoPago?             @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
   registradoPorUserId String?            @map("registrado_por_user_id")
   registradoPor       User?              @relation("GastoRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
+  pagosGastoFijo      GastoFijoPago[]
   createdAt      DateTime                @default(now()) @map("created_at")
   updatedAt      DateTime                @updatedAt @map("updated_at")
 
@@ -731,6 +734,7 @@ model Proyecto {
   impresiones            ImpresionJob[]
   ordenesCompra          OrdenCompra[]
   gastos                 Gasto[]
+  reclamo                ReclamoProyecto?
   
   @@index([clienteId])
   @@map("proyectos")
@@ -922,3 +926,63 @@ model Transferencia {
   @@index([registradoPorUserId])
   @@map("transferencias_cuentas")
 }
+
+// ── Módulo de Gastos Fijos (Recurrentes) ──────────────────────────────────────
+model GastoFijo {
+  id                  String          @id @default(uuid())
+  nombre              String
+  categoria           String          @default("oficina")
+  montoEstimado       Decimal         @map("monto_estimado") @db.Decimal(12, 2)
+  frecuencia          String          @default("MENSUAL") // MENSUAL, QUINCENAL, SEMANAL, ANUAL
+  diaVencimiento      Int?            @map("dia_vencimiento") // Día del mes (1-31)
+  proximaFechaPago    DateTime        @map("proxima_fecha_pago") @db.Date
+  proveedor           String          @default("")
+  notas               String          @default("")
+  activo              Boolean         @default(true)
+  metodoPagoId        String?         @map("metodo_pago_id")
+  metodoPago          MetodoPago?     @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)
+  registradoPorUserId String?         @map("registrado_por_user_id")
+  registradoPor       User?           @relation("GastoFijoRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
+  pagos               GastoFijoPago[]
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  @@index([proximaFechaPago])
+  @@index([metodoPagoId])
+  @@index([registradoPorUserId])
+  @@map("gastos_fijos")
+}
+
+model GastoFijoPago {
+  id            String    @id @default(uuid())
+  gastoFijoId   String    @map("gasto_fijo_id")
+  gastoFijo     GastoFijo @relation(fields: [gastoFijoId], references: [id], onDelete: Cascade)
+  gastoId       String    @map("gasto_id")
+  gasto         Gasto     @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+  montoPagado   Decimal   @map("monto_pagado") @db.Decimal(12, 2)
+  fechaPago     DateTime  @map("fecha_pago") @db.Date
+  periodoPagado String    @default("") @map("periodo_pagado") // Ej: "2026-07"
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([gastoFijoId])
+  @@index([gastoId])
+  @@map("gasto_fijo_pagos")
+}
+
+model ReclamoProyecto {
+  id                 String    @id @default(uuid())
+  proyectoId         String    @unique @map("proyecto_id")
+  proyecto           Proyecto  @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  clienteNombre      String    @map("cliente_nombre")
+  clienteTelefono    String?   @map("cliente_telefono")
+  clienteEmail       String?   @map("cliente_email")
+  detalle            String
+  estado             String    @default("PENDIENTE") // PENDIENTE, EN_REVISION, EN_PROCESO, FINALIZADO
+  fechaCreacion      DateTime  @default(now()) @map("fecha_creacion")
+  fechaActualizacion DateTime  @updatedAt @map("fecha_actualizacion")
+  notasResolucion    String?   @map("notas_resolucion")
+
+  @@map("reclamos_proyectos")
+}
+
+

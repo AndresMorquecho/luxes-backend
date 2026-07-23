@@ -993,14 +993,14 @@ export class NominaController {
     // ─── Egresos Detallados Endpoints ───
     async getDetailedEgresos(req, res) {
         try {
-            const { empleadoId, fechaInicio, fechaFin } = req.query;
-            if (!empleadoId) {
-                return res.status(400).json({
-                    success: false,
-                    error: { code: 'VALIDATION_ERROR', message: 'empleadoId es requerido' }
-                });
+            const { empleadoId, tipo, fechaInicio, fechaFin } = req.query;
+            const whereClause = {};
+            if (empleadoId) {
+                whereClause.empleadoId = String(empleadoId);
             }
-            const whereClause = { empleadoId: String(empleadoId) };
+            if (tipo) {
+                whereClause.tipo = String(tipo);
+            }
             if (fechaInicio && fechaFin) {
                 whereClause.fecha = {
                     gte: new Date(String(fechaInicio)),

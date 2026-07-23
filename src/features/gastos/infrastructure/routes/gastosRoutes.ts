@@ -1,16 +1,27 @@
 import { Router } from 'express';
 import type { GastosController } from '../adapters/http/gastosController.js';
 import type { VehiculosController } from '../adapters/http/vehiculosController.js';
+import type { GastosFijosController } from '../adapters/http/gastosFijosController.js';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
 
 export function createGastosRoutes(
   gastosController: GastosController,
-  vehiculosController: VehiculosController
+  vehiculosController: VehiculosController,
+  gastosFijosController: GastosFijosController
 ): { gastosRouter: Router; vehiculosRouter: Router } {
   const gastosRouter = Router();
   const vehiculosRouter = Router();
 
-  // Gastos
+  // Gastos Fijos
+  gastosRouter.get('/fijos/deudas-count', authMiddleware, (req, res) => gastosFijosController.getDeudasCount(req, res));
+  gastosRouter.get('/fijos', authMiddleware, (req, res) => gastosFijosController.list(req, res));
+  gastosRouter.post('/fijos', authMiddleware, (req, res) => gastosFijosController.create(req, res));
+  gastosRouter.put('/fijos/:id', authMiddleware, (req, res) => gastosFijosController.update(req, res));
+  gastosRouter.delete('/fijos/:id', authMiddleware, (req, res) => gastosFijosController.remove(req, res));
+  gastosRouter.post('/fijos/:id/pagar', authMiddleware, (req, res) => gastosFijosController.pagar(req, res));
+  gastosRouter.delete('/fijos/pagos/:pagoId', authMiddleware, (req, res) => gastosFijosController.deletePago(req, res));
+
+  // Gastos Operativos
   gastosRouter.get('/', authMiddleware, (req, res) => gastosController.list(req, res));
   gastosRouter.post('/', authMiddleware, (req, res) => gastosController.create(req, res));
   gastosRouter.put('/:id', authMiddleware, (req, res) => gastosController.update(req, res));
