@@ -22,7 +22,11 @@ import { createLandingRoutes } from './features/landing/infrastructure/routes/la
 
 
 async function bootstrap() {
+<<<<<<< Updated upstream
   // Limpieza de rol "asistencia" residual en base de datos si existiera
+=======
+  // Limpieza de rol RBAC "asistencia" residual (el usuario kiosco se mantiene en desarrollo)
+>>>>>>> Stashed changes
   try {
     const { prisma } = await import('./config/prismaClient.js');
     const dbRole = await prisma.role.findFirst({
@@ -36,6 +40,7 @@ async function bootstrap() {
     console.error('[Bootstrap] Error al limpiar rol asistencia:', error);
   }
 
+<<<<<<< Updated upstream
   // Usuario de kiosco: siempre debe existir en producción (sin resetear contraseña si ya existe)
   try {
     const { prisma } = await import('./config/prismaClient.js');
@@ -70,18 +75,41 @@ async function bootstrap() {
         },
       });
       console.log('[Bootstrap] Usuario asistencia creado (asistencia / 123456).');
+=======
+    // En producción se limpia el usuario kiosco residual; en local se conserva para pruebas
+    if (env.nodeEnv !== 'development') {
+      const dbUser = await prisma.user.findFirst({
+        where: { username: { equals: 'asistencia', mode: 'insensitive' } },
+      });
+      if (dbUser) {
+        console.log(`[Bootstrap] Eliminando usuario asistencia residual: ${dbUser.username}`);
+        try {
+          await prisma.user.delete({ where: { id: dbUser.id } });
+        } catch (err) {
+          await prisma.user.update({
+            where: { id: dbUser.id },
+            data: { estado: 'inactivo', username: `asistencia_old_${Date.now()}` }
+          });
+        }
+      }
+>>>>>>> Stashed changes
     }
   } catch (error) {
     console.error('[Bootstrap] Error al asegurar usuario asistencia:', error);
   }
 
-  // Asegurar usuarios del sistema (activos + contraseña dev conocida) solo si la tabla está vacía
+  // Asegurar usuarios del sistema con contraseña de desarrollo conocida
   try {
     const { prisma } = await import('./config/prismaClient.js');
     const userCount = await prisma.user.count();
+    const shouldSeedSystemUsers = userCount === 0 || env.nodeEnv === 'development';
 
-    if (userCount === 0) {
-      console.log('[Bootstrap] Base de datos de usuarios vacía. Sembrando usuarios del sistema por defecto...');
+    if (shouldSeedSystemUsers) {
+      console.log(
+        userCount === 0
+          ? '[Bootstrap] Base de datos de usuarios vacía. Sembrando usuarios del sistema por defecto...'
+          : '[Bootstrap] Desarrollo: asegurando usuarios del sistema con contraseña conocida...',
+      );
       const bcrypt = await import('bcryptjs');
       const passwordHash = await bcrypt.default.hash('123456', 10);
 
@@ -108,7 +136,7 @@ async function bootstrap() {
         {
           username: 'admin',
           data: {
-            id: 'USR-001',
+            id: 'USR-DEV-ADMIN',
             nombre: 'Andrés Israel',
             email: 'admin@luxes.com',
             rol: 'Administrador',
@@ -118,7 +146,7 @@ async function bootstrap() {
         {
           username: 'taller',
           data: {
-            id: 'USR-TALLER-001',
+            id: 'USR-DEV-TALLER',
             nombre: 'Taller Técnico',
             email: 'taller@luxes.com',
             rol: 'Taller',
@@ -128,7 +156,7 @@ async function bootstrap() {
         {
           username: 'impresion',
           data: {
-            id: 'USR-003',
+            id: 'USR-DEV-IMPRESION',
             nombre: 'Impresor Principal',
             email: 'impresion@luxes.com',
             rol: 'Impresión',
@@ -138,7 +166,7 @@ async function bootstrap() {
         {
           username: 'disenador',
           data: {
-            id: 'USR-005',
+            id: 'USR-DEV-DISENADOR',
             nombre: 'Diseñador Creativo',
             email: 'disenador@luxes.com',
             rol: 'Ventas / Diseñador',
@@ -148,16 +176,29 @@ async function bootstrap() {
         {
           username: 'ventas',
           data: {
-            id: 'USR-004',
+            id: 'USR-DEV-VENTAS',
             nombre: 'Andrés Israel',
             email: 'ventas@luxes.com',
             rol: 'Ventas / Diseñador',
-            roleId: (await findRole('Ventas / Diseñador', 'Diseñador'))?.id ?? null,
+            roleId: (await findRole('Ventas / Diseñador', 'Diseñador', 'Ventas'))?.id ?? null,
+          },
+        },
+        {
+          username: 'asistencia',
+          data: {
+            id: 'USR-DEV-ASISTENCIA',
+            nombre: 'Asistencia Kiosco',
+            email: 'asistencia@luxes.com',
+            rol: 'asistencia',
+            roleId: null,
           },
         },
       ];
 
       for (const { username, data } of systemUsers) {
+        // En producción no recrear el kiosco de asistencia
+        if (username === 'asistencia' && env.nodeEnv !== 'development') continue;
+
         await prisma.user.upsert({
           where: { username },
           update: {
@@ -174,6 +215,14 @@ async function bootstrap() {
           },
         });
         console.log(`[Bootstrap] Usuario ${username} verificado/corregido con éxito.`);
+      }
+
+      // En local también alinear la cuenta admin real más usada
+      if (env.nodeEnv === 'development') {
+        await prisma.user.updateMany({
+          where: { username: { equals: 'MorquechoI', mode: 'insensitive' } },
+          data: { passwordHash, estado: 'activo' },
+        });
       }
     } else {
       console.log('[Bootstrap] Base de datos de usuarios ya contiene registros. Saltando usuarios por defecto.');
