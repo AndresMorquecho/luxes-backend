@@ -855,6 +855,34 @@ model SiteSetting {
   @@map("site_settings")
 }
 
+model LandingCategory {
+  id        String                 @id @default(uuid())
+  name      String
+  slug      String                 @unique
+  order     Int                    @default(0)
+  active    Boolean                @default(true)
+  images    LandingCategoryImage[]
+  createdAt DateTime               @default(now()) @map("created_at")
+  updatedAt DateTime               @updatedAt @map("updated_at")
+
+  @@map("landing_categories")
+}
+
+model LandingCategoryImage {
+  id          String          @id @default(uuid())
+  categoryId  String          @map("category_id")
+  category    LandingCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  imageUrl    String          @map("image_url")
+  title       String          @default("")
+  description String          @default("")
+  tags        String          @default("[]")
+  order       Int             @default(0)
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@index([categoryId])
+  @@map("landing_category_images")
+}
+
 model Ingreso {
   id                  String      @id
   concepto            String
