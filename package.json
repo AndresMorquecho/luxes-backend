@@ -20,6 +20,7 @@
     "db:ensure-asistencia": "tsx prisma/ensure-asistencia-user.ts",
     "db:fix-migrations": "tsx prisma/fix-failed-migrations.ts",
     "db:fix-inventory-categories": "tsx prisma/fix-inventory-categories.ts",
+    "db:seed-inventario": "tsx prisma/seed-inventario-excel.ts",
     "db:setup": "prisma migrate deploy && tsx prisma/seed.ts"
   },
   "keywords": [],
