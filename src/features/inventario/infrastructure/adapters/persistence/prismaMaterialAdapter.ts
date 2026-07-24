@@ -68,13 +68,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   }): Promise<{ items: MaterialData[]; total: number } | MaterialData[]> {
     const { tipo, page, limit, search, categoria, incluirDerivados } = options || {};
 
-    // Excluir: rollos agotados/ocultos siempre.
-    // Rollos derivados ([R001], [R002]) se excluyen por defecto (OC, préstamos, etc.).
-    // Usar incluirDerivados=true solo desde la vista de inventario de impresión.
-    const where: any = { ocultado: false };
-    if (!incluirDerivados) {
-      where.materialBaseId = null;
-    }
+    // No filtrar ocultado/materialBaseId en WHERE: el Prisma Client puede estar
+    // desincronizado del schema (campos no generados) y tumba toda la consulta.
+    // El filtro JS de abajo es la fuente de verdad para esos campos.
+    const where: any = {};
     if (tipo) {
       where.tipo = tipo;
     }
@@ -90,28 +87,23 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
       ];
     }
 
-    // NOTA: El Prisma client puede no reconocer materialBaseId/ocultado en WHERE
-    // si el .dll no fue regenerado (EPERM al generar). Por eso aplicamos filtro JS
-    // post-consulta como fallback de seguridad.
     const applyJsFilter = (rows: any[]) => {
       return rows
-        .filter(r => !(r as any).ocultado) // ocultado siempre excluir
-        .filter(r => incluirDerivados || !(r as any).materialBaseId); // derivados según flag
+        .filter(r => !(r as any).ocultado)
+        .filter(r => incluirDerivados || !(r as any).materialBaseId);
     };
 
     if (page !== undefined && limit !== undefined) {
       const skip = (page - 1) * limit;
-      const [rawRows] = await Promise.all([
-        this.prisma.material.findMany({
-          where,
-          include: { 
-            unidadMedida: true,
-            aCargoEmpleado: { select: { id: true, nombre: true } },
-            detallesCompra: { include: { ordenCompra: true } }
-          },
-          orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
-        }),
-      ]);
+      const rawRows = await this.prisma.material.findMany({
+        where,
+        include: {
+          unidadMedida: true,
+          aCargoEmpleado: { select: { id: true, nombre: true } },
+          detallesCompra: { include: { ordenCompra: true } },
+        },
+        orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
+      });
       const filtered = applyJsFilter(rawRows);
       const mapped = filtered.map(r => this.mapRow(r));
       if (tipo === 'consumible') {
@@ -126,18 +118,18 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
         items: mapped.slice(skip, skip + limit),
         total: mapped.length,
       };
-    } else {
-      const rawRows = await this.prisma.material.findMany({
-        where,
-        include: { 
-          unidadMedida: true,
-          aCargoEmpleado: { select: { id: true, nombre: true } },
-          detallesCompra: { include: { ordenCompra: true } }
-        },
-        orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
-      });
-      return applyJsFilter(rawRows).map(r => this.mapRow(r));
     }
+
+    const rawRows = await this.prisma.material.findMany({
+      where,
+      include: {
+        unidadMedida: true,
+        aCargoEmpleado: { select: { id: true, nombre: true } },
+        detallesCompra: { include: { ordenCompra: true } },
+      },
+      orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
+    });
+    return applyJsFilter(rawRows).map(r => this.mapRow(r));
   }
 
   async findById(id: string): Promise<MaterialData | null> {
