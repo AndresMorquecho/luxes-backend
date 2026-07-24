@@ -1114,15 +1114,16 @@ export class NominaController {
 
   async getDetailedEgresos(req: Request, res: Response): Promise<Response> {
     try {
-      const { empleadoId, fechaInicio, fechaFin } = req.query;
-      if (!empleadoId) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'VALIDATION_ERROR', message: 'empleadoId es requerido' }
-        });
+      const { empleadoId, tipo, fechaInicio, fechaFin } = req.query;
+      const whereClause: any = {};
+
+      if (empleadoId) {
+        whereClause.empleadoId = String(empleadoId);
       }
 
-      const whereClause: any = { empleadoId: String(empleadoId) };
+      if (tipo) {
+        whereClause.tipo = String(tipo);
+      }
 
       if (fechaInicio && fechaFin) {
         whereClause.fecha = {

@@ -1182,6 +1182,8 @@ export class ProyectosController {
             const instalacionCompletada = !requiereInstalacion
                 || datosTarget.instalacionCompletada === true
                 || proyecto.instalacion?.instalacionCompletada === true;
+            const rowsReclamo = (await prisma.$queryRawUnsafe(`SELECT id, proyecto_id AS "proyectoId", cliente_nombre AS "clienteNombre", cliente_telefono AS "clienteTelefono", cliente_email AS "clienteEmail", detalle, estado, fecha_creacion AS "fechaCreacion", fecha_actualizacion AS "fechaActualizacion", notas_resolucion AS "notasResolucion" FROM reclamos_proyectos WHERE proyecto_id = $1 LIMIT 1`, String(id)).catch(() => []));
+            const reclamo = rowsReclamo[0] || null;
             return res.status(200).json({
                 success: true,
                 data: {
@@ -1192,6 +1194,7 @@ export class ProyectosController {
                     encuestaCompletada: encuesta?.completada === true,
                     encuesta: encuesta?.completada === true ? encuesta : null,
                     personal: await getPersonalEncuesta(proyecto.id, datosTarget, proyecto.instalacion),
+                    reclamo,
                 },
             });
         }
@@ -1487,6 +1490,204 @@ export class ProyectosController {
         catch (error) {
             console.error('[proyectos/reportes/stats]', error);
             return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener estadísticas de proyectos' } });
+        }
+    }
+    /** Registrar reclamo / inconveniente post-venta por parte del cliente (Ruta pública) */
+    async submitReclamo(req, res) {
+        try {
+            const { id } = req.params;
+            const { detalle } = req.body || {};
+            const textoDetalle = String(detalle || '').trim();
+            if (!textoDetalle) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_INPUT', message: 'Por favor detalla el inconveniente o problema' },
+                });
+            }
+            const proyecto = await prisma.proyecto.findUnique({
+                where: { id: String(id) },
+            });
+            if (!proyecto) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' },
+                });
+            }
+            // Verificar si ya existe reclamo previo para este proyecto
+            const rowsExistentes = (await prisma.$queryRawUnsafe(`SELECT id FROM reclamos_proyectos WHERE proyecto_id = $1 LIMIT 1`, String(id)).catch(() => []));
+            if (rowsExistentes.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: {
+                        code: 'ALREADY_EXISTS',
+                        message: 'Ya existe un reporte de inconveniente registrado para este proyecto',
+                    },
+                });
+            }
+            const reclamoId = `REC-${Date.now()}`;
+            const clienteNombre = proyecto.clienteNombre || 'Cliente';
+            const clienteTelefono = proyecto.clienteTelefono || null;
+            const clienteEmail = proyecto.clienteEmail || null;
+            await prisma.$executeRawUnsafe(`INSERT INTO reclamos_proyectos (id, proyecto_id, cliente_nombre, cliente_telefono, cliente_email, detalle, estado, fecha_creacion, fecha_actualizacion)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`, reclamoId, proyecto.id, clienteNombre, clienteTelefono, clienteEmail, textoDetalle, 'PENDIENTE');
+            const nuevoReclamo = {
+                id: reclamoId,
+                proyectoId: proyecto.id,
+                clienteNombre,
+                clienteTelefono,
+                clienteEmail,
+                detalle: textoDetalle,
+                estado: 'PENDIENTE',
+                fechaCreacion: new Date().toISOString(),
+            };
+            // Crear notificación para administradores
+            try {
+                await prisma.notification.create({
+                    data: {
+                        title: 'Nuevo Reclamo Post-Venta',
+                        message: `El cliente ${clienteNombre} ha reportado un inconveniente en el proyecto "${proyecto.nombre}".`,
+                        rol: 'Administrador',
+                    },
+                });
+            }
+            catch (errNotif) {
+                console.error('[submitReclamo] Error al notificar:', errNotif);
+            }
+            return res.status(201).json({
+                success: true,
+                data: nuevoReclamo,
+            });
+        }
+        catch (error) {
+            console.error('[submitReclamo]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al registrar el reclamo' },
+            });
+        }
+    }
+    /** Obtener lista de todos los reclamos post-venta con paginación y filtros (Ruta autenticada) */
+    async listReclamos(req, res) {
+        try {
+            const pageNum = Math.max(1, parseInt(String(req.query.page || '1'), 10));
+            const limitNum = Math.max(1, Math.min(100, parseInt(String(req.query.limit || '10'), 10)));
+            const search = String(req.query.search || '').trim();
+            const estadoFilter = String(req.query.estado || 'TODOS').trim().toUpperCase();
+            const offset = (pageNum - 1) * limitNum;
+            let whereClause = 'WHERE 1=1';
+            const params = [];
+            let paramIdx = 1;
+            if (estadoFilter && estadoFilter !== 'TODOS') {
+                whereClause += ` AND r.estado = $${paramIdx++}`;
+                params.push(estadoFilter);
+            }
+            if (search) {
+                whereClause += ` AND (
+          r.cliente_nombre ILIKE $${paramIdx} OR
+          r.detalle ILIKE $${paramIdx} OR
+          r.proyecto_id ILIKE $${paramIdx} OR
+          p.nombre ILIKE $${paramIdx}
+        )`;
+                params.push(`%${search}%`);
+                paramIdx++;
+            }
+            // Conteo total para paginación filtrada
+            const countQuery = `
+        SELECT COUNT(*)::int AS total
+        FROM reclamos_proyectos r
+        LEFT JOIN proyectos p ON p.id = r.proyecto_id
+        ${whereClause}
+      `;
+            const countResult = (await prisma.$queryRawUnsafe(countQuery, ...params));
+            const totalFiltered = countResult[0]?.total || 0;
+            // KPIs generales (sobre todos los reclamos en BD)
+            const kpisQuery = `
+        SELECT 
+          COUNT(*)::int AS total,
+          COUNT(CASE WHEN estado = 'PENDIENTE' THEN 1 END)::int AS pendientes,
+          COUNT(CASE WHEN estado IN ('EN_REVISION', 'EN_PROCESO') THEN 1 END)::int AS "enProceso",
+          COUNT(CASE WHEN estado = 'FINALIZADO' THEN 1 END)::int AS finalizados
+        FROM reclamos_proyectos
+      `;
+            const kpisResult = (await prisma.$queryRawUnsafe(kpisQuery));
+            const kpis = kpisResult[0] || { total: 0, pendientes: 0, enProceso: 0, finalizados: 0 };
+            // Consulta paginada
+            const dataQuery = `
+        SELECT 
+          r.id,
+          r.proyecto_id AS "proyectoId",
+          r.cliente_nombre AS "clienteNombre",
+          r.cliente_telefono AS "clienteTelefono",
+          r.cliente_email AS "clienteEmail",
+          r.detalle,
+          r.estado,
+          r.fecha_creacion AS "fechaCreacion",
+          r.fecha_actualizacion AS "fechaActualizacion",
+          r.notas_resolucion AS "notasResolucion",
+          p.nombre AS "proyectoNombre",
+          p.responsable AS "proyectoResponsable",
+          p.fase_actual AS "proyectoFase"
+        FROM reclamos_proyectos r
+        LEFT JOIN proyectos p ON p.id = r.proyecto_id
+        ${whereClause}
+        ORDER BY r.fecha_creacion DESC
+        LIMIT $${paramIdx++} OFFSET $${paramIdx++}
+      `;
+            const dataParams = [...params, limitNum, offset];
+            const reclamos = (await prisma.$queryRawUnsafe(dataQuery, ...dataParams));
+            const totalPages = Math.ceil(totalFiltered / limitNum) || 1;
+            return res.status(200).json({
+                success: true,
+                data: {
+                    reclamos,
+                    pagination: {
+                        total: totalFiltered,
+                        page: pageNum,
+                        limit: limitNum,
+                        totalPages,
+                    },
+                    kpis,
+                },
+            });
+        }
+        catch (error) {
+            console.error('[listReclamos]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al obtener reclamos' },
+            });
+        }
+    }
+    /** Actualizar el estado y notas de un reclamo post-venta (Ruta autenticada) */
+    async updateEstadoReclamo(req, res) {
+        try {
+            const { reclamoId } = req.params;
+            const { estado, notasResolucion } = req.body || {};
+            const estadosValidos = ['PENDIENTE', 'EN_REVISION', 'EN_PROCESO', 'FINALIZADO'];
+            const estadoNormalizado = String(estado || '').toUpperCase();
+            if (!estadosValidos.includes(estadoNormalizado)) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_STATUS', message: 'Estado no válido' },
+                });
+            }
+            const notas = notasResolucion !== undefined ? String(notasResolucion) : null;
+            await prisma.$executeRawUnsafe(`UPDATE reclamos_proyectos SET estado = $1, notas_resolucion = COALESCE($2, notas_resolucion), fecha_actualizacion = NOW() WHERE id = $3`, estadoNormalizado, notas, String(reclamoId));
+            return res.status(200).json({
+                success: true,
+                data: {
+                    id: reclamoId,
+                    estado: estadoNormalizado,
+                    notasResolucion: notas,
+                },
+            });
+        }
+        catch (error) {
+            console.error('[updateEstadoReclamo]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al actualizar el estado del reclamo' },
+            });
         }
     }
 }

@@ -49,6 +49,28 @@ async function bootstrap() {
     catch (error) {
         console.error('[Bootstrap] Error al limpiar rol/usuario asistencia:', error);
     }
+    // Crear tabla reclamos_proyectos si no existe
+    try {
+        const { prisma } = await import('./config/prismaClient.js');
+        await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS reclamos_proyectos (
+        id VARCHAR(255) PRIMARY KEY,
+        proyecto_id VARCHAR(255) UNIQUE NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        cliente_nombre VARCHAR(255) NOT NULL,
+        cliente_telefono VARCHAR(255),
+        cliente_email VARCHAR(255),
+        detalle TEXT NOT NULL,
+        estado VARCHAR(50) DEFAULT 'PENDIENTE' NOT NULL,
+        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        notas_resolucion TEXT
+      );
+    `);
+        console.log('[Bootstrap] Tabla reclamos_proyectos verificada/creada.');
+    }
+    catch (error) {
+        console.error('[Bootstrap] Error al verificar tabla reclamos_proyectos:', error);
+    }
     // Asegurar usuarios del sistema (activos + contraseña dev conocida) solo si la tabla está vacía
     try {
         const { prisma } = await import('./config/prismaClient.js');
