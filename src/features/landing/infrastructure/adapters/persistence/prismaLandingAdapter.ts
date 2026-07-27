@@ -243,7 +243,7 @@ export async function countCategoryImages(categoryId: string): Promise<number> {
 
 export async function addCategoryImage(categoryId: string, data: CategoryImageInput) {
   const count = await countCategoryImages(categoryId);
-  if (count >= 6) {
+  if (count >= 25) {
     throw new Error('MAX_IMAGES_REACHED');
   }
   return prisma.landingCategoryImage.create({

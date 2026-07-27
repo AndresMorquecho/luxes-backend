@@ -338,7 +338,7 @@ export class LandingController {
                     await fs.unlink(req.file.path).catch(() => undefined);
                 return res.status(400).json({
                     success: false,
-                    error: { code: 'MAX_IMAGES_REACHED', message: 'La categoría ya tiene el máximo de 6 imágenes' },
+                    error: { code: 'MAX_IMAGES_REACHED', message: 'La categoría ya tiene el máximo de 25 imágenes' },
                 });
             }
             console.error('Error al agregar imagen a categoría:', error);
