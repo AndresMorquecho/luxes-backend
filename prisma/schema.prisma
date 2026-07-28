@@ -35,6 +35,7 @@ model User {
   ingresosCajaRegistrados   Ingreso[]       @relation("IngresoRegistradoPor")
   transferenciasRegistradas Transferencia[] @relation("TransferenciasRegistradas")
   gastosFijosRegistrados    GastoFijo[]     @relation("GastoFijoRegistradoPor")
+  chequesCompraRegistrados  ChequeCompra[]  @relation("ChequeCompraRegistradoPor")
   empleadoId          String?       @unique @map("empleado_id")
   empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
 
@@ -196,6 +197,7 @@ model MetodoPago {
   transferenciasEnviadas   Transferencia[] @relation("TransferenciasEnviadas")
   transferenciasRecibidas  Transferencia[] @relation("TransferenciasRecibidas")
   gastosFijos              GastoFijo[]
+  chequesCompra            ChequeCompra[]
 
   @@map("metodos_pago")
 }
@@ -225,6 +227,7 @@ model OrdenCompra {
   recibidoPor       User?           @relation("OrdenRecibida", fields: [recibidoPorId], references: [id], onDelete: SetNull)
   detalles          DetalleCompra[]
   abonos            AbonoCompra[]
+  cheques           ChequeCompra[]
   cuentaPorPagar    CuentaPorPagar?
   proyectoId        String?         @map("proyecto_id")
   proyecto          Proyecto?       @relation(fields: [proyectoId], references: [id], onDelete: SetNull)
@@ -285,6 +288,30 @@ model CuentaPorPagar {
   estado            String       @default("pendiente")
 
   @@map("cuentas_por_pagar")
+}
+
+model ChequeCompra {
+  id                  String       @id @default(uuid())
+  ordenCompraId       String       @map("orden_compra_id")
+  ordenCompra         OrdenCompra  @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+  metodoPagoId        String       @map("metodo_pago_id")
+  metodoPago          MetodoPago   @relation(fields: [metodoPagoId], references: [id])
+  numeroCheque        String       @map("numero_cheque")
+  monto               Float
+  fechaEmision        DateTime     @default(now()) @map("fecha_emision")
+  fechaCobro          DateTime     @map("fecha_cobro")
+  estado              String       @default("PENDIENTE")
+  referencia          String?
+  procesado           Boolean      @default(false)
+  notificado          Boolean      @default(false)
+  registradoPorUserId String?      @map("registrado_por_user_id")
+  registradoPor       User?        @relation("ChequeCompraRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
+
+  @@index([ordenCompraId])
+  @@index([metodoPagoId])
+  @@index([registradoPorUserId])
+  @@index([fechaCobro, estado])
+  @@map("cheques_compra")
 }
 
 model Notification {

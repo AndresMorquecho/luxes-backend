@@ -11,6 +11,7 @@ import type {
 } from '../../../domain/ports/ComprasRepositoryPort.js';
 import webpush from 'web-push';
 import { env } from '../../../../../config/env.js';
+import { procesarChequesVencidos } from '../../../../../shared/services/chequesSchedulerService.js';
 
 // Configure VAPID details for Web Push
 if (env.vapidPublicKey && env.vapidPrivateKey) {
@@ -808,6 +809,38 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
         registradoPor: { select: { id: true, nombre: true } },
       },
     });
+
+    // Recalcular el estado y monto pagado acumulado de la CuentaPorPagar y la Orden de Compra
+    const abonosSum = await this.prisma.abonoCompra.aggregate({
+      where: { ordenCompraId: data.ordenCompraId },
+      _sum: { monto: true },
+    });
+
+    const cxp = await this.prisma.cuentaPorPagar.findUnique({
+      where: { ordenCompraId: data.ordenCompraId },
+    });
+
+    if (cxp) {
+      const totalPagado = abonosSum._sum.monto || 0;
+      const newSaldo = Math.max(0, cxp.montoTotal - totalPagado);
+      const newEstado = newSaldo <= 0 ? 'pagado' : totalPagado > 0 ? 'parcial' : 'pendiente';
+      const newEstadoPago = newEstado === 'pagado' ? 'pagado' : totalPagado > 0 ? 'parcial' : 'sin_pagar';
+
+      await this.prisma.cuentaPorPagar.update({
+        where: { id: cxp.id },
+        data: {
+          montoPagado: totalPagado,
+          saldo: newSaldo,
+          estado: newEstado,
+        },
+      });
+
+      await this.prisma.ordenCompra.update({
+        where: { id: data.ordenCompraId },
+        data: { estadoPago: newEstadoPago },
+      });
+    }
+
     return row as unknown as AbonoCompraData;
   }
 
@@ -844,6 +877,127 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     }
   }
 
+  // ── Cheques Posfechados ───────────────────────────────────────────────────
+
+  async createChequeCompra(input: {
+    ordenCompraId: string;
+    metodoPagoId: string;
+    numeroCheque: string;
+    monto: number;
+    fechaCobro: Date;
+    referencia?: string;
+    registradoPorUserId?: string;
+  }): Promise<any> {
+    const row = await (this.prisma as any).chequeCompra.create({
+      data: {
+        ordenCompraId: input.ordenCompraId,
+        metodoPagoId: input.metodoPagoId,
+        numeroCheque: input.numeroCheque,
+        monto: input.monto,
+        fechaCobro: input.fechaCobro,
+        referencia: input.referencia || `Cheque N° ${input.numeroCheque}`,
+        registradoPorUserId: input.registradoPorUserId || null,
+        estado: 'PENDIENTE',
+        procesado: false,
+        notificado: false,
+      },
+      include: {
+        ordenCompra: { include: { proveedor: true } },
+        metodoPago: true,
+        registradoPor: { select: { id: true, nombre: true } },
+      },
+    });
+
+    // Activar el worker inmediatamente por si la fecha asignada ya venció/hoy
+    procesarChequesVencidos().catch(err => console.error('[Cheque Worker Error]', err));
+
+    return row;
+  }
+
+  async findAllChequesCompra(options?: { estado?: string; ordenCompraId?: string }): Promise<any[]> {
+    const where: any = {};
+    if (options?.estado) where.estado = options.estado;
+    if (options?.ordenCompraId) where.ordenCompraId = options.ordenCompraId;
+
+    const rows = await (this.prisma as any).chequeCompra.findMany({
+      where,
+      include: {
+        ordenCompra: { include: { proveedor: true } },
+        metodoPago: true,
+        registradoPor: { select: { id: true, nombre: true } },
+      },
+      orderBy: { fechaCobro: 'asc' },
+    });
+    return rows;
+  }
+
+  async procesarChequeCompra(id: string): Promise<any> {
+    const cheque = await (this.prisma as any).chequeCompra.findUnique({
+      where: { id },
+    });
+    if (!cheque) throw new Error('Cheque posfechado no encontrado.');
+    if (cheque.procesado) return cheque;
+
+    // 1. Crear el abono efectivo que realiza el egreso de banco
+    await this.createAbono({
+      ordenCompraId: cheque.ordenCompraId,
+      metodoPagoId: cheque.metodoPagoId,
+      monto: cheque.monto,
+      referencia: cheque.referencia || `Cobro Cheque N° ${cheque.numeroCheque}`,
+      registradoPorUserId: cheque.registradoPorUserId || undefined,
+    });
+
+    // 2. Marcar cheque como procesado
+    const updated = await (this.prisma as any).chequeCompra.update({
+      where: { id },
+      data: {
+        estado: 'PROCESADO',
+        procesado: true,
+        notificado: true,
+      },
+      include: {
+        ordenCompra: { include: { proveedor: true } },
+        metodoPago: true,
+        registradoPor: { select: { id: true, nombre: true } },
+      },
+    });
+    return updated;
+  }
+
+  async updateChequeCompra(id: string, data: { numeroCheque?: string; fechaCobro?: Date; monto?: number; metodoPagoId?: string }): Promise<any> {
+    const cheque = await (this.prisma as any).chequeCompra.findUnique({ where: { id } });
+    if (!cheque) throw new Error('Cheque posfechado no encontrado.');
+    if (cheque.procesado) throw new Error('No se puede editar un cheque que ya fue cobrado/procesado.');
+
+    const updateData: any = {};
+    if (data.numeroCheque) updateData.numeroCheque = data.numeroCheque;
+    if (data.fechaCobro) updateData.fechaCobro = data.fechaCobro;
+    if (data.monto && data.monto > 0) updateData.monto = data.monto;
+    if (data.metodoPagoId) updateData.metodoPagoId = data.metodoPagoId;
+
+    const updated = await (this.prisma as any).chequeCompra.update({
+      where: { id },
+      data: updateData,
+      include: {
+        ordenCompra: { include: { proveedor: true } },
+        metodoPago: true,
+        registradoPor: { select: { id: true, nombre: true } },
+      },
+    });
+
+    procesarChequesVencidos().catch(err => console.error('[Cheque Worker Error]', err));
+
+    return updated;
+  }
+
+  async deleteChequeCompra(id: string): Promise<void> {
+    const cheque = await (this.prisma as any).chequeCompra.findUnique({ where: { id } });
+    if (!cheque) throw new Error('Cheque posfechado no encontrado.');
+    if (cheque.procesado) throw new Error('No se puede eliminar directamente un cheque que ya fue cobrado. Elimine el abono registrado correspondiente.');
+
+    await (this.prisma as any).chequeCompra.delete({ where: { id } });
+  }
+
   // ── Cuentas por Pagar ──────────────────────────────────────────────────────
 
   async findAllCuentasPorPagar(options?: {
@@ -851,6 +1005,61 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     limit?: number;
     estado?: string;
   }): Promise<{ items: CuentaPorPagarData[]; total: number }> {
+    // Evaluar inmediatamente si hay cheques vencidos pendientes antes de retornar la lista
+    await procesarChequesVencidos().catch(err => console.error('[Cheque Auto-Check Error]', err));
+
+    // Autocorrección de consistencia: reconciliar deudas con abonos completados
+    try {
+      const pagadasPendientes = await this.prisma.cuentaPorPagar.findMany({
+        where: {
+          OR: [
+            { saldo: { lte: 0 }, estado: { not: 'pagado' } },
+            { montoPagado: { gte: 0.01 }, estado: { not: 'pagado' } },
+          ],
+        },
+      });
+
+      for (const c of pagadasPendientes) {
+        const abonosSum = await this.prisma.abonoCompra.aggregate({
+          where: { ordenCompraId: c.ordenCompraId },
+          _sum: { monto: true },
+        });
+
+        const totalPagado = abonosSum._sum.monto || 0;
+        const realSaldo = Math.max(0, c.montoTotal - totalPagado);
+
+        if (realSaldo <= 0.009 || totalPagado >= c.montoTotal - 0.009) {
+          await this.prisma.cuentaPorPagar.update({
+            where: { id: c.id },
+            data: {
+              montoPagado: c.montoTotal,
+              saldo: 0,
+              estado: 'pagado',
+            },
+          });
+          await this.prisma.ordenCompra.update({
+            where: { id: c.ordenCompraId },
+            data: { estadoPago: 'pagado' },
+          });
+        } else if (totalPagado > 0) {
+          await this.prisma.cuentaPorPagar.update({
+            where: { id: c.id },
+            data: {
+              montoPagado: totalPagado,
+              saldo: realSaldo,
+              estado: 'parcial',
+            },
+          });
+          await this.prisma.ordenCompra.update({
+            where: { id: c.ordenCompraId },
+            data: { estadoPago: 'parcial' },
+          });
+        }
+      }
+    } catch (reconcileErr) {
+      console.error('[Reconcile CxP Error]', reconcileErr);
+    }
+
     const { page = 1, limit = 10, estado } = options || {};
 
     const where: any = {};

@@ -52,6 +52,34 @@ export interface AbonoCompraData {
   registradoPor?: { id: string; nombre: string } | null;
 }
 
+export interface ChequeCompraData {
+  id: string;
+  ordenCompraId: string;
+  ordenCompra?: OrdenCompraData;
+  metodoPagoId: string;
+  metodoPago?: MetodoPagoData;
+  numeroCheque: string;
+  monto: number;
+  fechaEmision: Date;
+  fechaCobro: Date;
+  estado: string; // 'PENDIENTE' | 'PROCESADO' | 'CANCELADO'
+  referencia?: string | null;
+  procesado: boolean;
+  notificado: boolean;
+  registradoPorUserId?: string | null;
+  registradoPor?: { id: string; nombre: string } | null;
+}
+
+export interface CreateChequeInput {
+  ordenCompraId: string;
+  metodoPagoId: string;
+  numeroCheque: string;
+  monto: number;
+  fechaCobro: Date;
+  referencia?: string;
+  registradoPorUserId?: string;
+}
+
 export interface CuentaPorPagarData {
   id: string;
   ordenCompraId: string;
@@ -191,6 +219,13 @@ export interface ComprasRepositoryPort {
     registradoPorUserId?: string | null;
   }): Promise<AbonoCompraData>;
   deleteAbono(abonoId: string, ordenCompraId: string, monto: number): Promise<void>;
+
+  // ── Cheques Posfechados ──
+  createChequeCompra(input: CreateChequeInput): Promise<ChequeCompraData>;
+  findAllChequesCompra(options?: { estado?: string; ordenCompraId?: string }): Promise<ChequeCompraData[]>;
+  procesarChequeCompra(id: string): Promise<ChequeCompraData>;
+  updateChequeCompra(id: string, data: { numeroCheque?: string; fechaCobro?: Date; monto?: number; metodoPagoId?: string }): Promise<ChequeCompraData>;
+  deleteChequeCompra(id: string): Promise<void>;
 
   // ── Cuentas por Pagar ──
   findAllCuentasPorPagar(options?: {

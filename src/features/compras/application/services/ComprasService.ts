@@ -435,4 +435,64 @@ export class ComprasService {
       recibidoPorId: usuarioId,
     });
   }
+
+  // ── Cheques Posfechados ─────────────────────────────────────────────────────
+
+  getCheques(options?: { estado?: string; ordenCompraId?: string }) {
+    return this.repo.findAllChequesCompra(options);
+  }
+
+  async crearChequePosfechado(input: {
+    ordenCompraId: string;
+    metodoPagoId: string;
+    numeroCheque: string;
+    monto: number;
+    fechaCobro: Date | string;
+    referencia?: string;
+    registradoPorUserId?: string;
+  }) {
+    if (!input.ordenCompraId) throw new Error('Se requiere ID de Orden de Compra.');
+    if (!input.metodoPagoId) throw new Error('Se requiere seleccionar la cuenta/banco de origen.');
+    if (!input.numeroCheque?.trim()) throw new Error('Se requiere ingresar el número de cheque.');
+    if (!input.monto || input.monto <= 0) throw new Error('El monto del cheque debe ser mayor a 0.');
+    if (!input.fechaCobro) throw new Error('Se requiere la fecha de cobro/emisión del cheque.');
+
+    const fechaCobroDate = new Date(input.fechaCobro);
+    if (isNaN(fechaCobroDate.getTime())) throw new Error('La fecha de cobro no es válida.');
+
+    return this.repo.createChequeCompra({
+      ordenCompraId: input.ordenCompraId,
+      metodoPagoId: input.metodoPagoId,
+      numeroCheque: input.numeroCheque.trim(),
+      monto: input.monto,
+      fechaCobro: fechaCobroDate,
+      referencia: input.referencia?.trim() || `Cheque Posfechado N° ${input.numeroCheque.trim()}`,
+      registradoPorUserId: input.registradoPorUserId,
+    });
+  }
+
+  async procesarCheque(id: string) {
+    if (!id) throw new Error('ID de cheque inválido.');
+    return this.repo.procesarChequeCompra(id);
+  }
+
+  async editarChequePosfechado(id: string, data: { numeroCheque?: string; fechaCobro?: Date | string; monto?: number; metodoPagoId?: string }) {
+    if (!id) throw new Error('ID de cheque inválido.');
+    let fechaCobroDate: Date | undefined = undefined;
+    if (data.fechaCobro) {
+      fechaCobroDate = new Date(data.fechaCobro);
+      if (isNaN(fechaCobroDate.getTime())) throw new Error('La fecha de cobro no es válida.');
+    }
+    return this.repo.updateChequeCompra(id, {
+      numeroCheque: data.numeroCheque?.trim(),
+      fechaCobro: fechaCobroDate,
+      monto: data.monto ? Number(data.monto) : undefined,
+      metodoPagoId: data.metodoPagoId,
+    });
+  }
+
+  async eliminarChequePosfechado(id: string) {
+    if (!id) throw new Error('ID de cheque inválido.');
+    return this.repo.deleteChequeCompra(id);
+  }
 }

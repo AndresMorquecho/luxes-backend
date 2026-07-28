@@ -109,40 +109,40 @@ export class PrismaNotificationAdapter {
             },
             orderBy: { createdAt: 'desc' },
         });
-        return rows.map((row) => ({
+        // Deduplicar notificaciones idénticas para una vista limpia del buzón
+        const seen = new Set();
+        const uniqueRows = rows.filter((r) => {
+            const key = `${r.title}|${r.message}`;
+            if (seen.has(key))
+                return false;
+            seen.add(key);
+            return true;
+        });
+        return uniqueRows.map((row) => ({
             ...row,
             createdBy: row.createdBy || 'Sistema Luxes',
         }));
     }
     async countUnreadForUser(userId, role) {
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            include: {
-                role: {
-                    include: {
-                        permissions: {
-                            include: {
-                                permission: true,
-                            },
-                        },
-                    },
-                },
-            },
-        });
-        const userPermissions = user?.role?.permissions?.map((rp) => rp.permission.key) || [];
-        const count = await this.prisma.notification.count({
-            where: {
-                isRead: false,
-                ...buildVisibilityFilter(userId, role, userPermissions),
-            },
-        });
-        return count;
+        const unreadList = await this.findAllForUser(userId, role);
+        return unreadList.length;
     }
     async markAsRead(id) {
         const row = await this.prisma.notification.update({
             where: { id },
             data: { isRead: true },
         });
+        // Marcar como leídas también todas las copias duplicadas con el mismo título y mensaje
+        if (row.title && row.message) {
+            await this.prisma.notification.updateMany({
+                where: {
+                    title: row.title,
+                    message: row.message,
+                    isRead: false,
+                },
+                data: { isRead: true },
+            }).catch((err) => console.error('[Notification markAsRead duplicates cleanup]', err));
+        }
         return {
             ...row,
             createdBy: row.createdBy || 'Sistema Luxes',

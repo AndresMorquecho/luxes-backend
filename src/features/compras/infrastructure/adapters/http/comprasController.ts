@@ -174,8 +174,19 @@ export class ComprasController {
         updateData.aprobadoPorId = userId;
       }
 
-      if (updateData.abonoMonto && userId) {
-        updateData.registradoPorUserId = userId;
+      if (req.body.esChequePosfechado && updateData.abonoMonto > 0) {
+        await this.service.crearChequePosfechado({
+          ordenCompraId: id,
+          metodoPagoId: updateData.metodoPagoId,
+          numeroCheque: String(req.body.numeroCheque || ''),
+          monto: Number(updateData.abonoMonto),
+          fechaCobro: req.body.fechaCobroCheque || req.body.fechaCobro,
+          referencia: updateData.abonoReferencia,
+          registradoPorUserId: userId,
+        });
+        delete updateData.abonoMonto;
+        delete updateData.metodoPagoId;
+        delete updateData.abonoReferencia;
       }
 
       const data = await this.service.updateOrden(id, updateData);
@@ -269,7 +280,20 @@ export class ComprasController {
 
   async createAbono(req: Request, res: Response) {
     try {
-      const userId = (req as { user?: { id?: string } }).user?.id || null;
+      const userId = (req as { user?: { id?: string } }).user?.id || undefined;
+
+      if (req.body.esChequePosfechado) {
+        const data = await this.service.crearChequePosfechado({
+          ordenCompraId: String(req.params.id),
+          metodoPagoId: req.body.metodoPagoId,
+          numeroCheque: String(req.body.numeroCheque || ''),
+          monto: parseFloat(req.body.monto),
+          fechaCobro: req.body.fechaCobro,
+          referencia: req.body.referencia,
+          registradoPorUserId: userId,
+        });
+        return res.status(201).json({ success: true, data });
+      }
 
       // Verificar si la fecha del abono cae en un período cerrado de caja
       const { prisma } = await import('../../../../../config/prismaClient.js');
@@ -438,5 +462,40 @@ export class ComprasController {
     } catch (e) {
       return this.fail(res, e, 400);
     }
+  }
+
+  // ── Cheques Posfechados ───────────────────────────────────────────────────
+
+  async listCheques(req: Request, res: Response) {
+    try {
+      const estado = this.str(req.query.estado);
+      const ordenCompraId = this.str(req.query.ordenCompraId);
+      const data = await this.service.getCheques({ estado, ordenCompraId });
+      return this.ok(res, data);
+    } catch (e) { return this.fail(res, e); }
+  }
+
+  async procesarCheque(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const data = await this.service.procesarCheque(id);
+      return this.ok(res, data);
+    } catch (e) { return this.fail(res, e, 400); }
+  }
+
+  async updateCheque(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const data = await this.service.editarChequePosfechado(id, req.body);
+      return this.ok(res, data);
+    } catch (e) { return this.fail(res, e, 400); }
+  }
+
+  async deleteCheque(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      await this.service.eliminarChequePosfechado(id);
+      return this.ok(res, { deleted: true });
+    } catch (e) { return this.fail(res, e, 400); }
   }
 }

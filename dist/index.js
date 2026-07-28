@@ -82,6 +82,30 @@ async function bootstrap() {
     catch (error) {
         console.error('[Bootstrap] Error al verificar columna comprobante_url:', error);
     }
+    // Verificar/Crear tabla cheques_compra
+    try {
+        const { prisma } = await import('./config/prismaClient.js');
+        await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS cheques_compra (
+        id VARCHAR(255) PRIMARY KEY,
+        orden_compra_id VARCHAR(255) NOT NULL REFERENCES ordenes_compra(id) ON DELETE CASCADE,
+        metodo_pago_id VARCHAR(255) NOT NULL REFERENCES metodos_pago(id),
+        numero_cheque VARCHAR(255) NOT NULL,
+        monto DOUBLE PRECISION NOT NULL,
+        fecha_emision TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        fecha_cobro TIMESTAMP NOT NULL,
+        estado VARCHAR(50) DEFAULT 'PENDIENTE' NOT NULL,
+        referencia TEXT,
+        procesado BOOLEAN DEFAULT FALSE NOT NULL,
+        notificado BOOLEAN DEFAULT FALSE NOT NULL,
+        registrado_por_user_id VARCHAR(255) REFERENCES users(id) ON DELETE SET NULL
+      );
+    `);
+        console.log('[Bootstrap] Tabla cheques_compra verificada/creada.');
+    }
+    catch (error) {
+        console.error('[Bootstrap] Error al verificar tabla cheques_compra:', error);
+    }
     // Asegurar usuarios del sistema (activos + contraseña dev conocida) solo si la tabla está vacía
     try {
         const { prisma } = await import('./config/prismaClient.js');
@@ -267,6 +291,16 @@ async function bootstrap() {
     const server = app.listen(env.port, () => {
         console.log(`Luxes API corriendo en http://localhost:${env.port}`);
         console.log(`Login: POST http://localhost:${env.port}/api/auth/login`);
+        // Iniciar temporizador para cobro de cheques posfechados programados
+        try {
+            import('./shared/services/chequesSchedulerService.js').then(({ startChequesScheduler }) => {
+                startChequesScheduler();
+                console.log('[Bootstrap] Servicio de Cheques Posfechados iniciado.');
+            });
+        }
+        catch (err) {
+            console.error('[Bootstrap] Error al iniciar cheques scheduler:', err);
+        }
     });
     server.on('error', (err) => {
         if (err.code === 'EADDRINUSE') {

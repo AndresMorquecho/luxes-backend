@@ -26,6 +26,12 @@ export function createComprasRoutes(ctrl: ComprasController): Router {
   router.put('/metodos-pago/:id',          (req, res) => ctrl.updateMetodoPago(req, res));
   router.delete('/metodos-pago/:id',       (req, res) => ctrl.deleteMetodoPago(req, res));
 
+  // ── Cheques Posfechados (antes de :id) ────────────────────────────────────
+  router.get('/cheques',                   (req, res) => ctrl.listCheques(req, res));
+  router.post('/cheques/:id/procesar',     (req, res) => ctrl.procesarCheque(req, res));
+  router.put('/cheques/:id',              (req, res) => ctrl.updateCheque(req, res));
+  router.delete('/cheques/:id',           (req, res) => ctrl.deleteCheque(req, res));
+
   // ── Órdenes de Compra ──────────────────────────────────────────────────────
   router.get('/',                          (req, res) => ctrl.listOrdenes(req, res));
   router.post('/',                         (req, res) => ctrl.createOrden(req, res));
