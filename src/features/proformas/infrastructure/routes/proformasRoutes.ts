@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import type { ProformasController } from '../adapters/http/proformasController.js';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
+import { createUploadMiddleware } from '../../../../shared/middleware/uploadMiddleware.js';
 
 export function createProformasRoutes(controller: ProformasController): Router {
   const router = Router();
+  const comprobanteUpload = createUploadMiddleware('proformas/comprobantes');
 
+  router.post('/comprobantes/upload', authMiddleware, comprobanteUpload.single('comprobante'), (req, res) => controller.uploadComprobante(req, res));
   router.get('/', authMiddleware, (req, res) => controller.list(req, res));
   router.post('/', authMiddleware, (req, res) => controller.create(req, res));
   router.get('/:id', authMiddleware, (req, res) => controller.getById(req, res));

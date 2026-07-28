@@ -132,6 +132,7 @@ function mapProforma(p) {
             monto: Number(ab.monto),
             fecha: toDateTimeStr(ab.fecha),
             referencia: ab.referencia,
+            comprobanteUrl: ab.comprobanteUrl || null,
             metodoPago: ab.metodoPago ? { id: ab.metodoPago.id, nombre: ab.metodoPago.nombre } : null,
             registradoPor: ab.registradoPor ? { id: ab.registradoPor.id, nombre: ab.registradoPor.nombre } : null,
         })),
@@ -477,11 +478,25 @@ export class ProformasController {
             return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al obtener proforma' } });
         }
     }
+    async uploadComprobante(req, res) {
+        try {
+            const file = req.file;
+            if (!file) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No se envió ningún archivo' } });
+            }
+            const url = `/uploads/proformas/comprobantes/${file.filename}`;
+            return res.status(200).json({ success: true, data: { url } });
+        }
+        catch (error) {
+            console.error('[proformas/uploadComprobante]', error);
+            return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al subir el comprobante' } });
+        }
+    }
     async aprobar(req, res) {
         try {
             const { id } = req.params;
             const b = req.body || {};
-            const { monto, metodoPagoId, referencia, aplicarIva } = b;
+            const { monto, metodoPagoId, referencia, aplicarIva, comprobanteUrl } = b;
             const userRole = (req.user?.rol || '').toUpperCase();
             const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
             if (!isAdmin) {
@@ -526,6 +541,7 @@ export class ProformasController {
                         metodoPagoId: String(metodoPagoId),
                         monto: abonoMonto,
                         referencia: referencia ?? '',
+                        comprobanteUrl: comprobanteUrl ?? null,
                         registradoPorUserId: registradoPorUserId ?? undefined,
                     },
                 });
@@ -606,8 +622,7 @@ export class ProformasController {
     async registrarAbono(req, res) {
         try {
             const { id } = req.params;
-            const b = req.body || {};
-            const { monto, metodoPagoId, referencia } = b;
+            const { monto, metodoPagoId, referencia, comprobanteUrl } = req.body || {};
             if (monto === undefined || !metodoPagoId) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Monto y método de pago son requeridos' } });
             }
@@ -644,6 +659,7 @@ export class ProformasController {
                         metodoPagoId: String(metodoPagoId),
                         monto: abonoMonto,
                         referencia: referencia ?? '',
+                        comprobanteUrl: comprobanteUrl ?? null,
                         registradoPorUserId: registradoPorUserId ?? undefined,
                     },
                 });
@@ -667,8 +683,8 @@ export class ProformasController {
     async editarAbono(req, res) {
         try {
             const { id, abonoId } = req.params;
-            const b = req.body || {};
-            const { monto, metodoPagoId, referencia } = b;
+            const { monto, metodoPagoId, referencia, comprobanteUrl } = req.body || {};
+            const nuevoMonto = Number(monto);
             const userRole = (req.user?.rol || '').toUpperCase();
             const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
             if (!isAdmin) {
@@ -695,7 +711,6 @@ export class ProformasController {
             const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
             const total = subtotal * (1 + Number(proforma.iva));
             const sumOtrosAbonos = abonosSorted.slice(0, -1).reduce((s, ab) => s + Number(ab.monto), 0);
-            const nuevoMonto = Number(monto);
             if (nuevoMonto <= 0) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
             }
@@ -712,6 +727,7 @@ export class ProformasController {
                         monto: nuevoMonto,
                         metodoPagoId: String(metodoPagoId),
                         referencia: referencia ?? '',
+                        ...(comprobanteUrl !== undefined ? { comprobanteUrl: comprobanteUrl || null } : {}),
                         registradoPorUserId: registradoPorUserId ?? undefined,
                     },
                 });

@@ -74,6 +74,17 @@ async function bootstrap() {
     console.error('[Bootstrap] Error al verificar tabla reclamos_proyectos:', error);
   }
 
+  // Verificar/Crear columna comprobante_url en abonos_proforma
+  try {
+    const { prisma } = await import('./config/prismaClient.js');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE abonos_proforma ADD COLUMN IF NOT EXISTS comprobante_url TEXT;
+    `);
+    console.log('[Bootstrap] Columna comprobante_url en abonos_proforma verificada.');
+  } catch (error) {
+    console.error('[Bootstrap] Error al verificar columna comprobante_url:', error);
+  }
+
 
 
   // Asegurar usuarios del sistema (activos + contraseña dev conocida) solo si la tabla está vacía

@@ -12,6 +12,21 @@ export function createGastosRoutes(
   const gastosRouter = Router();
   const vehiculosRouter = Router();
 
+  // Middleware para restringir acceso al módulo de finanzas a Ventas y Diseñador
+  gastosRouter.use((req: any, res, next) => {
+    const userRole = (req.user?.rol || '').toLowerCase().trim();
+    if (userRole.includes('ventas') || userRole.includes('diseñador') || userRole.includes('disenador')) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'El rol de Ventas / Diseñador no tiene acceso al módulo de finanzas',
+        },
+      });
+    }
+    next();
+  });
+
   // Gastos Fijos
   gastosRouter.get('/fijos/deudas-count', authMiddleware, (req, res) => gastosFijosController.getDeudasCount(req, res));
   gastosRouter.get('/fijos', authMiddleware, (req, res) => gastosFijosController.list(req, res));

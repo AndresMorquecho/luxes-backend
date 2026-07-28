@@ -596,6 +596,7 @@ model AbonoProforma {
   monto         Float
   fecha         DateTime   @default(now())
   referencia    String?
+  comprobanteUrl String?   @map("comprobante_url")
   registradoPorUserId String? @map("registrado_por_user_id")
   registradoPor       User?   @relation("AbonoProformaRegistradoPor", fields: [registradoPorUserId], references: [id], onDelete: SetNull)
 

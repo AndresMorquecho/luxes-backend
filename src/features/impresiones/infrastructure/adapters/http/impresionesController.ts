@@ -10,10 +10,11 @@ export class ImpresionesController {
       });
 
       // Classify jobs
-      // 1. activeJob: at most one job with status "Listo", "Imprimiendo", or "Pausado"
-      const activeJob = jobs.find((j) =>
+      // 1. activeJobs: jobs with status "Listo", "Imprimiendo", or "Pausado" (max 3 allowed by workflow)
+      const activeJobs = jobs.filter((j) =>
         ['Listo', 'Imprimiendo', 'Pausado'].includes(j.status)
-      ) || null;
+      );
+      const activeJob = activeJobs[0] || null;
 
       // 2. queue: jobs in "En espera", sorted by position, then createdAt
       const queue = jobs
@@ -35,6 +36,7 @@ export class ImpresionesController {
       return res.status(200).json({
         success: true,
         data: {
+          activeJobs,
           activeJob,
           queue,
           completedJobs,
