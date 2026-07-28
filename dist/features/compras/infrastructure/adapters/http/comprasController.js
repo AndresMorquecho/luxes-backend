@@ -294,6 +294,47 @@ export class ComprasController {
             return this.fail(res, e, 400);
         }
     }
+    async eliminarAbono(req, res) {
+        try {
+            const user = req.user;
+            const rol = (user?.rol || '').toLowerCase();
+            const isAdmin = rol === 'admin' || rol === 'administrador';
+            if (!isAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    error: { message: 'Solo los administradores pueden eliminar abonos.' },
+                });
+            }
+            const id = String(req.params.id);
+            const abonoId = String(req.params.abonoId);
+            // Verificar si cae en periodo cerrado
+            const { prisma } = await import('../../../../../config/prismaClient.js');
+            const abonos = await this.service.getAbonosByOrden(id);
+            const targetAbono = abonos.find(a => a.id === abonoId);
+            if (targetAbono) {
+                const fechaAbono = new Date(targetAbono.fecha);
+                const cierreBloqueante = await prisma.cierreCaja.findFirst({
+                    where: {
+                        fechaInicio: { lte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 23, 59, 59, 999) },
+                        fechaFin: { gte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 0, 0, 0, 0) },
+                    },
+                });
+                if (cierreBloqueante) {
+                    const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+                    const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+                    return res.status(403).json({
+                        success: false,
+                        error: { code: 'PERIODO_CERRADO', message: `No se pueden eliminar abonos de un período cerrado (${fi} al ${ff}).` },
+                    });
+                }
+            }
+            await this.service.eliminarAbono(id, abonoId);
+            return this.ok(res, { deleted: true });
+        }
+        catch (e) {
+            return this.fail(res, e, 400);
+        }
+    }
     // ── Cuentas por Pagar ──────────────────────────────────────────────────────
     async listCuentasPorPagar(req, res) {
         try {

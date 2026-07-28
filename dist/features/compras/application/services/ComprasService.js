@@ -156,6 +156,21 @@ export class ComprasService {
         await this.repo.updateOrden(data.ordenCompraId, ordenUpdate);
         return abono;
     }
+    async eliminarAbono(ordenCompraId, abonoId) {
+        const orden = await this.repo.findOrdenById(ordenCompraId);
+        if (!orden)
+            throw new Error('Orden de compra no encontrada.');
+        const abonos = await this.repo.findAbonosByOrden(ordenCompraId);
+        if (!abonos || abonos.length === 0) {
+            throw new Error('No existen abonos registrados para esta orden de compra.');
+        }
+        const abonosSorted = abonos.slice().sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+        const lastAbono = abonosSorted[abonosSorted.length - 1];
+        if (lastAbono.id !== String(abonoId)) {
+            throw new Error('Solo se puede eliminar el último abono registrado.');
+        }
+        await this.repo.deleteAbono(abonoId, ordenCompraId, lastAbono.monto);
+    }
     // ── Cuentas por Pagar ──────────────────────────────────────────────────────
     getCuentasPorPagar(options) {
         return this.repo.findAllCuentasPorPagar(options);

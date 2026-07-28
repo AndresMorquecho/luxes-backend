@@ -779,7 +779,10 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
   async findAbonosByOrden(ordenId: string): Promise<AbonoCompraData[]> {
     const rows = await this.prisma.abonoCompra.findMany({
       where: { ordenCompraId: ordenId },
-      include: { metodoPago: true },
+      include: {
+        metodoPago: true,
+        registradoPor: { select: { id: true, nombre: true } },
+      },
       orderBy: { fecha: 'desc' },
     });
     return rows as unknown as AbonoCompraData[];
@@ -800,9 +803,45 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
         referencia: data.referencia,
         registradoPorUserId: data.registradoPorUserId ?? undefined,
       },
-      include: { metodoPago: true },
+      include: {
+        metodoPago: true,
+        registradoPor: { select: { id: true, nombre: true } },
+      },
     });
     return row as unknown as AbonoCompraData;
+  }
+
+  async deleteAbono(abonoId: string, ordenCompraId: string, monto: number): Promise<void> {
+    await this.prisma.abonoCompra.delete({
+      where: { id: abonoId },
+    });
+
+    const cxp = await this.prisma.cuentaPorPagar.findUnique({
+      where: { ordenCompraId },
+    });
+
+    if (cxp) {
+      const newMontoPagado = Math.max(0, cxp.montoPagado - monto);
+      const newSaldo = Math.max(0, cxp.montoTotal - newMontoPagado);
+      const newEstado = newSaldo <= 0 ? 'pagado' : newMontoPagado > 0 ? 'parcial' : 'pendiente';
+      const newEstadoPago = newEstado === 'pagado' ? 'pagado' : newMontoPagado > 0 ? 'parcial' : 'sin_pagar';
+
+      await this.prisma.cuentaPorPagar.update({
+        where: { id: cxp.id },
+        data: {
+          montoPagado: newMontoPagado,
+          saldo: newSaldo,
+          estado: newEstado,
+        },
+      });
+
+      await this.prisma.ordenCompra.update({
+        where: { id: ordenCompraId },
+        data: {
+          estadoPago: newEstadoPago,
+        },
+      });
+    }
   }
 
   // ── Cuentas por Pagar ──────────────────────────────────────────────────────

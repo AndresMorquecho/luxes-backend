@@ -48,6 +48,8 @@ export interface AbonoCompraData {
   monto: number;
   fecha: Date;
   referencia?: string | null;
+  registradoPorUserId?: string | null;
+  registradoPor?: { id: string; nombre: string } | null;
 }
 
 export interface CuentaPorPagarData {
@@ -188,6 +190,7 @@ export interface ComprasRepositoryPort {
     referencia?: string;
     registradoPorUserId?: string | null;
   }): Promise<AbonoCompraData>;
+  deleteAbono(abonoId: string, ordenCompraId: string, monto: number): Promise<void>;
 
   // ── Cuentas por Pagar ──
   findAllCuentasPorPagar(options?: {
