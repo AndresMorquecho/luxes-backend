@@ -49,9 +49,17 @@ export function createEmpleadosController(empleadoService: EmpleadoService): Emp
     async list(_req, res) {
       try {
         const empleados = await empleadoService.listEmpleados();
+        const sanitized = empleados.map((e) => {
+          const json = e.toJSON();
+          // Evitar transferir Base64 masivos en la lista general para no saturar ancho de banda/memoria
+          if (json.foto && json.foto.startsWith('data:image/') && json.foto.length > 2000) {
+            return { ...json, foto: null };
+          }
+          return json;
+        });
         return res.status(200).json({
           success: true,
-          data: empleados.map((e) => e.toJSON()),
+          data: sanitized,
         });
       } catch (error) {
         console.error('[empleados/list]', error);
