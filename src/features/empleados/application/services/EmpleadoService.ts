@@ -1,3 +1,4 @@
+import fs from 'fs/promises';
 import path from 'path';
 import { EmpleadoInput, EmpleadoRepositoryPort } from '../../domain/ports/EmpleadoRepositoryPort.js';
 import { Empleado } from '../../domain/entities/Empleado.js';
@@ -9,6 +10,28 @@ import { prisma } from '../../../../config/prismaClient.js';
 import { safeUnlinkFile } from '../../../../shared/utils/pathSafetyHelper.js';
 
 const DEFAULT_PASSWORD = '123456';
+
+async function saveBase64FotoToFile(empId: string, foto?: string | null): Promise<string | null | undefined> {
+  if (!foto) return foto;
+  const trimmed = foto.trim();
+  if (!trimmed.startsWith('data:image/')) return foto;
+
+  const matches = trimmed.match(/^data:(image\/[a-zA-Z0-9-+.]+);base64,(.+)$/);
+  if (!matches) return foto;
+
+  const mimeType = matches[1];
+  const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+  const buffer = Buffer.from(matches[2], 'base64');
+
+  const uploadsDir = path.resolve('uploads', 'fotos');
+  await fs.mkdir(uploadsDir, { recursive: true });
+
+  const filename = `foto-${empId}-${Date.now()}.${ext}`;
+  const filePath = path.join(uploadsDir, filename);
+  await fs.writeFile(filePath, buffer);
+
+  return `/uploads/fotos/${filename}`;
+}
 
 export class EmpleadoService {
   constructor(
@@ -28,25 +51,21 @@ export class EmpleadoService {
   async createEmpleado(data: EmpleadoInput): Promise<Empleado> {
     this.validateInput(data);
 
-    const existing = await this.empleadoRepository.findByCedula(data.cedula.trim());
-    if (existing) {
-      throw new Error('Ya existe un empleado con esa cédula');
+    const email = data.correo ? data.correo.trim().toLowerCase() : undefined;
+    const username = data.username ? data.username.trim() : email ? email.split('@')[0] : `user_${data.cedula.trim()}`;
+
+    const duplicate = await this.empleadoRepository.findByCedula(data.cedula.trim());
+    if (duplicate) {
+      throw new Error('Ya existe un empleado registrado con esa cédula');
     }
 
-    const username = data.username?.trim() || data.correo?.trim().split('@')[0] || `user_${data.cedula.trim()}`;
-    const email = data.correo?.trim().toLowerCase() || `${username}@luxes.com`;
-
-    // Validar si el correo ya está registrado en User
-    const existingEmail = await prisma.user.findFirst({
-      where: { email }
-    });
-    if (existingEmail) {
-      throw new Error('Ya existe un usuario con ese correo electrónico');
+    const existingUser = email ? await prisma.user.findUnique({ where: { email } }) : null;
+    if (existingUser) {
+      throw new Error('Ya existe un usuario registrado con ese correo electrónico');
     }
 
-    // Validar si el username ya está registrado en User
-    const existingUsername = await prisma.user.findFirst({
-      where: { username }
+    const existingUsername = await prisma.user.findUnique({
+      where: { username },
     });
     if (existingUsername) {
       throw new Error('Ya existe un usuario con ese nombre de usuario');
@@ -54,8 +73,9 @@ export class EmpleadoService {
 
     const id = await this.empleadoRepository.generateNextId();
     const passwordHash = await this.passwordHasher.hash(data.contraseña?.trim() || DEFAULT_PASSWORD);
-    
-    const empleado = await this.empleadoRepository.create(id, { ...data, correo: email, passwordHash });
+
+    const fotoUrl = await saveBase64FotoToFile(id, data.foto);
+    const empleado = await this.empleadoRepository.create(id, { ...data, foto: fotoUrl, correo: email, passwordHash });
 
     // Crear el usuario correspondiente de manera automática y vincularlo
     const defaultRole = data.roleId 
@@ -67,7 +87,7 @@ export class EmpleadoService {
     await prisma.user.create({
       data: {
         nombre: data.nombre,
-        email,
+        email: email || `${username}@luxes.com`,
         username,
         passwordHash,
         rol: defaultRole?.name || data.rol || 'visor',
@@ -94,8 +114,11 @@ export class EmpleadoService {
     }
 
     const updateData: EmpleadoInput = { ...data };
-    if (data.foto !== undefined && data.foto !== current.foto && current.foto) {
-      await safeUnlinkFile(path.resolve('uploads'), current.foto);
+    if (data.foto !== undefined) {
+      updateData.foto = await saveBase64FotoToFile(id, data.foto);
+      if (current.foto && current.foto !== updateData.foto && current.foto.startsWith('/uploads/')) {
+        await safeUnlinkFile(path.resolve('uploads'), current.foto.replace('/uploads/', ''));
+      }
     }
     if (data.contraseña?.trim()) {
       updateData.passwordHash = await this.passwordHasher.hash(data.contraseña.trim());
