@@ -28,6 +28,16 @@ function resolveUserRol(dbUser: { rol: string; username: string; role?: { name: 
   return roleName || dbUser.rol;
 }
 
+const formatFotoUrl = (empId?: string | null, foto?: string | null): string | null => {
+  if (!foto || !empId) return null;
+  const trimmed = foto.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('data:image/')) {
+    return `/api/empleados/${empId}/foto`;
+  }
+  return trimmed;
+};
+
 /**
  * Adaptador de persistencia de usuarios en base de datos PostgreSQL usando Prisma.
  * Implementa el puerto UserRepositoryPort.
@@ -43,7 +53,11 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         },
       },
     },
-    empleado: true,
+    empleado: {
+      select: {
+        foto: true,
+      },
+    },
   };
 
   async findByUsernameOrEmail(identifier: string): Promise<User | null> {
@@ -74,7 +88,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
-      foto: (dbUser as any).empleado?.foto || null,
+      foto: formatFotoUrl(dbUser.empleadoId, (dbUser as any).empleado?.foto),
     });
   }
 
@@ -103,7 +117,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
-      foto: (dbUser as any).empleado?.foto || null,
+      foto: formatFotoUrl(dbUser.empleadoId, (dbUser as any).empleado?.foto),
     });
   }
 
@@ -129,7 +143,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
-      foto: (dbUser as any).empleado?.foto || null,
+      foto: formatFotoUrl(dbUser.empleadoId, (dbUser as any).empleado?.foto),
     });
   }
 
@@ -164,7 +178,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
-      foto: (dbUser as any).empleado?.foto || null,
+      foto: formatFotoUrl(dbUser.empleadoId, (dbUser as any).empleado?.foto),
     });
   }
 
@@ -191,7 +205,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
         sidebarConfig: dbUser.sidebarConfig,
         empleadoId: dbUser.empleadoId,
-        foto: (dbUser as any).empleado?.foto || null,
+        foto: formatFotoUrl(dbUser.empleadoId, (dbUser as any).empleado?.foto),
       });
     });
   }
@@ -228,7 +242,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
       sidebarConfig: dbUser.sidebarConfig,
       empleadoId: dbUser.empleadoId,
-      foto: (dbUser as any).empleado?.foto || null,
+      foto: formatFotoUrl(dbUser.empleadoId, (dbUser as any).empleado?.foto),
     });
   }
 

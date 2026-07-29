@@ -1329,17 +1329,24 @@ export class GastosController {
         }
       }
 
-      const usersActivity = dbUsers.map(u => ({
-        id: u.id,
-        nombre: u.nombre,
-        username: u.username,
-        rol: u.rol,
-        empleadoId: u.empleadoId,
-        foto: u.empleado?.foto || null,
-        activeTask: latestTaskByUser[u.id] || null,
-        pendingTasksCount: taskCountByUser[u.id] || 0,
-        lastAction: lastActionByUser[u.id] || null
-      }));
+      const usersActivity = dbUsers.map(u => {
+        const fotoRaw = u.empleado?.foto?.trim();
+        let fotoUrl: string | null = fotoRaw || null;
+        if (fotoRaw && u.empleadoId && fotoRaw.startsWith('data:image/')) {
+          fotoUrl = `/api/empleados/${u.empleadoId}/foto`;
+        }
+        return {
+          id: u.id,
+          nombre: u.nombre,
+          username: u.username,
+          rol: u.rol,
+          empleadoId: u.empleadoId,
+          foto: fotoUrl,
+          activeTask: latestTaskByUser[u.id] || null,
+          pendingTasksCount: taskCountByUser[u.id] || 0,
+          lastAction: lastActionByUser[u.id] || null
+        };
+      });
 
       // 2. Cola de impresión
       const currentPrintingJob = await prisma.impresionJob.findFirst({
