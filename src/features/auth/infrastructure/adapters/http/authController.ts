@@ -341,16 +341,33 @@ export function createAuthController(authService: AuthService): AuthController {
 
     async listAuditLogs(req: Request, res: Response): Promise<Response> {
       try {
-        const { search, userId, modulo, severidad } = req.query;
-        const logs = await authService.listAuditLogs({
+        const { search, userId, modulo, severidad, page, limit } = req.query;
+        const result: any = await authService.listAuditLogs({
           search: search as string,
           userId: userId as string,
           modulo: modulo as string,
           severidad: severidad as string,
+          page: page ? Number(page) : 1,
+          limit: limit ? Number(limit) : 20,
         });
+
+        if (Array.isArray(result)) {
+          return res.status(200).json({
+            success: true,
+            data: result,
+            pagination: {
+              total: result.length,
+              page: 1,
+              limit: result.length || 20,
+              totalPages: 1,
+            },
+          });
+        }
+
         return res.status(200).json({
           success: true,
-          data: logs,
+          data: result.data,
+          pagination: result.pagination,
         });
       } catch (error) {
         console.error('[audit-logs/list]', error);

@@ -31,19 +31,36 @@ export class PrismaAuditLogAdapter extends AuditLogRepositoryPort {
                 { detalle: { contains: filters.search, mode: 'insensitive' } },
             ];
         }
-        return prisma.auditLog.findMany({
-            where: whereClause,
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        nombre: true,
+        const page = Math.max(1, Number(filters?.page) || 1);
+        const limit = Math.max(1, Math.min(200, Number(filters?.limit) || 20));
+        const skip = (page - 1) * limit;
+        const [total, data] = await Promise.all([
+            prisma.auditLog.count({ where: whereClause }),
+            prisma.auditLog.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            nombre: true,
+                        },
                     },
                 },
+                orderBy: {
+                    fecha: 'desc',
+                },
+                skip,
+                take: limit,
+            }),
+        ]);
+        return {
+            data,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.max(1, Math.ceil(total / limit)),
             },
-            orderBy: {
-                fecha: 'desc',
-            },
-        });
+        };
     }
 }

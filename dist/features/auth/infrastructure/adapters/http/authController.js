@@ -306,16 +306,31 @@ export function createAuthController(authService) {
         // --- ENDPOINTS AUDITORÍA ---
         async listAuditLogs(req, res) {
             try {
-                const { search, userId, modulo, severidad } = req.query;
-                const logs = await authService.listAuditLogs({
+                const { search, userId, modulo, severidad, page, limit } = req.query;
+                const result = await authService.listAuditLogs({
                     search: search,
                     userId: userId,
                     modulo: modulo,
                     severidad: severidad,
+                    page: page ? Number(page) : 1,
+                    limit: limit ? Number(limit) : 20,
                 });
+                if (Array.isArray(result)) {
+                    return res.status(200).json({
+                        success: true,
+                        data: result,
+                        pagination: {
+                            total: result.length,
+                            page: 1,
+                            limit: result.length || 20,
+                            totalPages: 1,
+                        },
+                    });
+                }
                 return res.status(200).json({
                     success: true,
-                    data: logs,
+                    data: result.data,
+                    pagination: result.pagination,
                 });
             }
             catch (error) {

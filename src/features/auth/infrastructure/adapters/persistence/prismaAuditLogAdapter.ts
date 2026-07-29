@@ -1,4 +1,4 @@
-import { AuditLogRepositoryPort } from '../../../domain/ports/AuditLogRepositoryPort.js';
+import { AuditLogRepositoryPort, AuditLogPaginatedResult } from '../../../domain/ports/AuditLogRepositoryPort.js';
 import { prisma } from '../../../../../config/prismaClient.js';
 
 export class PrismaAuditLogAdapter extends AuditLogRepositoryPort {
@@ -27,7 +27,9 @@ export class PrismaAuditLogAdapter extends AuditLogRepositoryPort {
     userId?: string;
     modulo?: string;
     severidad?: string;
-  }): Promise<any[]> {
+    page?: number;
+    limit?: number;
+  }): Promise<AuditLogPaginatedResult> {
     const whereClause: any = {};
 
     if (filters?.userId) {
@@ -47,19 +49,38 @@ export class PrismaAuditLogAdapter extends AuditLogRepositoryPort {
       ];
     }
 
-    return prisma.auditLog.findMany({
-      where: whereClause,
-      include: {
-        user: {
-          select: {
-            id: true,
-            nombre: true,
+    const page = Math.max(1, Number(filters?.page) || 1);
+    const limit = Math.max(1, Math.min(200, Number(filters?.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const [total, data] = await Promise.all([
+      prisma.auditLog.count({ where: whereClause }),
+      prisma.auditLog.findMany({
+        where: whereClause,
+        include: {
+          user: {
+            select: {
+              id: true,
+              nombre: true,
+            },
           },
         },
+        orderBy: {
+          fecha: 'desc',
+        },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       },
-      orderBy: {
-        fecha: 'desc',
-      },
-    });
+    };
   }
 }
