@@ -1,6 +1,8 @@
+import fs from 'fs/promises';
 import path from 'path';
 import { isValidDocumentoTipo } from '../persistence/prismaEmpleadoDocumentoAdapter.js';
 import { prisma } from '../../../../../config/prismaClient.js';
+import { parseBase64Image } from '../../../../../shared/utils/base64Helper.js';
 const parseBody = (body) => ({
     nombre: String(body.nombre ?? ''),
     cedula: String(body.cedula ?? ''),
@@ -100,24 +102,48 @@ export function createEmpleadosController(empleadoService) {
                     return res.status(404).send('Foto no encontrada');
                 }
                 const fotoStr = empleado.foto.trim();
+                // 1. Si es un string Base64 (incluyendo los que tienen saltos de línea \n \r)
                 if (fotoStr.startsWith('data:image/')) {
-                    const matches = fotoStr.match(/^data:(image\/[a-zA-Z0-9-+.]+);base64,(.+)$/);
-                    if (matches) {
-                        const mimeType = matches[1];
-                        const buffer = Buffer.from(matches[2], 'base64');
-                        res.setHeader('Content-Type', mimeType);
+                    const parsed = parseBase64Image(fotoStr);
+                    if (parsed) {
+                        // Convertir y guardar en disco de inmediato para que peticiones futuras respondan a 5ms
+                        try {
+                            const uploadsDir = path.resolve('uploads', 'fotos');
+                            await fs.mkdir(uploadsDir, { recursive: true });
+                            const filename = `foto-${id}-${Date.now()}.${parsed.ext}`;
+                            const filePath = path.join(uploadsDir, filename);
+                            const relativeUrl = `/uploads/fotos/${filename}`;
+                            await fs.writeFile(filePath, parsed.buffer);
+                            await prisma.empleado.update({
+                                where: { id },
+                                data: { foto: relativeUrl },
+                            });
+                        }
+                        catch (saveErr) {
+                            console.error('[getFoto] Error al autosalvar foto Base64 a disco:', saveErr);
+                        }
+                        res.setHeader('Content-Type', parsed.mimeType);
                         res.setHeader('Cache-Control', 'public, max-age=86400');
                         res.setHeader('Access-Control-Allow-Origin', '*');
-                        return res.status(200).send(buffer);
+                        return res.status(200).send(parsed.buffer);
                     }
                 }
-                else if (fotoStr.startsWith('/uploads/') || fotoStr.startsWith('uploads/')) {
-                    const absolutePath = path.resolve('.', fotoStr.replace(/^\//, ''));
-                    res.setHeader('Cache-Control', 'public, max-age=86400');
-                    res.setHeader('Access-Control-Allow-Origin', '*');
-                    return res.sendFile(absolutePath);
+                // 2. Si es una ruta estática en disco (/uploads/fotos/...)
+                if (fotoStr.startsWith('/uploads/') || fotoStr.startsWith('uploads/')) {
+                    const cleanPath = fotoStr.replace(/^\//, '');
+                    const absolutePath = path.resolve(process.cwd(), cleanPath);
+                    try {
+                        await fs.access(absolutePath);
+                        res.setHeader('Cache-Control', 'public, max-age=86400');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        return res.sendFile(absolutePath);
+                    }
+                    catch {
+                        console.warn(`[getFoto] Archivo estático no encontrado en disco: ${absolutePath}`);
+                    }
                 }
-                else if (fotoStr.startsWith('http://') || fotoStr.startsWith('https://')) {
+                // 3. Si es una URL externa
+                if (fotoStr.startsWith('http://') || fotoStr.startsWith('https://')) {
                     return res.redirect(fotoStr);
                 }
                 return res.status(404).send('Foto no encontrada');
