@@ -3,7 +3,7 @@ import { NominaController } from '../adapters/http/nominaController.js';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
 import { createUploadMiddleware } from '../../../../shared/middleware/uploadMiddleware.js';
 
-const comprobanteUpload = createUploadMiddleware('comprobantes');
+const comprobanteUpload = createUploadMiddleware('nomina/comprobantes');
 
 export function createNominaRoutes(controller: NominaController): Router {
   const router = Router();

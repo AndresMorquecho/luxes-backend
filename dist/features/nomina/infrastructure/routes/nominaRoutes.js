@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
 import { createUploadMiddleware } from '../../../../shared/middleware/uploadMiddleware.js';
-const comprobanteUpload = createUploadMiddleware('comprobantes');
+const comprobanteUpload = createUploadMiddleware('nomina/comprobantes');
 export function createNominaRoutes(controller) {
     const router = Router();
     router.get('/horas-extras', authMiddleware, (req, res) => controller.getOvertime(req, res));

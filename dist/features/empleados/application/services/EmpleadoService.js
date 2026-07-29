@@ -1,6 +1,8 @@
+import path from 'path';
 import { PrismaEmpleadoDocumentoAdapter } from '../../infrastructure/adapters/persistence/prismaEmpleadoDocumentoAdapter.js';
 import { BcryptPasswordAdapter } from '../../../auth/infrastructure/adapters/security/bcryptPasswordAdapter.js';
 import { prisma } from '../../../../config/prismaClient.js';
+import { safeUnlinkFile } from '../../../../shared/utils/pathSafetyHelper.js';
 const DEFAULT_PASSWORD = '123456';
 export class EmpleadoService {
     empleadoRepository;
@@ -73,6 +75,9 @@ export class EmpleadoService {
             throw new Error('Ya existe otro empleado con esa cédula');
         }
         const updateData = { ...data };
+        if (data.foto !== undefined && data.foto !== current.foto && current.foto) {
+            await safeUnlinkFile(path.resolve('uploads'), current.foto);
+        }
         if (data.contraseña?.trim()) {
             updateData.passwordHash = await this.passwordHasher.hash(data.contraseña.trim());
         }
@@ -124,6 +129,9 @@ export class EmpleadoService {
         const current = await this.empleadoRepository.findById(id);
         if (!current) {
             throw new Error('Empleado no encontrado');
+        }
+        if (current.foto) {
+            await safeUnlinkFile(path.resolve('uploads'), current.foto);
         }
         // Eliminar también el usuario vinculado en cascada (si es posible)
         const linkedUser = await prisma.user.findUnique({ where: { empleadoId: id } });

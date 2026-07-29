@@ -1,6 +1,7 @@
 import { prisma } from '../../../../../config/prismaClient.js';
 import path from 'path';
 import fs from 'fs/promises';
+import { safeRemoveDir } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
@@ -607,10 +608,19 @@ export class ProyectosController {
     async remove(req, res) {
         try {
             const { id } = req.params;
-            // Explicitly delete related print jobs to prevent orphaned jobs
-            await prisma.impresionJob.deleteMany({ where: { proyectoId: String(id) } });
-            await prisma.proyecto.delete({ where: { id: String(id) } });
-            return res.status(200).json({ success: true, data: { id } });
+            const proyectoIdStr = String(id || '').trim();
+            if (!proyectoIdStr) {
+                return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'ID de proyecto requerido' } });
+            }
+            // 1. Eliminar carpeta física de archivos del proyecto en disco
+            await safeRemoveDir(PROYECTOS_UPLOADS_ROOT, proyectoIdStr).catch((err) => {
+                console.error(`[proyectos/remove] Error eliminando carpeta de proyecto ${proyectoIdStr}:`, err);
+            });
+            // 2. Explicitly delete related print jobs to prevent orphaned jobs
+            await prisma.impresionJob.deleteMany({ where: { proyectoId: proyectoIdStr } });
+            // 3. Eliminar registro en BD
+            await prisma.proyecto.delete({ where: { id: proyectoIdStr } });
+            return res.status(200).json({ success: true, data: { id: proyectoIdStr } });
         }
         catch (error) {
             console.error('[proyectos/remove]', error);

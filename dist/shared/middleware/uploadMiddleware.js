@@ -2,12 +2,14 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { safeResolvePath } from '../utils/pathSafetyHelper.js';
+const UPLOADS_BASE = path.resolve('uploads');
 /**
  * Crea un middleware de Multer para subir archivos a una subcarpeta de uploads/.
- * No aplica restricciones de tipo ni tamaño de archivo.
+ * Sanitiza la ruta y el nombre del archivo generado.
  */
 export function createUploadMiddleware(subfolder) {
-    const dest = path.resolve('uploads', subfolder);
+    const dest = safeResolvePath(UPLOADS_BASE, subfolder);
     // Asegurar que el directorio exista
     if (!fs.existsSync(dest)) {
         fs.mkdirSync(dest, { recursive: true });
@@ -18,7 +20,10 @@ export function createUploadMiddleware(subfolder) {
         },
         filename: (_req, file, cb) => {
             const uniqueId = crypto.randomUUID();
-            const ext = path.extname(file.originalname);
+            const rawExt = path.extname(file.originalname).toLowerCase();
+            // Sanitizar la extensión para remover caracteres raros
+            const cleanExt = rawExt.replace(/[^a-z0-9.]/g, '');
+            const ext = cleanExt || '.bin';
             cb(null, `${uniqueId}${ext}`);
         },
     });

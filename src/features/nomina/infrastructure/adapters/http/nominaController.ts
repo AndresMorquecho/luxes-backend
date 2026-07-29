@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import fs from 'fs';
 import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
+import { safeUnlinkFile } from '../../../../../shared/utils/pathSafetyHelper.js';
 import {
   calcSueldoBrutoQuincena,
   sueldoDiarioEnQuincena,
@@ -2029,7 +2030,7 @@ export class NominaController {
         });
       }
 
-      const url = `/uploads/comprobantes/${file.filename}`;
+      const url = `/uploads/nomina/comprobantes/${file.filename}`;
       return res.status(200).json({
         success: true,
         data: { url, filename: file.filename, originalName: file.originalname }
@@ -2056,13 +2057,12 @@ export class NominaController {
         });
       }
 
-      // Prevenir path traversal
       const safeName = path.basename(String(filename));
-      const filePath = path.resolve('uploads', 'comprobantes', safeName);
+      const uploadsBase = path.resolve('uploads');
 
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+      // Intentar borrar primero en la ruta estandarizada y fallback a legacy
+      await safeUnlinkFile(uploadsBase, `/uploads/nomina/comprobantes/${safeName}`);
+      await safeUnlinkFile(uploadsBase, `/uploads/comprobantes/${safeName}`);
 
       return res.status(200).json({ success: true });
     } catch (error) {

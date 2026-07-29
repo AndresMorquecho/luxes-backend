@@ -1,3 +1,4 @@
+import path from 'path';
 import { EmpleadoInput, EmpleadoRepositoryPort } from '../../domain/ports/EmpleadoRepositoryPort.js';
 import { Empleado } from '../../domain/entities/Empleado.js';
 import { EmpleadoDocumento } from '../../domain/entities/EmpleadoDocumento.js';
@@ -5,6 +6,7 @@ import { PrismaEmpleadoDocumentoAdapter } from '../../infrastructure/adapters/pe
 import { EmpleadoDocumentoTipo } from '../../domain/entities/EmpleadoDocumento.js';
 import { BcryptPasswordAdapter } from '../../../auth/infrastructure/adapters/security/bcryptPasswordAdapter.js';
 import { prisma } from '../../../../config/prismaClient.js';
+import { safeUnlinkFile } from '../../../../shared/utils/pathSafetyHelper.js';
 
 const DEFAULT_PASSWORD = '123456';
 
@@ -92,6 +94,9 @@ export class EmpleadoService {
     }
 
     const updateData: EmpleadoInput = { ...data };
+    if (data.foto !== undefined && data.foto !== current.foto && current.foto) {
+      await safeUnlinkFile(path.resolve('uploads'), current.foto);
+    }
     if (data.contraseña?.trim()) {
       updateData.passwordHash = await this.passwordHasher.hash(data.contraseña.trim());
     }
@@ -150,6 +155,10 @@ export class EmpleadoService {
     const current = await this.empleadoRepository.findById(id);
     if (!current) {
       throw new Error('Empleado no encontrado');
+    }
+
+    if (current.foto) {
+      await safeUnlinkFile(path.resolve('uploads'), current.foto);
     }
 
     // Eliminar también el usuario vinculado en cascada (si es posible)

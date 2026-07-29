@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
+import { safeRemoveDir, safeUnlinkFile } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { EmpleadoDocumento, EMPLEADO_DOCUMENTO_TIPOS, } from '../../../domain/entities/EmpleadoDocumento.js';
 const UPLOADS_ROOT = path.resolve('uploads/empleados');
 const mapRecord = (record) => new EmpleadoDocumento({
@@ -14,7 +15,14 @@ const mapRecord = (record) => new EmpleadoDocumento({
     createdAt: record.createdAt.toISOString(),
 });
 export const ensureEmpleadoUploadsDir = async (empleadoId) => {
-    await fs.mkdir(path.join(UPLOADS_ROOT, empleadoId), { recursive: true });
+    if (!empleadoId || typeof empleadoId !== 'string' || !empleadoId.trim()) {
+        throw new Error('ID de empleado no provisto para asegurar directorio.');
+    }
+    const cleanId = empleadoId.trim();
+    if (cleanId.includes('..') || cleanId.includes('/') || cleanId.includes('\\')) {
+        throw new Error('ID de empleado contiene caracteres inválidos.');
+    }
+    await fs.mkdir(path.join(UPLOADS_ROOT, cleanId), { recursive: true });
 };
 export const isValidDocumentoTipo = (tipo) => EMPLEADO_DOCUMENTO_TIPOS.includes(tipo);
 export class PrismaEmpleadoDocumentoAdapter {
@@ -51,18 +59,18 @@ export class PrismaEmpleadoDocumentoAdapter {
         await prisma.empleadoDocumento.delete({ where: { id: documentoId } });
     }
     async deleteAllForEmpleado(empleadoId) {
+        if (!empleadoId || typeof empleadoId !== 'string' || !empleadoId.trim()) {
+            throw new Error('[PrismaEmpleadoDocumentoAdapter] empleadoId es requerido para el borrado.');
+        }
         const records = await prisma.empleadoDocumento.findMany({ where: { empleadoId } });
         for (const record of records) {
             await this.deleteFile(record.archivoUrl);
         }
         await prisma.empleadoDocumento.deleteMany({ where: { empleadoId } });
-        await fs.rm(path.join(UPLOADS_ROOT, empleadoId), { recursive: true, force: true });
+        await safeRemoveDir(UPLOADS_ROOT, empleadoId.trim());
     }
     async deleteFile(archivoUrl) {
-        if (!archivoUrl.startsWith('/uploads/'))
-            return;
-        const filePath = path.resolve(`.${archivoUrl}`);
-        await fs.unlink(filePath).catch(() => undefined);
+        await safeUnlinkFile(path.resolve('uploads'), archivoUrl);
     }
 }
 export { UPLOADS_ROOT as EMPLEADO_UPLOADS_ROOT };

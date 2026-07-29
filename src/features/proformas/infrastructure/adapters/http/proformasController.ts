@@ -1,8 +1,10 @@
 import type { Request, Response } from 'express';
+import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
 import { Decimal } from '@prisma/client/runtime/library';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { logAuditAction } from '../../../../../shared/services/auditLogService.js';
+import { safeUnlinkFile } from '../../../../../shared/utils/pathSafetyHelper.js';
 
 /** Genera el siguiente ID con formato PRO-### */
 async function nextProformaId(): Promise<string> {
@@ -888,6 +890,10 @@ export class ProformasController {
 
       const nuevoEstado = sumOtrosAbonos >= (total - 0.01) ? 'Pagada' : 'Aprobada';
 
+      if (lastAbono.comprobanteUrl) {
+        await safeUnlinkFile(path.resolve('uploads'), lastAbono.comprobanteUrl);
+      }
+
       const result = await prisma.$transaction(async (tx) => {
         await tx.abonoProforma.delete({
           where: { id: lastAbono.id },
@@ -999,7 +1005,18 @@ export class ProformasController {
         }
       }
 
-      // 2. Delete proforma
+      // 2. Eliminar comprobantes físicos de abonos
+      const abonos = await prisma.abonoProforma.findMany({
+        where: { proformaId: String(id) },
+        select: { comprobanteUrl: true },
+      });
+      for (const abono of abonos) {
+        if (abono.comprobanteUrl) {
+          await safeUnlinkFile(path.resolve('uploads'), abono.comprobanteUrl);
+        }
+      }
+
+      // 3. Delete proforma
       await prisma.proforma.delete({ where: { id: String(id) } });
       return res.status(200).json({ success: true, data: { id } });
     } catch (error) {

@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
-import fs from 'fs';
 import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
+import { safeUnlinkFile } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { calcSueldoBrutoQuincena, sueldoDiarioEnQuincena, sueldoMensualEfectivo, } from '../../../../../shared/utils/sueldoHelpers.js';
 import { calcDiasLaborables, calcDiasLaborados, normalizeFeriados, iterDatesInPeriod, isDiaLaboralSemana, feriadosEnPeriodo, } from '../../../../../shared/utils/nominaPeriodoHelpers.js';
 import { loadSbuVigente, } from '../../../../../shared/utils/decimosEcuadorHelpers.js';
@@ -1816,7 +1816,7 @@ export class NominaController {
                     error: { code: 'NO_FILE', message: 'No se recibió ningún archivo.' }
                 });
             }
-            const url = `/uploads/comprobantes/${file.filename}`;
+            const url = `/uploads/nomina/comprobantes/${file.filename}`;
             return res.status(200).json({
                 success: true,
                 data: { url, filename: file.filename, originalName: file.originalname }
@@ -1842,12 +1842,11 @@ export class NominaController {
                     error: { code: 'VALIDATION_ERROR', message: 'El nombre del archivo es requerido.' }
                 });
             }
-            // Prevenir path traversal
             const safeName = path.basename(String(filename));
-            const filePath = path.resolve('uploads', 'comprobantes', safeName);
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
+            const uploadsBase = path.resolve('uploads');
+            // Intentar borrar primero en la ruta estandarizada y fallback a legacy
+            await safeUnlinkFile(uploadsBase, `/uploads/nomina/comprobantes/${safeName}`);
+            await safeUnlinkFile(uploadsBase, `/uploads/comprobantes/${safeName}`);
             return res.status(200).json({ success: true });
         }
         catch (error) {

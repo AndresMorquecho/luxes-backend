@@ -27,7 +27,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./prisma:/app/prisma
-      - landing_uploads:/app/uploads
+      - uploads_data:/app/uploads
     ports:
       - "3000:3000"
     environment:
@@ -61,5 +61,6 @@ services:
 
 volumes:
   postgres_data:
-  landing_uploads:
+  uploads_data:
+
 
