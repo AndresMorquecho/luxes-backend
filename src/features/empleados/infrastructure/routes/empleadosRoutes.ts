@@ -48,6 +48,7 @@ export function createEmpleadosRoutes(controller: EmpleadosController): Router {
   const router = Router();
 
   router.get('/', authMiddleware, (req, res) => controller.list(req, res));
+  router.get('/:id/foto', (req, res) => controller.getFoto(req, res));
   router.get('/:id/documentos', authMiddleware, (req, res) => controller.listDocumentos(req, res));
   router.post(
     '/:id/documentos',

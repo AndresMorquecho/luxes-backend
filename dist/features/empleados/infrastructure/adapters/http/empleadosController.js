@@ -1,3 +1,4 @@
+import path from 'path';
 import { isValidDocumentoTipo } from '../persistence/prismaEmpleadoDocumentoAdapter.js';
 import { prisma } from '../../../../../config/prismaClient.js';
 const parseBody = (body) => ({
@@ -24,14 +25,32 @@ const parseBody = (body) => ({
     roleId: body.roleId ? String(body.roleId) : undefined,
 });
 const paramId = (req) => String(req.params.id);
+const formatFotoUrl = (empId, foto) => {
+    if (!foto)
+        return null;
+    const trimmed = foto.trim();
+    if (!trimmed)
+        return null;
+    if (trimmed.startsWith('data:image/')) {
+        return `/api/empleados/${empId}/foto`;
+    }
+    return trimmed;
+};
 export function createEmpleadosController(empleadoService) {
     return {
         async list(_req, res) {
             try {
                 const empleados = await empleadoService.listEmpleados();
+                const sanitized = empleados.map((e) => {
+                    const json = e.toJSON();
+                    return {
+                        ...json,
+                        foto: formatFotoUrl(e.id, json.foto),
+                    };
+                });
                 return res.status(200).json({
                     success: true,
-                    data: empleados.map((e) => e.toJSON()),
+                    data: sanitized,
                 });
             }
             catch (error) {
@@ -52,10 +71,12 @@ export function createEmpleadosController(empleadoService) {
                     });
                 }
                 const user = await prisma.user.findUnique({ where: { empleadoId: paramId(req) } });
+                const json = empleado.toJSON();
                 return res.status(200).json({
                     success: true,
                     data: {
-                        ...empleado.toJSON(),
+                        ...json,
+                        foto: formatFotoUrl(empleado.id, json.foto),
                         username: user?.username || '',
                         rol: user?.rol || '',
                         roleId: user?.roleId || '',
@@ -69,6 +90,41 @@ export function createEmpleadosController(empleadoService) {
                     success: false,
                     error: { code: 'INTERNAL_ERROR', message: 'Error al obtener empleado' },
                 });
+            }
+        },
+        async getFoto(req, res) {
+            try {
+                const id = paramId(req);
+                const empleado = await empleadoService.getEmpleadoById(id);
+                if (!empleado || !empleado.foto) {
+                    return res.status(404).send('Foto no encontrada');
+                }
+                const fotoStr = empleado.foto.trim();
+                if (fotoStr.startsWith('data:image/')) {
+                    const matches = fotoStr.match(/^data:(image\/[a-zA-Z0-9-+.]+);base64,(.+)$/);
+                    if (matches) {
+                        const mimeType = matches[1];
+                        const buffer = Buffer.from(matches[2], 'base64');
+                        res.setHeader('Content-Type', mimeType);
+                        res.setHeader('Cache-Control', 'public, max-age=86400');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        return res.status(200).send(buffer);
+                    }
+                }
+                else if (fotoStr.startsWith('/uploads/') || fotoStr.startsWith('uploads/')) {
+                    const absolutePath = path.resolve('.', fotoStr.replace(/^\//, ''));
+                    res.setHeader('Cache-Control', 'public, max-age=86400');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    return res.sendFile(absolutePath);
+                }
+                else if (fotoStr.startsWith('http://') || fotoStr.startsWith('https://')) {
+                    return res.redirect(fotoStr);
+                }
+                return res.status(404).send('Foto no encontrada');
+            }
+            catch (error) {
+                console.error('[empleados/getFoto]', error);
+                return res.status(500).send('Error al obtener la foto');
             }
         },
         async create(req, res) {
