@@ -8,20 +8,20 @@ import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInst
 
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
 
-async function buildImagePreviewDataUrl(
-  filePath: string,
-  mimetype: string,
-  maxBytes = 1_500_000,
-): Promise<string | undefined> {
-  if (!mimetype.startsWith('image/')) return undefined;
-  try {
-    const stat = await fs.stat(filePath);
-    if (stat.size > maxBytes) return undefined;
-    const buf = await fs.readFile(filePath);
-    return `data:${mimetype};base64,${buf.toString('base64')}`;
-  } catch {
-    return undefined;
+/** Quita previewDataUrl (base64) del grafo de fases para no inflar JSON de API. */
+function stripPreviewDataUrls<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripPreviewDataUrls(item)) as T;
   }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (key === 'previewDataUrl') continue;
+      out[key] = stripPreviewDataUrls(child);
+    }
+    return out as T;
+  }
+  return value;
 }
 
 export async function ensureProyectoUploadsDir(proyectoId: string) {
@@ -339,6 +339,7 @@ function mapProyecto(p: any) {
           }),
         };
       }
+      datos = stripPreviewDataUrls(datos);
       acc[f.fase] = {
         completada: f.completada,
         fechaCompletada: toDateStr(f.fechaCompletada),
@@ -1112,16 +1113,13 @@ export class ProyectosController {
         },
       });
 
-      const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
-
-      const previewDataUrl = await buildImagePreviewDataUrl(file.path, file.mimetype);
+      const datosExistentes = stripPreviewDataUrls(parseFaseDatos(faseDisenoExistente?.datos));
 
       const nuevoArchivo = {
         name: file.originalname,
         size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
         type: file.mimetype,
         url: archivoUrl,
-        ...(previewDataUrl ? { previewDataUrl } : {}),
       };
 
       // Obtener arreglo de archivos actuales
@@ -1169,7 +1167,6 @@ export class ProyectosController {
           size: nuevoArchivo.size,
           type: nuevoArchivo.type,
           url: nuevoArchivo.url,
-          ...(previewDataUrl ? { previewDataUrl } : {}),
         },
       });
     } catch (error) {
@@ -1236,12 +1233,10 @@ export class ProyectosController {
       }
 
       const archivoUrl = `/uploads/proyectos/${id}/${file.filename}`;
-      const previewDataUrl = await buildImagePreviewDataUrl(file.path, file.mimetype);
       const evidencia = {
         url: archivoUrl,
         name: file.originalname,
         type: file.mimetype,
-        ...(previewDataUrl ? { previewDataUrl } : {}),
       };
 
       const faseInst = await prisma.proyectoFase.findUnique({
@@ -1250,7 +1245,7 @@ export class ProyectosController {
         },
       });
 
-      const datosPrevios = parseFaseDatos(faseInst?.datos);
+      const datosPrevios = stripPreviewDataUrls(parseFaseDatos(faseInst?.datos));
       const evidenciasPrevias = Array.isArray(datosPrevios.evidencias) ? [...datosPrevios.evidencias] : [];
       evidenciasPrevias.push(evidencia);
 

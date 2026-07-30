@@ -1,8 +1,44 @@
 import path from 'path';
 import fs from 'fs/promises';
+import crypto from 'crypto';
+import sharp from 'sharp';
+const THUMB_ROOT = path.resolve('uploads/.thumbs');
+const THUMB_WIDTH = 320;
+function resolveUploadsAbsolute(relPath) {
+    if (!relPath.startsWith('/uploads/'))
+        return null;
+    const absolutePath = path.resolve('.' + relPath);
+    const uploadsRoot = path.resolve('uploads');
+    const relative = path.relative(uploadsRoot, absolutePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative))
+        return null;
+    return absolutePath;
+}
+async function ensureThumbFor(absolutePath) {
+    const stat = await fs.stat(absolutePath);
+    const hash = crypto
+        .createHash('sha1')
+        .update(`${absolutePath}|${stat.mtimeMs}|${stat.size}|${THUMB_WIDTH}`)
+        .digest('hex');
+    const thumbPath = path.join(THUMB_ROOT, `${hash}-${THUMB_WIDTH}.webp`);
+    try {
+        await fs.access(thumbPath);
+        return thumbPath;
+    }
+    catch {
+        /* generate */
+    }
+    await fs.mkdir(THUMB_ROOT, { recursive: true });
+    await sharp(absolutePath)
+        .rotate()
+        .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
+        .webp({ quality: 72 })
+        .toFile(thumbPath);
+    return thumbPath;
+}
 /**
- * Servidor de miniaturas para imágenes del sistema.
- * Sirve archivos estáticos con cabeceras de caché inmutables para 0 consumo de GPU/CPU.
+ * Sirve miniaturas reales (WebP ~320px) con cache en disco.
+ * Si sharp falla, hace fallback al original para no romper la UI.
  */
 export async function serveMediaThumbnail(req, res) {
     try {
@@ -23,15 +59,28 @@ export async function serveMediaThumbnail(req, res) {
             }
         }
         if (relPath.startsWith('/uploads/')) {
-            const absolutePath = path.resolve('.' + relPath);
+            const absolutePath = resolveUploadsAbsolute(relPath);
+            if (!absolutePath) {
+                res.status(403).send('Ruta no permitida');
+                return;
+            }
             try {
                 await fs.access(absolutePath);
-                res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-                res.sendFile(absolutePath);
-                return;
             }
             catch {
                 res.status(404).send('Archivo no encontrado');
+                return;
+            }
+            res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+            try {
+                const thumbPath = await ensureThumbFor(absolutePath);
+                res.type('image/webp');
+                res.sendFile(thumbPath);
+                return;
+            }
+            catch (err) {
+                console.warn('[mediaThumbnailController] sharp fallback to original:', err);
+                res.sendFile(absolutePath);
                 return;
             }
         }

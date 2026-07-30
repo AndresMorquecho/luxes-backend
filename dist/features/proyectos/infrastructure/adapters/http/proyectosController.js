@@ -5,19 +5,21 @@ import { safeRemoveDir } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
-async function buildImagePreviewDataUrl(filePath, mimetype, maxBytes = 1_500_000) {
-    if (!mimetype.startsWith('image/'))
-        return undefined;
-    try {
-        const stat = await fs.stat(filePath);
-        if (stat.size > maxBytes)
-            return undefined;
-        const buf = await fs.readFile(filePath);
-        return `data:${mimetype};base64,${buf.toString('base64')}`;
+/** Quita previewDataUrl (base64) del grafo de fases para no inflar JSON de API. */
+function stripPreviewDataUrls(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => stripPreviewDataUrls(item));
     }
-    catch {
-        return undefined;
+    if (value && typeof value === 'object') {
+        const out = {};
+        for (const [key, child] of Object.entries(value)) {
+            if (key === 'previewDataUrl')
+                continue;
+            out[key] = stripPreviewDataUrls(child);
+        }
+        return out;
     }
+    return value;
 }
 export async function ensureProyectoUploadsDir(proyectoId) {
     await fs.mkdir(path.join(PROYECTOS_UPLOADS_ROOT, proyectoId), { recursive: true });
@@ -298,6 +300,7 @@ function mapProyecto(p) {
                     }),
                 };
             }
+            datos = stripPreviewDataUrls(datos);
             acc[f.fase] = {
                 completada: f.completada,
                 fechaCompletada: toDateStr(f.fechaCompletada),
@@ -1016,14 +1019,12 @@ export class ProyectosController {
                     },
                 },
             });
-            const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
-            const previewDataUrl = await buildImagePreviewDataUrl(file.path, file.mimetype);
+            const datosExistentes = stripPreviewDataUrls(parseFaseDatos(faseDisenoExistente?.datos));
             const nuevoArchivo = {
                 name: file.originalname,
                 size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
                 type: file.mimetype,
                 url: archivoUrl,
-                ...(previewDataUrl ? { previewDataUrl } : {}),
             };
             // Obtener arreglo de archivos actuales
             let archivosArte = [];
@@ -1067,7 +1068,6 @@ export class ProyectosController {
                     size: nuevoArchivo.size,
                     type: nuevoArchivo.type,
                     url: nuevoArchivo.url,
-                    ...(previewDataUrl ? { previewDataUrl } : {}),
                 },
             });
         }
@@ -1129,19 +1129,17 @@ export class ProyectosController {
                 });
             }
             const archivoUrl = `/uploads/proyectos/${id}/${file.filename}`;
-            const previewDataUrl = await buildImagePreviewDataUrl(file.path, file.mimetype);
             const evidencia = {
                 url: archivoUrl,
                 name: file.originalname,
                 type: file.mimetype,
-                ...(previewDataUrl ? { previewDataUrl } : {}),
             };
             const faseInst = await prisma.proyectoFase.findUnique({
                 where: {
                     proyectoId_fase: { proyectoId: String(id), fase: 'INSTALACION' },
                 },
             });
-            const datosPrevios = parseFaseDatos(faseInst?.datos);
+            const datosPrevios = stripPreviewDataUrls(parseFaseDatos(faseInst?.datos));
             const evidenciasPrevias = Array.isArray(datosPrevios.evidencias) ? [...datosPrevios.evidencias] : [];
             evidenciasPrevias.push(evidencia);
             const datosActualizados = {
