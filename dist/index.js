@@ -254,6 +254,9 @@ async function bootstrap() {
     // Archivos de proyecto (diseño / evidencias): público, sin JWT — <img> no envía Authorization
     const proyectosArchivosController = new ProyectosController();
     app.get('/api/proyectos/:id/archivos/:filename', (req, res) => proyectosArchivosController.serveArchivoProyecto(req, res));
+    // Endpoint de miniaturas estáticas optimizadas
+    const { serveMediaThumbnail } = await import('./shared/adapters/http/mediaThumbnailController.js');
+    app.get('/api/media/thumbnail', serveMediaThumbnail);
     // Middleware de auditoría automática — registra acciones mutantes en audit_logs
     app.use('/api', auditMiddleware);
     const { authRoutes } = await createAuthModule();
