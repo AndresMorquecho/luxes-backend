@@ -48,20 +48,43 @@ export class ImpresionesController {
         try {
             const b = req.body || {};
             if (b.proyectoId) {
-                const existing = await prisma.impresionJob.findFirst({
-                    where: {
-                        proyectoId: String(b.proyectoId),
-                        status: { not: 'Cancelado' },
-                    },
-                });
-                if (existing) {
-                    return res.status(409).json({
-                        success: false,
-                        error: {
-                            code: 'ALREADY_SENT',
-                            message: 'Este proyecto ya fue enviado a impresión. Solo se permite un envío; sigue el avance en la cola de impresión.',
+                if (b.batchId) {
+                    // Nuevo comportamiento: verificar que el mismo LOTE no haya sido enviado ya
+                    const existingBatch = await prisma.impresionJob.findFirst({
+                        where: {
+                            proyectoId: String(b.proyectoId),
+                            batchId: String(b.batchId),
+                            status: { not: 'Cancelado' },
                         },
                     });
+                    if (existingBatch) {
+                        return res.status(409).json({
+                            success: false,
+                            error: {
+                                code: 'BATCH_ALREADY_SENT',
+                                message: 'Este lote de diseño ya fue enviado a impresión. Sigue el avance en la cola de impresión.',
+                            },
+                        });
+                    }
+                }
+                else {
+                    // Comportamiento legado: bloquear si ya existe cualquier job sin batchId para este proyecto
+                    const existing = await prisma.impresionJob.findFirst({
+                        where: {
+                            proyectoId: String(b.proyectoId),
+                            batchId: null,
+                            status: { not: 'Cancelado' },
+                        },
+                    });
+                    if (existing) {
+                        return res.status(409).json({
+                            success: false,
+                            error: {
+                                code: 'ALREADY_SENT',
+                                message: 'Este proyecto ya fue enviado a impresión. Solo se permite un envío; sigue el avance en la cola de impresión.',
+                            },
+                        });
+                    }
                 }
             }
             const maxPosition = await prisma.impresionJob.aggregate({
@@ -86,6 +109,7 @@ export class ImpresionesController {
                     notes: b.notes || '',
                     proyectoId: b.proyectoId || null,
                     proyectoNombre: b.proyectoNombre || null,
+                    batchId: b.batchId || null,
                     position,
                 },
             });

@@ -848,6 +848,7 @@ model ImpresionJob {
   notes             String    @default("")
   proyectoId        String?   @map("proyecto_id")
   proyectoNombre    String?   @map("proyecto_nombre")
+  batchId           String?   @map("batch_id") // ID del lote de diseño (null = legado sin lotes)
   cancelReason      String?   @map("cancel_reason")
   position          Int       @default(0)
   createdAt         DateTime  @default(now()) @map("created_at")

@@ -72,6 +72,10 @@ router.put('/:id', (req, res) => controller.update(req, res));
 router.delete('/:id', (req, res) => controller.remove(req, res));
 router.post('/:id/avanzar-fase', (req, res) => controller.avanzarFase(req, res));
 router.put('/:id/instalacion', (req, res) => controller.updateInstalacion(req, res));
+// Lotes de diseño complementarios (permite agregar ítems a proyectos en cualquier fase)
+router.post('/:id/diseno/batches', (req, res) => controller.createBatchDiseno(req, res));
+router.post('/:id/diseno/batches/:batchId/archivos', (req, res) => controller.addArchivoToBatch(req, res));
+router.post('/:id/diseno/batches/:batchId/enviar-impresion', (req, res) => controller.enviarBatchImpresion(req, res));
 router.post('/:id/upload-diseno', (req, res, next) => {
     uploadDiseno.single('archivo')(req, res, (error) => {
         if (error) {

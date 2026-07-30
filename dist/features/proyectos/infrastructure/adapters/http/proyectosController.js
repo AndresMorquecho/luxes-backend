@@ -1700,4 +1700,278 @@ export class ProyectosController {
             });
         }
     }
+    /**
+     * Crea un nuevo lote de diseño para un proyecto, sin importar la fase actual.
+     * Permite agregar ítems complementarios a proyectos ya en PRODUCCION, INSTALACION o COMPLETADO.
+     * POST /proyectos/:id/diseno/batches
+     */
+    async createBatchDiseno(req, res) {
+        try {
+            const { id } = req.params;
+            const b = req.body || {};
+            const proyecto = await prisma.proyecto.findUnique({
+                where: { id: String(id) },
+            });
+            if (!proyecto) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' },
+                });
+            }
+            // Leer fase DISEÑO existente
+            const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+                where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+            });
+            const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
+            // Construir batches: migrar datos legados si no existen aún
+            let batches = Array.isArray(datosExistentes.batches) ? [...datosExistentes.batches] : [];
+            if (batches.length === 0) {
+                // Migrar datos legados como Lote 1 (ya impreso)
+                const archivosLegado = Array.isArray(datosExistentes.archivosArte)
+                    ? datosExistentes.archivosArte
+                    : datosExistentes.archivoArte
+                        ? [datosExistentes.archivoArte]
+                        : [];
+                if (archivosLegado.length > 0) {
+                    batches.push({
+                        id: 'batch-1',
+                        label: 'Diseño inicial',
+                        creadoEn: faseDisenoExistente?.fechaCompletada
+                            ? toDateStr(faseDisenoExistente.fechaCompletada)
+                            : new Date().toISOString().split('T')[0],
+                        archivos: archivosLegado,
+                        estado: 'printed', // asumimos que ya fue a impresión
+                        jobImpresionId: null,
+                    });
+                }
+            }
+            // Crear el nuevo batch
+            const batchNum = batches.length + 1;
+            const nuevoBatchId = b.batchId || `batch-${Date.now()}`;
+            const nuevoBatch = {
+                id: nuevoBatchId,
+                label: b.label || `Ítem complementario (lote ${batchNum})`,
+                creadoEn: new Date().toISOString().split('T')[0],
+                archivos: Array.isArray(b.archivos) ? b.archivos : [],
+                estado: 'pending_print',
+                jobImpresionId: null,
+            };
+            batches.push(nuevoBatch);
+            const datosActualizados = {
+                ...datosExistentes,
+                batches,
+            };
+            await prisma.proyectoFase.upsert({
+                where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+                update: { datos: JSON.stringify(datosActualizados) },
+                create: {
+                    proyectoId: String(id),
+                    fase: 'DISEÑO',
+                    completada: false,
+                    datos: JSON.stringify(datosActualizados),
+                },
+            });
+            return res.status(201).json({
+                success: true,
+                data: {
+                    batch: nuevoBatch,
+                    totalBatches: batches.length,
+                },
+            });
+        }
+        catch (error) {
+            console.error('[proyectos/createBatchDiseno]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al crear lote de diseño' },
+            });
+        }
+    }
+    /**
+     * Agrega archivos a un batch de diseño específico (subida sin upload —
+     * el archivo ya fue subido vía /upload-diseno y la URL viene en el body).
+     * POST /proyectos/:id/diseno/batches/:batchId/archivos
+     */
+    async addArchivoToBatch(req, res) {
+        try {
+            const { id, batchId } = req.params;
+            const { archivo } = req.body || {};
+            if (!archivo || !archivo.url) {
+                return res.status(400).json({
+                    success: false,
+                    error: { code: 'INVALID_INPUT', message: 'Se requiere el objeto archivo con url' },
+                });
+            }
+            const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+                where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+            });
+            const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
+            const batches = Array.isArray(datosExistentes.batches) ? [...datosExistentes.batches] : [];
+            const batchIdx = batches.findIndex((b) => b.id === batchId);
+            if (batchIdx === -1) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Lote de diseño no encontrado' },
+                });
+            }
+            const batch = batches[batchIdx];
+            if (!Array.isArray(batch.archivos))
+                batch.archivos = [];
+            // Evitar duplicados por URL
+            if (!batch.archivos.some((a) => a.url === archivo.url)) {
+                batch.archivos.push(archivo);
+            }
+            batches[batchIdx] = batch;
+            const datosActualizados = { ...datosExistentes, batches };
+            await prisma.proyectoFase.update({
+                where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+                data: { datos: JSON.stringify(datosActualizados) },
+            });
+            return res.status(200).json({ success: true, data: { batch: batches[batchIdx] } });
+        }
+        catch (error) {
+            console.error('[proyectos/addArchivoToBatch]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al agregar archivo al lote' },
+            });
+        }
+    }
+    /**
+     * Envía un lote de diseño específico a la cola de impresión.
+     * Crea el ImpresionJob con el batchId y actualiza el estado del batch.
+     * POST /proyectos/:id/diseno/batches/:batchId/enviar-impresion
+     */
+    async enviarBatchImpresion(req, res) {
+        try {
+            const { id, batchId } = req.params;
+            const b = req.body || {};
+            const proyecto = await prisma.proyecto.findUnique({
+                where: { id: String(id) },
+            });
+            if (!proyecto) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' },
+                });
+            }
+            // Leer batch
+            const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+                where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+            });
+            const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
+            const batches = Array.isArray(datosExistentes.batches) ? [...datosExistentes.batches] : [];
+            const batchIdx = batches.findIndex((bt) => bt.id === batchId);
+            if (batchIdx === -1) {
+                return res.status(404).json({
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Lote de diseño no encontrado' },
+                });
+            }
+            const batch = batches[batchIdx];
+            if (batch.estado === 'printed') {
+                return res.status(409).json({
+                    success: false,
+                    error: { code: 'BATCH_ALREADY_PRINTED', message: 'Este lote ya fue enviado a impresión anteriormente' },
+                });
+            }
+            // Verificar que no se haya enviado ya este batch
+            const existingJob = await prisma.impresionJob.findFirst({
+                where: {
+                    proyectoId: String(id),
+                    batchId: String(batchId),
+                    status: { not: 'Cancelado' },
+                },
+            });
+            if (existingJob) {
+                return res.status(409).json({
+                    success: false,
+                    error: { code: 'BATCH_ALREADY_SENT', message: 'Este lote ya fue enviado a impresión' },
+                });
+            }
+            // Calcular posición en cola
+            const maxPosition = await prisma.impresionJob.aggregate({
+                _max: { position: true },
+                where: { status: 'En espera' },
+            });
+            const position = (maxPosition._max.position || 0) + 1;
+            // Preparar fileUrl: si hay múltiples archivos, guardar como JSON string para que la cola los procese todos
+            let fileUrl = null;
+            if (Array.isArray(batch.archivos) && batch.archivos.length > 0) {
+                if (batch.archivos.length === 1) {
+                    fileUrl = batch.archivos[0].url || null;
+                }
+                else {
+                    fileUrl = JSON.stringify(batch.archivos.map((a) => ({
+                        name: a.name || a.url?.split('/')?.pop() || proyecto.nombre,
+                        url: a.url,
+                    })));
+                }
+            }
+            const now = new Date().toISOString();
+            const job = await prisma.impresionJob.create({
+                data: {
+                    name: b.name || `${proyecto.nombre} — ${batch.label}`,
+                    copies: Number(b.copies) || 1,
+                    status: 'En espera',
+                    format: b.format || '',
+                    sentBy: b.sentBy || 'Diseño',
+                    sentAt: now,
+                    sentToQueueAt: now,
+                    fileUrl,
+                    client: proyecto.clienteNombre || '',
+                    urgency: b.urgency || 'Media',
+                    width: Number(b.width) || 1.0,
+                    height: Number(b.height) || 1.0,
+                    notes: b.notes || batch.label || '',
+                    proyectoId: String(id),
+                    proyectoNombre: proyecto.nombre,
+                    batchId: String(batchId),
+                    position,
+                },
+            });
+            // Actualizar estado del batch
+            batches[batchIdx] = {
+                ...batch,
+                estado: 'pending_print',
+                jobImpresionId: job.id,
+            };
+            const datosActualizados = { ...datosExistentes, batches };
+            await prisma.proyectoFase.update({
+                where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+                data: { datos: JSON.stringify(datosActualizados) },
+            });
+            // Notificar
+            try {
+                for (const rol of ['impresión', 'admin']) {
+                    await prisma.notification.create({
+                        data: {
+                            title: 'Nuevo Trabajo de Impresión',
+                            message: `Se ha enviado \"${job.name}\" (${batch.label}) a la cola de impresión.`,
+                            rol,
+                            createdBy: b.sentBy || 'Diseño',
+                        },
+                    });
+                }
+                const pushPayload = {
+                    title: 'Nuevo Trabajo en Cola',
+                    body: `\"${job.name}\" (${batch.label}) está en la cola de impresión.`,
+                    data: { url: '/colas-impresion' },
+                };
+                await sendPushToRole('impresión', pushPayload);
+                await sendPushToRole('admin', pushPayload);
+            }
+            catch (notifErr) {
+                console.error('[enviarBatchImpresion] Error en notificación:', notifErr);
+            }
+            return res.status(201).json({ success: true, data: { job, batch: batches[batchIdx] } });
+        }
+        catch (error) {
+            console.error('[proyectos/enviarBatchImpresion]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al enviar lote a impresión' },
+            });
+        }
+    }
 }
