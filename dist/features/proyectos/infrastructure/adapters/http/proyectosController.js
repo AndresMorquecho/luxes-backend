@@ -1815,6 +1815,26 @@ export class ProyectosController {
                 });
             }
             const batch = batches[batchIdx];
+            // Si el batch ya fue enviado a impresión y no fue cancelado, impedir agregarle nuevos archivos
+            const isPrintedOrPending = batch.estado === 'printed' || batch.estado === 'pending_print' || !!batch.jobImpresionId;
+            if (isPrintedOrPending) {
+                let isCanceled = false;
+                if (batch.jobImpresionId) {
+                    const job = await prisma.impresionJob.findUnique({ where: { id: Number(batch.jobImpresionId) } });
+                    if (job && job.status === 'Cancelado') {
+                        isCanceled = true;
+                    }
+                }
+                if (!isCanceled) {
+                    return res.status(409).json({
+                        success: false,
+                        error: {
+                            code: 'BATCH_LOCKED',
+                            message: 'Este lote ya fue enviado a impresión y se encuentra cerrado. Agrega un nuevo ítem complementario para subir archivos adicionales.',
+                        },
+                    });
+                }
+            }
             if (!Array.isArray(batch.archivos))
                 batch.archivos = [];
             // Evitar duplicados por URL
