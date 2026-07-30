@@ -165,6 +165,10 @@ export class ImpresionesController {
             const updateData = {};
             if (b.status !== undefined)
                 updateData.status = b.status;
+            if (b.format !== undefined)
+                updateData.format = b.format;
+            if (b.notes !== undefined)
+                updateData.notes = b.notes;
             if (b.elapsedSeconds !== undefined)
                 updateData.elapsedSeconds = Number(b.elapsedSeconds);
             if (b.cancelReason !== undefined)
