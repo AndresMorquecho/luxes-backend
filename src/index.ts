@@ -273,6 +273,10 @@ async function bootstrap() {
     proyectosArchivosController.serveArchivoProyecto(req, res),
   );
 
+  // Endpoint de miniaturas estáticas optimizadas
+  const { serveMediaThumbnail } = await import('./shared/adapters/http/mediaThumbnailController.js');
+  app.get('/api/media/thumbnail', serveMediaThumbnail);
+
   // Middleware de auditoría automática — registra acciones mutantes en audit_logs
   app.use('/api', auditMiddleware);
 
