@@ -13,36 +13,73 @@ function resolveUploadsAbsolute(relPath) {
         return null;
     return absolutePath;
 }
-async function ensureThumbFor(absolutePath) {
-    const stat = await fs.stat(absolutePath);
-    const hash = crypto
-        .createHash('sha1')
-        .update(`${absolutePath}|${stat.mtimeMs}|${stat.size}|${THUMB_WIDTH}`)
-        .digest('hex');
-    const thumbPath = path.join(THUMB_ROOT, `${hash}-${THUMB_WIDTH}.webp`);
+// Cache en memoria: si sharp falló, no volvemos a intentarlo (caro)
+let sharpAvailable = null;
+async function checkSharpAvailable() {
+    if (sharpAvailable !== null)
+        return sharpAvailable;
     try {
-        await fs.access(thumbPath);
-        return thumbPath;
+        await import('sharp');
+        sharpAvailable = true;
     }
     catch {
-        /* generate */
+        sharpAvailable = false;
+        console.warn('[mediaThumbnailController] sharp no disponible, usando jimp como fallback');
     }
-    await fs.mkdir(THUMB_ROOT, { recursive: true });
-    // Import dinámico — @ts-ignore porque sharp tiene tipos propios al instalarse (npm install)
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    return sharpAvailable;
+}
+async function generateThumbWithSharp(absolutePath, thumbPath) {
     // @ts-ignore
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sharp = (await import('sharp')).default;
     await sharp(absolutePath)
         .rotate()
         .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
         .webp({ quality: 72 })
         .toFile(thumbPath);
-    return thumbPath;
+}
+async function generateThumbWithJimp(absolutePath, thumbPath) {
+    // @ts-ignore
+    const { Jimp } = await import('jimp');
+    const image = await Jimp.read(absolutePath);
+    const w = image.bitmap.width;
+    if (w > THUMB_WIDTH) {
+        image.resize({ w: THUMB_WIDTH });
+    }
+    // jimp puede escribir JPEG directamente; lo guardamos como .jpg en vez de .webp
+    const jpgThumbPath = thumbPath.replace('.webp', '.jpg');
+    await image.write(jpgThumbPath);
+}
+async function ensureThumbFor(absolutePath) {
+    const stat = await fs.stat(absolutePath);
+    const useSharp = await checkSharpAvailable();
+    const ext = useSharp ? 'webp' : 'jpg';
+    const hash = crypto
+        .createHash('sha1')
+        .update(`${absolutePath}|${stat.mtimeMs}|${stat.size}|${THUMB_WIDTH}|${ext}`)
+        .digest('hex');
+    const thumbPath = path.join(THUMB_ROOT, `${hash}-${THUMB_WIDTH}.${ext}`);
+    const mime = useSharp ? 'image/webp' : 'image/jpeg';
+    try {
+        await fs.access(thumbPath);
+        return { thumbPath, mime };
+    }
+    catch {
+        /* generate */
+    }
+    await fs.mkdir(THUMB_ROOT, { recursive: true });
+    if (useSharp) {
+        await generateThumbWithSharp(absolutePath, thumbPath);
+    }
+    else {
+        await generateThumbWithJimp(absolutePath, thumbPath);
+    }
+    return { thumbPath, mime };
 }
 /**
- * Sirve miniaturas reales (WebP ~320px) con cache en disco.
- * Si sharp falla, hace fallback al original para no romper la UI.
+ * Sirve miniaturas reales (WebP/JPEG ~320px) con cache en disco.
+ * - Prioriza sharp (WebP, calidad óptima)
+ * - Fallback a jimp (JPEG, sin binarios nativos)
+ * - Si ambos fallan, redirige al original
  */
 export async function serveMediaThumbnail(req, res) {
     try {
@@ -77,13 +114,14 @@ export async function serveMediaThumbnail(req, res) {
             }
             res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
             try {
-                const thumbPath = await ensureThumbFor(absolutePath);
-                res.type('image/webp');
+                const { thumbPath, mime } = await ensureThumbFor(absolutePath);
+                res.type(mime);
                 res.sendFile(thumbPath);
                 return;
             }
             catch (err) {
-                console.warn('[mediaThumbnailController] sharp fallback to original:', err);
+                console.warn('[mediaThumbnailController] thumbnail generation failed, serving original:', err.message);
+                // Last resort: serve original with long cache headers
                 res.sendFile(absolutePath);
                 return;
             }
