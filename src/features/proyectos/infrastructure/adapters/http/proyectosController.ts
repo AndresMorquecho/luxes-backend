@@ -252,17 +252,28 @@ const proyectoInclude = {
   instalacion: {
     include: {
       personalAsignado: {
-        include: { empleado: true },
+        include: {
+          empleado: {
+            select: { id: true, nombre: true }
+          }
+        },
       },
       materiales: true,
     },
   },
   gastos: {
-    include: { metodoPago: true, registradoPor: true },
+    include: {
+      metodoPago: { select: { id: true, nombre: true } },
+      registradoPor: { select: { id: true, nombre: true } }
+    },
     orderBy: { fecha: 'desc' as const }
   },
   ordenesCompra: {
-    include: { detalles: true, proveedor: true, usuario: true }
+    include: {
+      detalles: true,
+      proveedor: { select: { id: true, nombre: true } },
+      usuario: { select: { id: true, nombre: true } }
+    }
   }
 };
 

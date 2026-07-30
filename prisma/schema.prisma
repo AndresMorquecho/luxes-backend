@@ -657,6 +657,7 @@ model Gasto {
   @@index([proyectoId])
   @@index([metodoPagoId])
   @@index([registradoPorUserId])
+  @@index([fecha, categoria])
   @@map("gastos")
 }
 
@@ -765,6 +766,9 @@ model Proyecto {
   reclamo                ReclamoProyecto?
   
   @@index([clienteId])
+  @@index([estado])
+  @@index([faseActual])
+  @@index([fechaCreacion(sort: Desc)])
   @@map("proyectos")
 }
 
@@ -857,6 +861,8 @@ model ImpresionJob {
   proyecto          Proyecto? @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
 
   @@index([proyectoId])
+  @@index([status])
+  @@index([position, createdAt])
   @@map("impresion_jobs")
 }
 
