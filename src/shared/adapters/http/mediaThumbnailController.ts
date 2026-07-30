@@ -2,7 +2,6 @@ import type { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
-import sharp from 'sharp';
 
 const THUMB_ROOT = path.resolve('uploads/.thumbs');
 const THUMB_WIDTH = 320;
@@ -32,6 +31,13 @@ async function ensureThumbFor(absolutePath: string): Promise<string> {
   }
 
   await fs.mkdir(THUMB_ROOT, { recursive: true });
+
+  // Import dinámico — @ts-ignore porque sharp tiene tipos propios al instalarse (npm install)
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sharp: any = (await import('sharp')).default;
+
   await sharp(absolutePath)
     .rotate()
     .resize({ width: THUMB_WIDTH, withoutEnlargement: true })
