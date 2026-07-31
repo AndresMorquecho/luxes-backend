@@ -253,7 +253,30 @@ async function bootstrap() {
 
   app.use(cors({ origin: env.corsOrigin }));
   app.use(express.json({ limit: '50mb' }));
-  app.use('/uploads', express.static(path.resolve('uploads')));
+
+  // Servir /uploads con soporte de miniaturas WebP (?thumb=1)
+  // Esta ruta ya es proxied por Nginx al backend, es el canal más confiable
+  const uploadsRoot = path.resolve('uploads');
+  const { ensureThumbFor } = await import('./shared/adapters/http/mediaThumbnailController.js');
+  const fsSync = await import('fs');
+  app.use('/uploads', async (req, res, next) => {
+    try {
+      const isThumb = req.query.thumb === '1' || req.query.thumbnail === 'true';
+      const isImage = /\.(jpe?g|png|webp|gif)$/i.test(req.path);
+      if (!isThumb || !isImage) return next();
+
+      const safePath = path.join(uploadsRoot, req.path.replace(/\.\./g, ''));
+      if (!fsSync.existsSync(safePath)) return next();
+
+      const { thumbPath, mime } = await ensureThumbFor(safePath);
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      res.type(mime);
+      res.sendFile(thumbPath);
+    } catch {
+      next();
+    }
+  });
+  app.use('/uploads', express.static(uploadsRoot));
 
   // Middleware para registrar las peticiones HTTP (ocultando contraseñas)
   app.use((req, _res, next) => {
