@@ -92,10 +92,16 @@ async function ensureThumbFor(absolutePath: string): Promise<{ thumbPath: string
  */
 export async function serveMediaThumbnail(req: Request, res: Response): Promise<void> {
   try {
-    const rawUrl = String(req.query.url || '').trim();
+    let rawUrl = String(req.query.url || '').trim();
     if (!rawUrl) {
       res.status(400).send('URL requerida');
       return;
+    }
+
+    try {
+      rawUrl = decodeURIComponent(rawUrl);
+    } catch {
+      /* ignore */
     }
 
     if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) {

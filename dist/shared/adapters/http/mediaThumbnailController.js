@@ -84,10 +84,16 @@ async function ensureThumbFor(absolutePath) {
  */
 export async function serveMediaThumbnail(req, res) {
     try {
-        const rawUrl = String(req.query.url || '').trim();
+        let rawUrl = String(req.query.url || '').trim();
         if (!rawUrl) {
             res.status(400).send('URL requerida');
             return;
+        }
+        try {
+            rawUrl = decodeURIComponent(rawUrl);
+        }
+        catch {
+            /* ignore */
         }
         if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) {
             res.status(400).send('Data URI no soportado para miniaturas');
