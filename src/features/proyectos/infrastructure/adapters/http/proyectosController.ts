@@ -1958,7 +1958,7 @@ export class ProyectosController {
         label: b.label || `Ítem complementario (lote ${batchNum})`,
         creadoEn: new Date().toISOString().split('T')[0],
         archivos: Array.isArray(b.archivos) ? b.archivos : [],
-        estado: 'pending_print',
+        estado: 'draft',
         jobImpresionId: null,
       };
       batches.push(nuevoBatch);
@@ -2028,8 +2028,8 @@ export class ProyectosController {
 
       const batch = batches[batchIdx];
 
-      // Si el batch ya fue enviado a impresión y no fue cancelado, impedir agregarle nuevos archivos
-      const isPrintedOrPending = batch.estado === 'printed' || batch.estado === 'pending_print' || !!batch.jobImpresionId;
+      // Si el batch ya tiene un job en la cola de impresión y no fue cancelado, impedir agregarle nuevos archivos
+      const isPrintedOrPending = (batch.estado === 'printed' || !!batch.jobImpresionId) && (batch.archivos && batch.archivos.length > 0);
       if (isPrintedOrPending) {
         let isCanceled = false;
         if (batch.jobImpresionId) {
@@ -2068,6 +2068,156 @@ export class ProyectosController {
       return res.status(500).json({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Error al agregar archivo al lote' },
+      });
+    }
+  }
+
+  /**
+   * Elimina un archivo de un batch de diseño específico.
+   * DELETE /proyectos/:id/diseno/batches/:batchId/archivos
+   */
+  async removeArchivoFromBatch(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id, batchId } = req.params;
+      const { url } = req.body || req.query || {};
+
+      if (!url) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_INPUT', message: 'URL del archivo requerida' },
+        });
+      }
+
+      const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+        where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+      });
+      const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
+      const batches: any[] = Array.isArray(datosExistentes.batches) ? [...datosExistentes.batches] : [];
+
+      const batchIdx = batches.findIndex((b) => b.id === batchId);
+      if (batchIdx === -1) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Lote de diseño no encontrado' },
+        });
+      }
+
+      const batch = batches[batchIdx];
+      if (Array.isArray(batch.archivos)) {
+        batch.archivos = batch.archivos.filter((a: any) => a.url !== url);
+      }
+      batches[batchIdx] = batch;
+
+      const datosActualizados = { ...datosExistentes, batches };
+      await prisma.proyectoFase.update({
+        where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+        data: { datos: JSON.stringify(datosActualizados) },
+      });
+
+      return res.status(200).json({ success: true, data: { batch: batches[batchIdx] } });
+    } catch (error) {
+      console.error('[proyectos/removeArchivoFromBatch]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar archivo del lote' },
+      });
+    }
+  }
+
+  /**
+   * Elimina un lote de diseño específico de un proyecto.
+   * DELETE /proyectos/:id/diseno/batches/:batchId
+   */
+  async deleteBatchDiseno(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id, batchId } = req.params;
+
+      const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+        where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+      });
+      if (!faseDisenoExistente) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Fase de diseño no encontrada' },
+        });
+      }
+
+      const datosExistentes = parseFaseDatos(faseDisenoExistente.datos);
+      let batches: any[] = Array.isArray(datosExistentes.batches) ? [...datosExistentes.batches] : [];
+
+      const targetBatch = batches.find((b) => b.id === batchId);
+      if (!targetBatch) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Lote de diseño no encontrado' },
+        });
+      }
+
+      batches = batches.filter((b) => b.id !== batchId);
+
+      const datosActualizados = { ...datosExistentes, batches };
+      await prisma.proyectoFase.update({
+        where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+        data: { datos: JSON.stringify(datosActualizados) },
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: { batchId, totalBatches: batches.length },
+      });
+    } catch (error) {
+      console.error('[proyectos/deleteBatchDiseno]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar lote de diseño' },
+      });
+    }
+  }
+
+  /**
+   * Elimina de golpe todos los lotes de diseño VACÍOS (sin archivos y sin job) de un proyecto.
+   * DELETE /proyectos/:id/diseno/batches-vacios
+   */
+  async deleteEmptyBatchesDiseno(req: Request, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+
+      const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+        where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+      });
+      if (!faseDisenoExistente) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Fase de diseño no encontrada' },
+        });
+      }
+
+      const datosExistentes = parseFaseDatos(faseDisenoExistente.datos);
+      const batches: any[] = Array.isArray(datosExistentes.batches) ? [...datosExistentes.batches] : [];
+
+      const lotesGuardados = batches.filter((b) => {
+        const tieneArchivos = Array.isArray(b.archivos) && b.archivos.length > 0;
+        const tieneJob = !!b.jobImpresionId;
+        return tieneArchivos || tieneJob;
+      });
+
+      const eliminadosCount = batches.length - lotesGuardados.length;
+
+      const datosActualizados = { ...datosExistentes, batches: lotesGuardados };
+      await prisma.proyectoFase.update({
+        where: { proyectoId_fase: { proyectoId: String(id), fase: 'DISEÑO' } },
+        data: { datos: JSON.stringify(datosActualizados) },
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: { eliminados: eliminadosCount, totalBatches: lotesGuardados.length },
+      });
+    } catch (error) {
+      console.error('[proyectos/deleteEmptyBatchesDiseno]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar lotes vacíos' },
       });
     }
   }
@@ -2221,4 +2371,5 @@ export class ProyectosController {
     }
   }
 }
+
 
