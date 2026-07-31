@@ -176,9 +176,7 @@ export class ProformasController {
                 });
                 const clienteOr = [{ clienteId: cid }];
                 if (cliente?.nombre) {
-                    clienteOr.push({
-                        clienteNombre: { equals: cliente.nombre, mode: 'insensitive' },
-                    });
+                    clienteOr.push({ clienteNombre: { equals: cliente.nombre, mode: 'insensitive' } }, { clienteNombre: { contains: cliente.nombre, mode: 'insensitive' } });
                 }
                 andFilters.push({ OR: clienteOr });
             }
