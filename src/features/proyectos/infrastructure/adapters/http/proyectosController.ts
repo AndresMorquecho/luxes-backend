@@ -6,6 +6,8 @@ import { safeRemoveDir } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
 
+import { ensureThumbFor } from '../../../../../shared/adapters/http/mediaThumbnailController.js';
+
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
 
 /** Quita previewDataUrl (base64) del grafo de fases para no inflar JSON de API. */
@@ -1201,6 +1203,22 @@ export class ProyectosController {
       }
 
       await fs.access(filePath);
+
+      const isThumbRequested = req.query.thumb === '1' || req.query.thumbnail === 'true';
+      const isImage = /\.(jpe?g|png|webp|gif)$/i.test(safeName);
+
+      if (isThumbRequested && isImage) {
+        try {
+          const { thumbPath, mime } = await ensureThumbFor(filePath);
+          res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+          res.type(mime);
+          return res.sendFile(thumbPath);
+        } catch (err) {
+          console.warn('[serveArchivoProyecto] Error generando miniatura:', err);
+        }
+      }
+
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
       return res.sendFile(filePath);
     } catch {
       return res.status(404).json({

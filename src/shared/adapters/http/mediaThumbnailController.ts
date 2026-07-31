@@ -54,7 +54,7 @@ async function generateThumbWithJimp(absolutePath: string, thumbPath: string): P
   await image.write(jpgThumbPath as any);
 }
 
-async function ensureThumbFor(absolutePath: string): Promise<{ thumbPath: string; mime: string }> {
+export async function ensureThumbFor(absolutePath: string): Promise<{ thumbPath: string; mime: string }> {
   const stat = await fs.stat(absolutePath);
   const useSharp = await checkSharpAvailable();
   const ext = useSharp ? 'webp' : 'jpg';
