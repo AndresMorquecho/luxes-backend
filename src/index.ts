@@ -86,6 +86,30 @@ async function bootstrap() {
     console.error('[Bootstrap] Error al verificar columna comprobante_url:', error);
   }
 
+  // Verificar/Crear columna medio en proformas y migrar histórico si aplica
+  try {
+    const { prisma } = await import('./config/prismaClient.js');
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE proformas ADD COLUMN IF NOT EXISTS medio TEXT DEFAULT 'LUXES';
+    `);
+    console.log('[Bootstrap] Columna medio en proformas verificada.');
+
+    await prisma.$executeRawUnsafe(`
+      UPDATE proformas
+      SET medio = p.medio
+      FROM proyectos p, proyecto_fases pf
+      WHERE pf.proyecto_id = p.id
+        AND pf.fase = 'COTIZACION'
+        AND pf.datos LIKE '%' || proformas.id || '%'
+        AND (proformas.medio IS NULL OR proformas.medio = 'LUXES')
+        AND p.medio IS NOT NULL
+        AND p.medio != 'LUXES';
+    `);
+    console.log('[Bootstrap] Migración de medio histórico completada.');
+  } catch (error) {
+    console.error('[Bootstrap] Error al verificar/migrar medio en proformas:', error);
+  }
+
   // Verificar/Crear tabla cheques_compra
   try {
     const { prisma } = await import('./config/prismaClient.js');

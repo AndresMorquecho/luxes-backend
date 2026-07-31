@@ -26,6 +26,7 @@ const mapProforma = (record) => ({
     })),
     iva: Number(record.iva),
     notas: record.notas,
+    medio: record.medio || 'LUXES',
     estado: record.estado,
 });
 const nextSequentialId = (prefix, ids) => {
@@ -59,6 +60,7 @@ export class PrismaProformasPersistence {
             vencimiento: toDate(input.vencimiento),
             iva: input.iva ?? 0.12,
             notas: input.notas ?? '',
+            medio: input.medio ?? 'LUXES',
             estado: input.estado ?? 'Pendiente',
         };
         if (input.id) {

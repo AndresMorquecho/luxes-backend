@@ -571,6 +571,7 @@ model Proforma {
   condiciones   String         @default("")
   iva           Decimal        @default(0.12) @db.Decimal(6, 4)
   notas         String         @default("")
+  medio         String         @default("LUXES")
   estado        String         @default("Pendiente")
   metodoPagoId  String?        @map("metodo_pago_id")
   metodoPago    MetodoPago?    @relation(fields: [metodoPagoId], references: [id], onDelete: SetNull)

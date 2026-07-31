@@ -112,6 +112,7 @@ function mapProforma(p) {
         condiciones: p.condiciones,
         iva: Number(p.iva),
         notas: p.notas,
+        medio: p.medio || 'LUXES',
         estado: p.estado,
         metodoPagoId: p.metodoPagoId,
         metodoPago: p.metodoPago,
@@ -272,6 +273,7 @@ export class ProformasController {
                     condiciones: b.condiciones ?? '',
                     iva: Number(b.iva ?? 0.12),
                     notas: b.notas ?? '',
+                    medio: b.medio ?? 'LUXES',
                     estado: b.estado ?? 'Pendiente',
                     metodoPagoId: b.metodoPagoId || null,
                     creadoPorUserId,
@@ -342,6 +344,7 @@ export class ProformasController {
                     condiciones: b.condiciones ?? '',
                     iva: Number(b.iva ?? 0.12),
                     notas: b.notas ?? '',
+                    medio: b.medio ?? 'LUXES',
                     estado: b.estado ?? 'Pendiente',
                     metodoPagoId: b.metodoPagoId || null,
                     items: {

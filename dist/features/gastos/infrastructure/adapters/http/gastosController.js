@@ -1994,18 +1994,11 @@ export class GastosController {
                 hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999Z');
             }
             const hasDateFilter = !!(desdeDate && hastaLimit);
-            // --- 1. INGRESOS Y VENTAS POR ORIGEN DEL PROYECTO (LUXES, REDES, VENDEDORES) ---
-            const projects = await prisma.proyecto.findMany({
-                where: hasDateFilter ? {
-                    fechaCreacion: { gte: desdeDate, lte: hastaLimit }
-                } : undefined,
-                include: {
-                    fases: {
-                        where: { fase: 'COTIZACION' }
-                    }
-                }
-            });
+            // --- 1. INGRESOS Y VENTAS POR MEDIO DE CONSECUCIÓN (LUXES, REDES, VENDEDORES) ---
             const proformas = await prisma.proforma.findMany({
+                where: hasDateFilter ? {
+                    fecha: { gte: desdeDate, lte: hastaLimit }
+                } : undefined,
                 include: { abonos: true, items: true }
             });
             const sourceData = {
@@ -2013,33 +2006,18 @@ export class GastosController {
                 REDES: { ventas: 0, ingresos: 0 },
                 VENDEDORES: { ventas: 0, ingresos: 0 }
             };
-            for (const p of projects) {
-                const source = (p.medio || 'LUXES').toUpperCase();
+            for (const prof of proformas) {
+                const source = (prof.medio || 'LUXES').toUpperCase();
                 if (!sourceData[source]) {
                     sourceData[source] = { ventas: 0, ingresos: 0 };
                 }
-                const cotizacionFase = p.fases.find(f => f.fase === 'COTIZACION');
-                let linkedProformaIds = [];
-                try {
-                    if (cotizacionFase?.datos) {
-                        const parsed = JSON.parse(cotizacionFase.datos);
-                        const cotizaciones = parsed.cotizacionesSeleccionadas || [];
-                        linkedProformaIds = cotizaciones.map((c) => String(c.id));
-                    }
-                }
-                catch { }
-                if (linkedProformaIds.length > 0) {
-                    const matchedProformas = proformas.filter(prof => linkedProformaIds.includes(prof.id));
-                    for (const prof of matchedProformas) {
-                        const subtotal = prof.items.reduce((sum, item) => sum + Number(item.cantidad) * Number(item.precioUnitario), 0);
-                        const totalVal = subtotal * (1 + Number(prof.iva));
-                        const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
-                        sourceData[source].ventas += totalVal;
-                        sourceData[source].ingresos += totalAbonado;
-                    }
-                }
-                else {
-                    sourceData[source].ventas += Number(p.montoEstimado) || 0;
+                const subtotal = prof.items.reduce((sum, item) => sum + Number(item.cantidad) * Number(item.precioUnitario), 0);
+                const totalVal = subtotal * (1 + Number(prof.iva));
+                const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
+                sourceData[source].ingresos += totalAbonado;
+                // Se considera Venta si se convirtió en venta (es decir, abonos > 0 o estado Aprobada/Pagada)
+                if (totalAbonado > 0 || prof.estado === 'Aprobada' || prof.estado === 'Pagada') {
+                    sourceData[source].ventas += totalVal;
                 }
             }
             // --- 2. TRABAJOS REALIZADOS, CALIFICACIONES Y ENTREGAS ---

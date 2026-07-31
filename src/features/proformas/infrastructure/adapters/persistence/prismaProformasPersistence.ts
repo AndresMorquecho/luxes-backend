@@ -18,6 +18,7 @@ export interface ProformaInput {
   items: ProformaItemInput[];
   iva?: number;
   notas?: string;
+  medio?: string;
   estado?: string;
 }
 
@@ -41,6 +42,7 @@ const mapProforma = (record: {
   vencimiento: Date | null;
   iva: Prisma.Decimal;
   notas: string;
+  medio?: string;
   estado: string;
   items: Array<{
     descripcion: string;
@@ -65,6 +67,7 @@ const mapProforma = (record: {
     })),
   iva: Number(record.iva),
   notas: record.notas,
+  medio: record.medio || 'LUXES',
   estado: record.estado,
 });
 
@@ -101,6 +104,7 @@ export class PrismaProformasPersistence {
       vencimiento: toDate(input.vencimiento),
       iva: input.iva ?? 0.12,
       notas: input.notas ?? '',
+      medio: input.medio ?? 'LUXES',
       estado: input.estado ?? 'Pendiente',
     };
 
