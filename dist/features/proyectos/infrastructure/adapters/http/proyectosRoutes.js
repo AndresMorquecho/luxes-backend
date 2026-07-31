@@ -56,8 +56,11 @@ const uploadEvidencia = multer({
         }
     },
 });
+import { serveMediaThumbnail } from '../../../../../shared/adapters/http/mediaThumbnailController.js';
 const router = Router();
 const controller = new ProyectosController();
+// Miniaturas optimizadas — accesible públicamente bajo /api/proyectos/media/thumbnail para el proxy Nginx
+router.get('/media/thumbnail', serveMediaThumbnail);
 // Archivos de proyecto: ruta pública (nombres aleatorios) — sirve vía /api para el proxy nginx
 router.get('/:id/archivos/:filename', (req, res) => controller.serveArchivoProyecto(req, res));
 router.use(authMiddleware);
