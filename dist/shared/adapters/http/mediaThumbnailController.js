@@ -109,6 +109,7 @@ export async function serveMediaThumbnail(req, res) {
                 await fs.access(absolutePath);
             }
             catch {
+                res.setHeader('Cache-Control', 'public, max-age=86400');
                 res.status(404).send('Archivo no encontrado');
                 return;
             }
