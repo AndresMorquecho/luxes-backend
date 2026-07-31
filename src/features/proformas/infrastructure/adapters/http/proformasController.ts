@@ -584,37 +584,43 @@ export class ProformasController {
       const total = subtotal * (1 + Number(ivaToApply));
 
       // Validar monto
-      const abonoMonto = Number(monto);
-      if (abonoMonto < 0) {
+      const abonoMonto = Number(monto || 0);
+      if (isNaN(abonoMonto) || abonoMonto < 0) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono no puede ser negativo' } });
       }
       if (total > 0 && abonoMonto > (total + 0.01)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El abono no puede superar el total de la proforma' } });
       }
 
+      const validMetodoId = (metodoPagoId && String(metodoPagoId).trim() && String(metodoPagoId) !== 'undefined' && String(metodoPagoId) !== 'null')
+        ? String(metodoPagoId).trim()
+        : null;
+
       // Transacción para guardar abono y actualizar estado de la proforma
       const nuevoEstado = abonoMonto >= (total - 0.01) ? 'Pagada' : 'Aprobada';
 
       const result = await prisma.$transaction(async (tx) => {
         const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
-        // 1. Crear el abono incluso si es 0, para que quede registro
-        await tx.abonoProforma.create({
-          data: {
-            proformaId: proforma.id,
-            metodoPagoId: String(metodoPagoId),
-            monto: abonoMonto,
-            referencia: referencia ?? '',
-            comprobanteUrl: comprobanteUrl ?? null,
-            registradoPorUserId: registradoPorUserId ?? undefined,
-          },
-        });
+        // 1. Crear el abono solo si el monto es mayor a 0
+        if (abonoMonto > 0) {
+          await tx.abonoProforma.create({
+            data: {
+              proformaId: proforma.id,
+              metodoPagoId: validMetodoId || String(metodoPagoId || ''),
+              monto: abonoMonto,
+              referencia: referencia ?? '',
+              comprobanteUrl: comprobanteUrl ?? null,
+              registradoPorUserId: registradoPorUserId ?? undefined,
+            },
+          });
+        }
 
         // 2. Actualizar la proforma
         const updated = await tx.proforma.update({
           where: { id: proforma.id },
           data: {
             estado: nuevoEstado,
-            metodoPagoId: String(metodoPagoId),
+            ...(validMetodoId ? { metodoPagoId: validMetodoId } : {}),
             fechaAprobacion: new Date(),
             iva: ivaToApply,
           },
