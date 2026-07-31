@@ -109,7 +109,7 @@ export async function serveMediaThumbnail(req: Request, res: Response): Promise<
       return;
     }
 
-    let relPath = rawUrl;
+    let relPath = rawUrl.replace(/^https?:\/\/[^/]+/, '');
     if (relPath.startsWith('/api/proyectos/') && relPath.includes('/archivos/')) {
       const match = relPath.match(/^\/api\/proyectos\/([^/]+)\/archivos\/([^/?#]+)/);
       if (match) {
