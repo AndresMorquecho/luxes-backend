@@ -6,8 +6,9 @@ const THUMB_WIDTH = 320;
 function resolveUploadsAbsolute(relPath) {
     if (!relPath.startsWith('/uploads/'))
         return null;
-    const absolutePath = path.resolve('.' + relPath);
     const uploadsRoot = path.resolve('uploads');
+    const cleanRel = relPath.replace(/^\/uploads\/?/, '');
+    const absolutePath = path.join(uploadsRoot, cleanRel);
     const relative = path.relative(uploadsRoot, absolutePath);
     if (relative.startsWith('..') || path.isAbsolute(relative))
         return null;
