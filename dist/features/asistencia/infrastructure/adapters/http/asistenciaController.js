@@ -194,4 +194,33 @@ export class AsistenciaController {
             });
         }
     }
+    async getAutoAsistenciaStatus(req, res) {
+        try {
+            const empleadoId = String(req.params.empleadoId);
+            const autoAsistencia = await this.asistenciaService.getAutoAsistenciaStatus(empleadoId);
+            return res.status(200).json({ success: true, data: { autoAsistencia } });
+        }
+        catch (error) {
+            console.error('[asistencia/getAutoAsistenciaStatus]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al obtener estado de marcación automática' },
+            });
+        }
+    }
+    async toggleAutoAsistenciaStatus(req, res) {
+        try {
+            const empleadoId = String(req.params.empleadoId);
+            const autoAsistencia = Boolean(req.body.autoAsistencia);
+            const result = await this.asistenciaService.toggleAutoAsistenciaStatus(empleadoId, autoAsistencia);
+            return res.status(200).json({ success: true, data: { autoAsistencia: result } });
+        }
+        catch (error) {
+            console.error('[asistencia/toggleAutoAsistenciaStatus]', error);
+            return res.status(500).json({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'Error al cambiar estado de marcación automática' },
+            });
+        }
+    }
 }

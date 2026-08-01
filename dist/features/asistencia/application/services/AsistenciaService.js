@@ -78,12 +78,130 @@ export class AsistenciaService {
     constructor(asistenciaRepository) {
         this.asistenciaRepository = asistenciaRepository;
     }
+    async evaluarAutoAsistencias() {
+        try {
+            const empsAuto = await prisma.empleado.findMany({
+                where: { autoAsistencia: true },
+                select: { id: true, nombre: true, tipoContrato: true },
+            });
+            if (!empsAuto || empsAuto.length === 0)
+                return;
+            const ahoraUTC = new Date();
+            const ahoraEC = new Date(ahoraUTC.getTime() - 5 * 60 * 60 * 1000);
+            const hoyStr = ahoraEC.toISOString().split('T')[0];
+            const { diaConfig } = await getHorarioDelDia(hoyStr);
+            if (!diaConfig)
+                return;
+            const currentMinutes = ahoraEC.getHours() * 60 + ahoraEC.getMinutes();
+            const parseMin = (timeStr) => {
+                if (!timeStr)
+                    return null;
+                const [h, m] = timeStr.split(':').map(Number);
+                return h * 60 + m;
+            };
+            const entradaMin = parseMin(diaConfig.entrada) ?? (8 * 60);
+            const inicioAlmMin = parseMin(diaConfig.inicioAlmuerzo) ?? (13 * 60);
+            const finAlmMin = parseMin(diaConfig.finAlmuerzo) ?? (14 * 60);
+            const salidaMin = parseMin(diaConfig.salida) ?? (17 * 60 + 30);
+            for (const emp of empsAuto) {
+                const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(emp.id);
+                const hasEntrada = todayMarks.some((m) => m.tipo === 'ENTRADA');
+                const hasInicioAlm = todayMarks.some((m) => m.tipo === 'INICIO_ALMUERZO');
+                const hasFinAlm = todayMarks.some((m) => m.tipo === 'FIN_ALMUERZO');
+                const hasSalida = todayMarks.some((m) => m.tipo === 'SALIDA');
+                const hasPermiso = todayMarks.some((m) => m.tipo === 'PERMISO');
+                if (hasPermiso)
+                    continue;
+                const LUXES_OFFICE_LAT = -2.14000;
+                const LUXES_OFFICE_LNG = -79.60597;
+                if (currentMinutes >= entradaMin && !hasEntrada) {
+                    const dtEntrada = new Date(`${hoyStr}T${diaConfig.entrada || '08:00'}:00.000-05:00`);
+                    await this.asistenciaRepository.create({
+                        empleadoId: emp.id,
+                        tipo: 'ENTRADA',
+                        label: 'Entrada',
+                        fechaHora: dtEntrada.toISOString(),
+                        ubicacionLat: LUXES_OFFICE_LAT,
+                        ubicacionLng: LUXES_OFFICE_LNG,
+                    });
+                    continue;
+                }
+                if (currentMinutes >= inicioAlmMin && hasEntrada && !hasInicioAlm) {
+                    const dtInicioAlm = new Date(`${hoyStr}T${diaConfig.inicioAlmuerzo || '13:00'}:00.000-05:00`);
+                    await this.asistenciaRepository.create({
+                        empleadoId: emp.id,
+                        tipo: 'INICIO_ALMUERZO',
+                        label: 'Salida Almuerzo',
+                        fechaHora: dtInicioAlm.toISOString(),
+                        ubicacionLat: LUXES_OFFICE_LAT,
+                        ubicacionLng: LUXES_OFFICE_LNG,
+                    });
+                    continue;
+                }
+                if (currentMinutes >= finAlmMin && hasInicioAlm && !hasFinAlm) {
+                    const dtFinAlm = new Date(`${hoyStr}T${diaConfig.finAlmuerzo || '14:00'}:00.000-05:00`);
+                    await this.asistenciaRepository.create({
+                        empleadoId: emp.id,
+                        tipo: 'FIN_ALMUERZO',
+                        label: 'Regreso Almuerzo',
+                        fechaHora: dtFinAlm.toISOString(),
+                        ubicacionLat: LUXES_OFFICE_LAT,
+                        ubicacionLng: LUXES_OFFICE_LNG,
+                    });
+                    continue;
+                }
+                if (currentMinutes >= salidaMin && (hasFinAlm || hasEntrada) && !hasSalida) {
+                    const dtSalida = new Date(`${hoyStr}T${diaConfig.salida || '17:30'}:00.000-05:00`);
+                    await this.asistenciaRepository.create({
+                        empleadoId: emp.id,
+                        tipo: 'SALIDA',
+                        label: 'Salida Trabajo',
+                        fechaHora: dtSalida.toISOString(),
+                        ubicacionLat: LUXES_OFFICE_LAT,
+                        ubicacionLng: LUXES_OFFICE_LNG,
+                    });
+                    await incrementarDiasLaborados(emp.id, dtSalida);
+                }
+            }
+        }
+        catch (err) {
+            console.error('[evaluarAutoAsistencias] Error:', err);
+        }
+    }
+    async getAutoAsistenciaStatus(empleadoId) {
+        try {
+            const emp = await prisma.empleado.findUnique({
+                where: { id: empleadoId },
+                select: { autoAsistencia: true },
+            });
+            return emp?.autoAsistencia ?? false;
+        }
+        catch {
+            return false;
+        }
+    }
+    async toggleAutoAsistenciaStatus(empleadoId, autoAsistencia) {
+        try {
+            const emp = await prisma.empleado.update({
+                where: { id: empleadoId },
+                data: { autoAsistencia },
+                select: { autoAsistencia: true },
+            });
+            return emp.autoAsistencia;
+        }
+        catch (err) {
+            console.error('[toggleAutoAsistenciaStatus]', err);
+            return autoAsistencia;
+        }
+    }
     async listAsistencias(desdeStr, hastaStr) {
+        await this.evaluarAutoAsistencias();
         const desde = new Date(`${desdeStr}T00:00:00.000-05:00`);
         const hasta = new Date(`${hastaStr}T23:59:59.999-05:00`);
         return this.asistenciaRepository.findAll(desde, hasta);
     }
     async getProximaMarcacion(empleadoId) {
+        await this.evaluarAutoAsistencias();
         const [todayMarks, emp] = await Promise.all([
             this.asistenciaRepository.findTodayByEmpleado(empleadoId),
             prisma.empleado.findUnique({ where: { id: empleadoId }, select: { tipoContrato: true } }),
@@ -97,6 +215,7 @@ export class AsistenciaService {
         return { ...base, opciones, tipoContrato };
     }
     async getTodayForEmpleado(empleadoId) {
+        await this.evaluarAutoAsistencias();
         return this.asistenciaRepository.findTodayByEmpleado(empleadoId);
     }
     async registrarAsistencia(input) {

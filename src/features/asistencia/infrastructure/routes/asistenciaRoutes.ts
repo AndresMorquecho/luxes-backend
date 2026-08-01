@@ -25,6 +25,13 @@ export function createAsistenciaRoutes(controller: AsistenciaController): Router
   router.post('/permiso', authMiddleware, (req, res) => controller.registrarPermiso(req, res));
   router.delete('/permiso', authMiddleware, (req, res) => controller.eliminarPermiso(req, res));
 
+  router.get('/empleado/:empleadoId/auto-asistencia', authMiddleware, (req, res) =>
+    controller.getAutoAsistenciaStatus(req, res)
+  );
+  router.patch('/empleado/:empleadoId/auto-asistencia', authMiddleware, (req, res) =>
+    controller.toggleAutoAsistenciaStatus(req, res)
+  );
+
   return router;
 }
 

@@ -394,6 +394,7 @@ model Empleado {
   direccion    String             @default("")
   foto         String?
   passwordHash String             @default("") @map("password_hash")
+  autoAsistencia Boolean          @default(false) @map("auto_asistencia")
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @updatedAt @map("updated_at")
   documentos   EmpleadoDocumento[]
