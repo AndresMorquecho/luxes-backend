@@ -236,7 +236,7 @@ export function calcularHorasExtrasDesdeSalida(
     throw new Error('El tiempo de horas extras es demasiado corto.');
   }
   const fmt = (d: Date) =>
-    d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hour12: false });
+    d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Guayaquil' });
   return {
     horas,
     detalleHorario: `${fmt(salidaAt)} - ${fmt(finHora)}`,
@@ -274,7 +274,7 @@ export function calcularHorasExtrasDesdeConfig(
   const horas = Math.round((minutosTotal / 60) * 100) / 100;
 
   const fmt = (d: Date) =>
-    d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hour12: false });
+    d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Guayaquil' });
 
   return {
     horas,

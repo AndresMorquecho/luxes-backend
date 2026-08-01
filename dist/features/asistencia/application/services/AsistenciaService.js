@@ -80,29 +80,43 @@ export class AsistenciaService {
     }
     async evaluarAutoAsistencias() {
         try {
-            const empsAuto = await prisma.empleado.findMany({
-                where: { autoAsistencia: true },
-                select: { id: true, nombre: true, tipoContrato: true },
-            });
+            let empsAuto = [];
+            try {
+                empsAuto = await prisma.empleado.findMany({
+                    where: { autoAsistencia: true },
+                    select: { id: true, nombre: true, tipoContrato: true },
+                });
+            }
+            catch {
+                empsAuto = [];
+            }
             if (!empsAuto || empsAuto.length === 0)
                 return;
             const ahoraUTC = new Date();
             const ahoraEC = new Date(ahoraUTC.getTime() - 5 * 60 * 60 * 1000);
+            const dayOfWeek = ahoraEC.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
+            // Si es Domingo, no se realiza marcación automática (Día de descanso)
+            if (dayOfWeek === 0)
+                return;
             const hoyStr = ahoraEC.toISOString().split('T')[0];
             const { diaConfig } = await getHorarioDelDia(hoyStr);
             if (!diaConfig)
                 return;
             const currentMinutes = ahoraEC.getHours() * 60 + ahoraEC.getMinutes();
             const parseMin = (timeStr) => {
-                if (!timeStr)
+                if (!timeStr || typeof timeStr !== 'string')
                     return null;
                 const [h, m] = timeStr.split(':').map(Number);
+                if (isNaN(h) || isNaN(m))
+                    return null;
                 return h * 60 + m;
             };
-            const entradaMin = parseMin(diaConfig.entrada) ?? (8 * 60);
-            const inicioAlmMin = parseMin(diaConfig.inicioAlmuerzo) ?? (13 * 60);
-            const finAlmMin = parseMin(diaConfig.finAlmuerzo) ?? (14 * 60);
-            const salidaMin = parseMin(diaConfig.salida) ?? (17 * 60 + 30);
+            const entradaMin = parseMin(diaConfig.entrada) ?? (dayOfWeek === 6 ? 9 * 60 : 8 * 60);
+            const inicioAlmMin = parseMin(diaConfig.inicioAlmuerzo);
+            const finAlmMin = parseMin(diaConfig.finAlmuerzo);
+            const salidaMin = parseMin(diaConfig.salida) ?? (dayOfWeek === 6 ? 14 * 60 : 17 * 60 + 30);
+            const LUXES_OFFICE_LAT = -2.14000;
+            const LUXES_OFFICE_LNG = -79.60597;
             for (const emp of empsAuto) {
                 const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(emp.id);
                 const hasEntrada = todayMarks.some((m) => m.tipo === 'ENTRADA');
@@ -112,10 +126,10 @@ export class AsistenciaService {
                 const hasPermiso = todayMarks.some((m) => m.tipo === 'PERMISO');
                 if (hasPermiso)
                     continue;
-                const LUXES_OFFICE_LAT = -2.14000;
-                const LUXES_OFFICE_LNG = -79.60597;
+                // 1. ENTRADA
                 if (currentMinutes >= entradaMin && !hasEntrada) {
-                    const dtEntrada = new Date(`${hoyStr}T${diaConfig.entrada || '08:00'}:00.000-05:00`);
+                    const horaEntrada = diaConfig.entrada || (dayOfWeek === 6 ? '09:00' : '08:00');
+                    const dtEntrada = new Date(`${hoyStr}T${horaEntrada}:00.000-05:00`);
                     await this.asistenciaRepository.create({
                         empleadoId: emp.id,
                         tipo: 'ENTRADA',
@@ -126,8 +140,10 @@ export class AsistenciaService {
                     });
                     continue;
                 }
-                if (currentMinutes >= inicioAlmMin && hasEntrada && !hasInicioAlm) {
-                    const dtInicioAlm = new Date(`${hoyStr}T${diaConfig.inicioAlmuerzo || '13:00'}:00.000-05:00`);
+                // 2. INICIO_ALMUERZO (Solo si el día tiene horario de almuerzo configurado)
+                if (inicioAlmMin !== null && currentMinutes >= inicioAlmMin && hasEntrada && !hasInicioAlm) {
+                    const horaInicioAlm = diaConfig.inicioAlmuerzo || '13:00';
+                    const dtInicioAlm = new Date(`${hoyStr}T${horaInicioAlm}:00.000-05:00`);
                     await this.asistenciaRepository.create({
                         empleadoId: emp.id,
                         tipo: 'INICIO_ALMUERZO',
@@ -138,8 +154,10 @@ export class AsistenciaService {
                     });
                     continue;
                 }
-                if (currentMinutes >= finAlmMin && hasInicioAlm && !hasFinAlm) {
-                    const dtFinAlm = new Date(`${hoyStr}T${diaConfig.finAlmuerzo || '14:00'}:00.000-05:00`);
+                // 3. FIN_ALMUERZO (Solo si inició almuerzo y el día contempla fin de almuerzo)
+                if (finAlmMin !== null && currentMinutes >= finAlmMin && hasInicioAlm && !hasFinAlm) {
+                    const horaFinAlm = diaConfig.finAlmuerzo || '14:00';
+                    const dtFinAlm = new Date(`${hoyStr}T${horaFinAlm}:00.000-05:00`);
                     await this.asistenciaRepository.create({
                         empleadoId: emp.id,
                         tipo: 'FIN_ALMUERZO',
@@ -150,8 +168,11 @@ export class AsistenciaService {
                     });
                     continue;
                 }
-                if (currentMinutes >= salidaMin && (hasFinAlm || hasEntrada) && !hasSalida) {
-                    const dtSalida = new Date(`${hoyStr}T${diaConfig.salida || '17:30'}:00.000-05:00`);
+                // 4. SALIDA
+                const canMarkSalida = hasFinAlm || (diaConfig.almuerzoOpcional && hasEntrada) || hasEntrada;
+                if (currentMinutes >= salidaMin && canMarkSalida && !hasSalida) {
+                    const horaSalida = diaConfig.salida || (dayOfWeek === 6 ? '14:00' : '17:30');
+                    const dtSalida = new Date(`${hoyStr}T${horaSalida}:00.000-05:00`);
                     await this.asistenciaRepository.create({
                         empleadoId: emp.id,
                         tipo: 'SALIDA',

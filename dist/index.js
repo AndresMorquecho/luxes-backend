@@ -130,6 +130,81 @@ async function bootstrap() {
     catch (error) {
         console.error('[Bootstrap] Error al verificar tabla cheques_compra:', error);
     }
+    // Verificar/Crear columna auto_asistencia en empleados
+    try {
+        const { prisma } = await import('./config/prismaClient.js');
+        await prisma.$executeRawUnsafe(`
+      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS auto_asistencia BOOLEAN DEFAULT FALSE;
+    `);
+        console.log('[Bootstrap] Columna auto_asistencia en empleados verificada.');
+    }
+    catch (error) {
+        console.error('[Bootstrap] Error al verificar columna auto_asistencia:', error);
+    }
+    // Corregir desfase de zona horaria (UTC vs America/Guayaquil) en registros de horas extras existentes (aprobadas y pendientes)
+    try {
+        const { prisma } = await import('./config/prismaClient.js');
+        const horasExtras = await prisma.horaExtra.findMany();
+        for (const he of horasExtras) {
+            let nuevoDetalle = null;
+            if (he.asistenciaFinId) {
+                const finAsistencia = await prisma.asistencia.findUnique({
+                    where: { id: he.asistenciaFinId },
+                });
+                if (finAsistencia) {
+                    const finHoraLocal = new Date(finAsistencia.fechaHora).toLocaleTimeString('es-EC', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                        timeZone: 'America/Guayaquil',
+                    });
+                    const inicioStr = he.detalleHorario ? he.detalleHorario.split('-')[0].trim() : '14:00';
+                    nuevoDetalle = `${inicioStr} - ${finHoraLocal}`;
+                }
+            }
+            else if (he.detalleHorario && /\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}/.test(he.detalleHorario)) {
+                // Si no tiene asistenciaFinId pero el detalleHorario tiene formato HH:MM - HH:MM
+                // Corregir si la hora de fin está en rango UTC (> 19)
+                const parts = he.detalleHorario.split('-').map((s) => s.trim());
+                const [endH, endM] = parts[1].split(':').map(Number);
+                if (endH >= 19) {
+                    const fixedEndH = String(endH - 5).padStart(2, '0');
+                    const fixedEndM = String(endM).padStart(2, '0');
+                    nuevoDetalle = `${parts[0]} - ${fixedEndH}:${fixedEndM}`;
+                }
+            }
+            if (nuevoDetalle && nuevoDetalle !== he.detalleHorario) {
+                console.log(`[Bootstrap] Corrigiendo zona horaria en HoraExtra (${he.aprobacionEstado}) ${he.id}: '${he.detalleHorario}' -> '${nuevoDetalle}'`);
+                const horasRed = Math.round(Number(he.horas) * 2) / 2;
+                await prisma.horaExtra.update({
+                    where: { id: he.id },
+                    data: {
+                        detalleHorario: nuevoDetalle,
+                        descripcion: `Horas extras — ${nuevoDetalle} (${horasRed}h facturado)`,
+                    },
+                });
+            }
+        }
+        // Corregir notificaciones con horarios con desfase UTC
+        const badNotifs = await prisma.notification.findMany({
+            where: { title: 'Horas extras por aprobar' },
+        });
+        for (const n of badNotifs) {
+            if (/- 2[0-3]:\d\d/.test(n.message)) {
+                const fixedMessage = n.message.replace(/- (2[0-3]):(\d\d)/g, (_match, h, m) => {
+                    const localH = String(Number(h) - 5).padStart(2, '0');
+                    return `- ${localH}:${m}`;
+                });
+                await prisma.notification.update({
+                    where: { id: n.id },
+                    data: { message: fixedMessage },
+                });
+            }
+        }
+    }
+    catch (error) {
+        console.error('[Bootstrap] Error al corregir desfase de horas extras:', error);
+    }
     // Asegurar usuarios del sistema (activos + contraseña dev conocida) solo si la tabla está vacía
     try {
         const { prisma } = await import('./config/prismaClient.js');
