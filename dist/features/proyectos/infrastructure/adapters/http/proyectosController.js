@@ -541,8 +541,24 @@ export class ProyectosController {
             }
             if (b.responsable !== undefined)
                 updateData.responsable = b.responsable;
-            if (b.requiereInstalacion !== undefined)
-                updateData.requiereInstalacion = Boolean(b.requiereInstalacion);
+            if (b.requiereInstalacion !== undefined) {
+                const nuevoReqInst = Boolean(b.requiereInstalacion);
+                updateData.requiereInstalacion = nuevoReqInst;
+                const proyectoExistente = await prisma.proyecto.findUnique({ where: { id: String(id) }, select: { faseActual: true } });
+                const faseActual = updateData.faseActual || proyectoExistente?.faseActual;
+                if (faseActual === 'ENTREGA' && nuevoReqInst) {
+                    updateData.faseActual = 'INSTALACION';
+                    if (b.progreso === undefined) {
+                        updateData.progreso = PROGRESO_POR_FASE['INSTALACION'] ?? 80;
+                    }
+                }
+                else if (faseActual === 'INSTALACION' && !nuevoReqInst) {
+                    updateData.faseActual = 'ENTREGA';
+                    if (b.progreso === undefined) {
+                        updateData.progreso = PROGRESO_POR_FASE['ENTREGA'] ?? 80;
+                    }
+                }
+            }
             if (b.faseActual !== undefined) {
                 updateData.faseActual = b.faseActual;
                 if (b.progreso === undefined) {
