@@ -98,7 +98,9 @@ export class GastosController {
                 }),
             ]);
             const gastosManual = gastos.map((g) => {
-                const isVehiculo = g.categoria?.toLowerCase() === 'vehiculos' || g.categoria?.toLowerCase() === 'mantenimiento';
+                const cat = (g.categoria || '').toLowerCase();
+                const isVehiculo = cat === 'vehiculos' || cat === 'mantenimiento';
+                const isNomina = cat === 'nomina' || cat === 'nominas' || cat === 'recursos_humanos';
                 let conceptoFinal = g.concepto;
                 if (isVehiculo) {
                     const match = g.concepto.match(/Vehículo:\s*(.+?)(?:\s*\([^)]+\)|$)/i);
@@ -116,8 +118,8 @@ export class GastosController {
                     metodoPagoId: g.metodoPagoId,
                     metodoPago: g.metodoPago,
                     registradoPor: g.registradoPor,
-                    origen: isVehiculo ? 'vehiculo' : 'otros_gastos',
-                    readonly: isVehiculo,
+                    origen: isVehiculo ? 'vehiculo' : isNomina ? 'nomina' : 'otros_gastos',
+                    readonly: isVehiculo || isNomina,
                     referencia: '',
                 };
             });
@@ -140,34 +142,6 @@ export class GastosController {
                 };
             });
             const pagosNomina = [];
-            nominas.forEach((n) => {
-                const abonosRaw = n.abonos;
-                const abonosArr = Array.isArray(abonosRaw) ? abonosRaw : typeof abonosRaw === 'string' ? JSON.parse(abonosRaw) : [];
-                if (abonosArr && abonosArr.length > 0) {
-                    abonosArr.forEach((ab, index) => {
-                        const startDate = new Date(n.fechaInicio);
-                        const startDay = startDate.getDate();
-                        const startMonth = startDate.toLocaleString('es-EC', { month: 'long' });
-                        const startYear = startDate.getFullYear();
-                        const quincenaText = startDay <= 15 ? '1era' : '2da';
-                        pagosNomina.push({
-                            id: `nomina-abono-${n.id}-${index}`,
-                            concepto: `Abono a Empleado ${n.empleado?.nombre || 'Sin nombre'} [${quincenaText} Quincena de ${startMonth} del ${startYear}]`,
-                            categoria: 'recursos_humanos',
-                            fecha: ab.fecha ? new Date(ab.fecha) : n.updatedAt,
-                            monto: Number(ab.monto || 0),
-                            proveedor: 'Personal',
-                            notas: ab.referencia || '',
-                            metodoPagoId: ab.metodoPagoId || null,
-                            metodoPago: null,
-                            registradoPor: null,
-                            origen: 'nomina',
-                            readonly: true,
-                            referencia: ab.referencia || '',
-                        });
-                    });
-                }
-            });
             const anticiposEmpleados = anticipos.map((ant) => ({
                 id: ant.id,
                 concepto: `Abono a Empleado ${ant.empleado?.nombre || 'Sin nombre'} [Anticipo]`,
@@ -480,24 +454,6 @@ export class GastosController {
                 }
                 egresosDetalle[methodId].total += monto;
             }
-            nominas.forEach(n => {
-                const abonosRaw = n.abonos;
-                const abonosArr = Array.isArray(abonosRaw) ? abonosRaw : typeof abonosRaw === 'string' ? JSON.parse(abonosRaw) : [];
-                if (abonosArr && abonosArr.length > 0) {
-                    abonosArr.forEach((ab) => {
-                        const abDate = ab.fecha ? new Date(ab.fecha) : n.updatedAt;
-                        if (abDate >= desdeDate && abDate <= hastaLimit) {
-                            const monto = Number(ab.monto || 0);
-                            totalEgresos += monto;
-                            const methodId = ab.metodoPagoId || 'no_especificado';
-                            if (!egresosDetalle[methodId]) {
-                                egresosDetalle[methodId] = { id: methodId, nombre: 'No especificado', total: 0 };
-                            }
-                            egresosDetalle[methodId].total += monto;
-                        }
-                    });
-                }
-            });
             // Registrar transferencias internas en los desgloses de cuentas individuales
             for (const t of transferencias) {
                 const monto = Number(t.monto);
@@ -923,19 +879,21 @@ export class GastosController {
                         const timeRef = new Date(g.createdAt);
                         combinedFecha.setUTCHours(timeRef.getUTCHours(), timeRef.getUTCMinutes(), timeRef.getUTCSeconds(), timeRef.getUTCMilliseconds());
                     }
+                    const cat = (g.categoria || '').toLowerCase();
+                    const isNom = cat === 'nomina' || cat === 'nominas' || cat === 'recursos_humanos';
                     movimientos.push({
                         id: g.id,
                         tipo: 'egreso',
-                        origen: 'gasto',
+                        origen: isNom ? 'pago_nomina' : 'gasto',
                         fecha: combinedFecha,
                         monto: Number(g.monto),
                         descripcion: g.concepto,
                         referencia: g.notas || '',
                         metodoPago: g.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: g.metodoPagoId,
-                        entidad: g.proveedor || g.categoria || '',
+                        entidad: g.proveedor || (isNom ? 'Personal' : g.categoria || ''),
                         usuario: g.registradoPor?.nombre || '—',
-                        categoria: g.categoria || 'Varios',
+                        categoria: isNom ? 'Nómina y Anticipos' : (g.categoria || 'Varios'),
                     });
                 }
                 // 3. EGRESOS — AbonoCompra
@@ -1009,34 +967,6 @@ export class GastosController {
                         categoria: 'Nómina y Anticipos',
                     });
                 }
-                const nominas = await prisma.nominaRegistro.findMany({
-                    include: { empleado: { select: { nombre: true } } }
-                });
-                nominas.forEach(n => {
-                    const abonosRaw = n.abonos;
-                    const abonosArr = Array.isArray(abonosRaw) ? abonosRaw : typeof abonosRaw === 'string' ? JSON.parse(abonosRaw) : [];
-                    if (abonosArr && abonosArr.length > 0) {
-                        abonosArr.forEach((ab, index) => {
-                            const abDate = ab.fecha ? new Date(ab.fecha) : n.updatedAt;
-                            if (abDate >= desdeDate && abDate <= hastaLimit) {
-                                movimientos.push({
-                                    id: `nomina-abono-${n.id}-${index}`,
-                                    tipo: 'egreso',
-                                    origen: 'pago_nomina',
-                                    fecha: abDate,
-                                    monto: Number(ab.monto || 0),
-                                    descripcion: `Pago Nómina - ${n.empleado?.nombre || 'Sin nombre'}`,
-                                    referencia: ab.referencia || `Liquidación nómina (${new Date(n.fechaInicio).toLocaleDateString()} al ${new Date(n.fechaFin).toLocaleDateString()})`,
-                                    metodoPago: 'No especificado',
-                                    metodoPagoId: ab.metodoPagoId || null,
-                                    entidad: 'Personal',
-                                    usuario: '—',
-                                    categoria: 'Nómina y Anticipos',
-                                });
-                            }
-                        });
-                    }
-                });
                 // 4. EGRESOS — Saldos pendientes de órdenes de compra (compromiso, no caja)
                 if (!metodoPagoId) {
                     const cxpPendientes = await prisma.cuentaPorPagar.findMany({
