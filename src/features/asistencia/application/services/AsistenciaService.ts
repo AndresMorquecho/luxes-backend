@@ -471,8 +471,7 @@ export class AsistenciaService {
       const medias = horasRedondeadas * 2; // number of 0.5-hour slots
       const suggestedTotal = Math.round(medias * valorMediaHoraExtra * 100) / 100;
 
-      const fechaDia = new Date(ahora);
-      fechaDia.setHours(0, 0, 0, 0);
+      const fechaDia = new Date(`${dateStr}T00:00:00.000Z`);
 
       const created = await prisma.horaExtra.create({
         data: {
