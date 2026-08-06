@@ -359,12 +359,21 @@ export class VehiculosController {
                 if (userRecord?.nombre)
                     usuarioNom = userRecord.nombre;
             }
+            const parseFechaControl = (val) => {
+                if (!val)
+                    return new Date();
+                const str = String(val);
+                if (str.includes('Z') || /[+-]\d{2}:\d{2}$/.test(str)) {
+                    return new Date(str);
+                }
+                return new Date(`${str}:00.000-05:00`);
+            };
             const control = await prisma.vehiculoControl.create({
                 data: {
                     vehiculoId: String(vehiculoId),
                     usuarioId,
                     usuarioNom,
-                    fecha: b.fecha ? new Date(b.fecha) : new Date(),
+                    fecha: parseFechaControl(b.fecha),
                     kilometraje: Number(b.kilometraje),
                     combustible: String(b.combustible),
                     nivelAceite: Boolean(b.nivelAceite),
