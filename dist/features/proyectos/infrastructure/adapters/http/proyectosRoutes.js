@@ -28,16 +28,15 @@ const storageEvidencia = multer.diskStorage({
 });
 const uploadDiseno = multer({
     storage: storageDiseno,
-    limits: { fileSize: 25 * 1024 * 1024 },
+    limits: { fileSize: 100 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-        const allowedTypes = /pdf|ai|psd|jpg|jpeg|png|webp|gif/;
-        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-        const mimetype = allowedTypes.test(file.mimetype);
-        if (extname && mimetype) {
+        const allowedExtensions = /\.(pdf|ai|psd|dxf|dwg|eps|cdr|svg|tif|tiff|jpg|jpeg|png|webp|gif|zip|rar|7z)$/i;
+        const extname = allowedExtensions.test(file.originalname.toLowerCase());
+        if (extname) {
             cb(null, true);
         }
         else {
-            cb(new Error('Tipo de archivo no permitido'));
+            cb(new Error('Tipo de archivo no permitido. Formatos permitidos: DXF, DWG, AI, PSD, PDF, EPS, CDR, SVG, TIF, JPG, PNG, WEBP, ZIP, RAR, 7Z'));
         }
     },
 });
