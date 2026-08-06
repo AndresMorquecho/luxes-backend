@@ -19,7 +19,6 @@ import { ProyectosController } from './features/proyectos/infrastructure/adapter
 import { createImpresionesModule } from './features/impresiones/infrastructure/composition/impresionesContainer.js';
 import { createGastosModule } from './features/gastos/infrastructure/composition/gastosContainer.js';
 import { createLandingRoutes } from './features/landing/infrastructure/routes/landingRoutes.js';
-import { migrateBase64FotosToFiles } from './scripts/migrateBase64FotosToFiles.js';
 async function bootstrap() {
     // Limpieza de rol y usuario "asistencia" residual en base de datos
     try {
@@ -330,10 +329,6 @@ async function bootstrap() {
     catch (error) {
         console.error('[Bootstrap] Error al sincronizar progreso de proyectos:', error);
     }
-    // Migrar fotos Base64 en segundo plano a archivos en disco
-    migrateBase64FotosToFiles().catch((err) => {
-        console.error('[Bootstrap] Error en migración de fotos:', err);
-    });
     const app = express();
     app.use(cors({ origin: env.corsOrigin }));
     app.use(express.json({ limit: '50mb' }));
