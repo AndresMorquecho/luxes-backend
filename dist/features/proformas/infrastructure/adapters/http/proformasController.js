@@ -151,6 +151,7 @@ function mapProforma(p) {
         fechaEnvio: toDateStr(p.fechaEnvio),
         fechaAprobacion: toDateTimeStr(p.fechaAprobacion),
         creadoPorUserId: p.creadoPorUserId || null,
+        createdAt: toDateTimeStr(p.createdAt),
         items: itemsMapped,
         abonos: abonosMapped,
     };
@@ -271,6 +272,14 @@ export class ProformasController {
             const id = await nextProformaId();
             const clienteId = await resolveClienteId(b.clienteId);
             const creadoPorUserId = req.user?.id || null;
+            let atiendeFinal = (b.atiende || '').trim();
+            if (!atiendeFinal && creadoPorUserId) {
+                const dbUser = await prisma.user.findUnique({
+                    where: { id: creadoPorUserId },
+                    select: { nombre: true, username: true }
+                });
+                atiendeFinal = dbUser?.nombre || dbUser?.username || '';
+            }
             const created = await prisma.proforma.create({
                 data: {
                     id,
@@ -282,7 +291,7 @@ export class ProformasController {
                     fecha: b.fecha ? new Date(b.fecha + (String(b.fecha).includes('T') ? '' : 'T12:00:00')) : new Date(),
                     vencimiento: b.vencimiento ? new Date(b.vencimiento + (String(b.vencimiento).includes('T') ? '' : 'T12:00:00')) : null,
                     diasValidez: Number(b.diasValidez ?? 3),
-                    atiende: b.atiende ?? req.user?.nombre ?? '',
+                    atiende: atiendeFinal,
                     condiciones: b.condiciones ?? '',
                     iva: Number(b.iva ?? 0.12),
                     notas: b.notas ?? '',
