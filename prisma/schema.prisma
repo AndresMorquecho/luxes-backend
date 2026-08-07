@@ -565,6 +565,7 @@ model Proforma {
   clienteNombre String         @map("cliente_nombre")
   telefono      String         @default("")
   email         String         @default("")
+  direccion     String         @default("")
   fecha         DateTime       @db.Date
   vencimiento   DateTime?      @db.Date
   diasValidez   Int            @default(3) @map("dias_validez")

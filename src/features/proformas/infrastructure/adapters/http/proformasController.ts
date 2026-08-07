@@ -115,18 +115,54 @@ async function notifyVentasEquipo(
 
 /** Mapea el registro Prisma a la forma que consume el frontend */
 function mapProforma(p: any) {
+  const itemsMapped = (p.items || [])
+    .slice()
+    .sort((a: any, b: any) => a.orden - b.orden)
+    .map((i: any) => ({
+      descripcion: i.descripcion,
+      cantidad: Number(i.cantidad),
+      precioUnitario: Number(i.precioUnitario),
+    }));
+
+  const subtotal = itemsMapped.reduce((s: number, i: any) => s + (i.cantidad * i.precioUnitario), 0);
+  const ivaNum = Number(p.iva ?? 0.12);
+  const total = subtotal * (1 + ivaNum);
+
+  const abonosMapped = (p.abonos || [])
+    .slice()
+    .sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
+    .map((ab: any) => ({
+      id: ab.id,
+      monto: Number(ab.monto),
+      fecha: toDateTimeStr(ab.fecha),
+      referencia: ab.referencia,
+      comprobanteUrl: ab.comprobanteUrl || null,
+      metodoPago: ab.metodoPago ? { id: ab.metodoPago.id, nombre: ab.metodoPago.nombre } : null,
+      registradoPor: ab.registradoPor ? { id: ab.registradoPor.id, nombre: ab.registradoPor.nombre } : null,
+    }));
+
+  const totalAbonado = abonosMapped.reduce((s: number, a: any) => s + a.monto, 0);
+  const saldoPendiente = Math.max(0, total - totalAbonado);
+  const excedente = Math.max(0, totalAbonado - total);
+
   return {
     id: p.id,
     clienteId: p.clienteId,
     cliente: p.clienteNombre,
     telefono: p.telefono,
     email: p.email,
+    direccion: p.direccion || p.cliente?.direccion || '',
     fecha: toDateStr(p.fecha),
     vencimiento: p.vencimiento ? toDateStr(p.vencimiento) : '',
     diasValidez: p.diasValidez,
     atiende: p.atiende,
     condiciones: p.condiciones,
-    iva: Number(p.iva),
+    iva: ivaNum,
+    subtotal,
+    total,
+    totalAbonado,
+    saldoPendiente,
+    excedente,
     notas: p.notas,
     medio: p.medio || 'LUXES',
     estado: p.estado,
@@ -135,26 +171,8 @@ function mapProforma(p: any) {
     fechaEnvio: toDateStr(p.fechaEnvio),
     fechaAprobacion: toDateTimeStr(p.fechaAprobacion),
     creadoPorUserId: p.creadoPorUserId || null,
-    items: (p.items || [])
-      .slice()
-      .sort((a: any, b: any) => a.orden - b.orden)
-      .map((i: any) => ({
-        descripcion: i.descripcion,
-        cantidad: Number(i.cantidad),
-        precioUnitario: Number(i.precioUnitario),
-      })),
-    abonos: (p.abonos || [])
-      .slice()
-      .sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
-      .map((ab: any) => ({
-        id: ab.id,
-        monto: Number(ab.monto),
-        fecha: toDateTimeStr(ab.fecha),
-        referencia: ab.referencia,
-        comprobanteUrl: ab.comprobanteUrl || null,
-        metodoPago: ab.metodoPago ? { id: ab.metodoPago.id, nombre: ab.metodoPago.nombre } : null,
-        registradoPor: ab.registradoPor ? { id: ab.registradoPor.id, nombre: ab.registradoPor.nombre } : null,
-      })),
+    items: itemsMapped,
+    abonos: abonosMapped,
   };
 }
 
@@ -266,7 +284,7 @@ export class ProformasController {
       const [proformas, total] = await Promise.all([
         prisma.proforma.findMany({
           where,
-          include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
+          include: { cliente: true, items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
           orderBy: { fecha: 'desc' },
           skip,
           take: limitNum,
@@ -303,6 +321,7 @@ export class ProformasController {
           clienteNombre: b.cliente ?? b.clienteNombre ?? '',
           telefono: b.telefono ?? '',
           email: b.email ?? '',
+          direccion: b.direccion ?? '',
           fecha: b.fecha ? new Date(b.fecha + (String(b.fecha).includes('T') ? '' : 'T12:00:00')) : new Date(),
           vencimiento: b.vencimiento ? new Date(b.vencimiento + (String(b.vencimiento).includes('T') ? '' : 'T12:00:00')) : null,
           diasValidez: Number(b.diasValidez ?? 3),
@@ -316,7 +335,7 @@ export class ProformasController {
           creadoPorUserId,
           items: { create: buildItems(b.items) },
         },
-        include: { items: true, metodoPago: true },
+        include: { cliente: true, items: true, metodoPago: true },
       });
 
       // Generar notificaciones para los administradores si la proforma se crea en estado Pendiente
@@ -350,10 +369,9 @@ export class ProformasController {
       const b = req.body || {};
       const clienteId = await resolveClienteId(b.clienteId);
 
-      // Obtener el estado actual antes de la actualización para detectar si estaba rechazada
       const existingProforma = await prisma.proforma.findUnique({
         where: { id: String(id) },
-        select: { estado: true }
+        include: { abonos: true },
       });
 
       if (!existingProforma) {
@@ -364,12 +382,24 @@ export class ProformasController {
       const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
       const isVentasODisenador = ['VENTAS', 'DISEÑADOR', 'DISENADOR'].includes(userRole);
 
-      if (!isAdmin) {
-        if (!isVentasODisenador) {
-          return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'No tienes permiso para editar proformas' } });
-        }
-        if (existingProforma.estado !== 'Rechazada') {
-          return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Solo se pueden editar proformas en estado Rechazada' } });
+      if (!isAdmin && !isVentasODisenador) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'No tienes permiso para editar proformas' } });
+      }
+
+      const itemsToBuild = buildItems(b.items);
+      const subtotalCalc = itemsToBuild.reduce((s, i) => s + (i.cantidad * i.precioUnitario), 0);
+      const ivaValCalc = Number(b.iva ?? existingProforma.iva ?? 0.12);
+      const nuevoTotalCalc = subtotalCalc * (1 + ivaValCalc);
+      const totalAbonado = (existingProforma.abonos || []).reduce((sum, a) => sum + Number(a.monto), 0);
+
+      let targetEstado = b.estado ?? existingProforma.estado;
+      if (existingProforma.estado === 'Rechazada') {
+        targetEstado = 'Pendiente';
+      } else if (existingProforma.estado === 'Aprobada' || existingProforma.estado === 'Pagada') {
+        if (totalAbonado >= (nuevoTotalCalc - 0.01)) {
+          targetEstado = 'Pagada';
+        } else {
+          targetEstado = 'Aprobada';
         }
       }
 
@@ -381,6 +411,7 @@ export class ProformasController {
           clienteNombre: b.cliente ?? b.clienteNombre ?? '',
           telefono: b.telefono ?? '',
           email: b.email ?? '',
+          direccion: b.direccion ?? '',
           fecha: b.fecha ? new Date(String(b.fecha).includes('T') ? b.fecha : `${b.fecha}T12:00:00`) : undefined,
           vencimiento: b.vencimiento ? new Date(String(b.vencimiento).includes('T') ? b.vencimiento : `${b.vencimiento}T12:00:00`) : null,
           diasValidez: Number(b.diasValidez ?? 3),
@@ -389,14 +420,14 @@ export class ProformasController {
           iva: Number(b.iva ?? 0.12),
           notas: b.notas ?? '',
           medio: b.medio ?? 'LUXES',
-          estado: b.estado ?? 'Pendiente',
+          estado: targetEstado,
           metodoPagoId: b.metodoPagoId || null,
           items: {
             deleteMany: {},
-            create: buildItems(b.items),
+            create: itemsToBuild,
           },
         },
-        include: { items: true, metodoPago: true },
+        include: { cliente: true, items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
       });
       const mappedUpdated = mapProforma(updated);
 
@@ -518,6 +549,7 @@ export class ProformasController {
       const proforma = await prisma.proforma.findUnique({
         where: { id: String(id) },
         include: {
+          cliente: true,
           items: true,
           metodoPago: true,
           abonos: {

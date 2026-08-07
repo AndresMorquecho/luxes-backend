@@ -13,6 +13,7 @@ export interface ProformaInput {
   cliente: string;
   telefono?: string;
   email?: string;
+  direccion?: string;
   fecha: string;
   vencimiento?: string;
   items: ProformaItemInput[];
@@ -38,6 +39,7 @@ const mapProforma = (record: {
   clienteNombre: string;
   telefono: string;
   email: string;
+  direccion?: string;
   fecha: Date;
   vencimiento: Date | null;
   iva: Prisma.Decimal;
@@ -56,6 +58,7 @@ const mapProforma = (record: {
   cliente: record.clienteNombre,
   telefono: record.telefono,
   email: record.email,
+  direccion: record.direccion ?? '',
   fecha: formatDate(record.fecha),
   vencimiento: formatDate(record.vencimiento),
   items: record.items
@@ -100,6 +103,7 @@ export class PrismaProformasPersistence {
       clienteNombre: input.cliente,
       telefono: input.telefono ?? '',
       email: input.email ?? '',
+      direccion: input.direccion ?? '',
       fecha,
       vencimiento: toDate(input.vencimiento),
       iva: input.iva ?? 0.12,
