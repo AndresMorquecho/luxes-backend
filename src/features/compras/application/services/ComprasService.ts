@@ -5,6 +5,7 @@ import type {
   MetodoPagoData,
   AbonoCompraData,
   CuentaPorPagarData,
+  CreateCuentaPorPagarManualInput,
   DetalleCompraInput,
   DetalleCompraData,
 } from '../../domain/ports/ComprasRepositoryPort.js';
@@ -305,6 +306,16 @@ export class ComprasService {
     estado?: string;
   }): Promise<{ items: CuentaPorPagarData[]; total: number }> {
     return this.repo.findAllCuentasPorPagar(options);
+  }
+
+  async createCuentaPorPagarManual(input: CreateCuentaPorPagarManualInput): Promise<CuentaPorPagarData> {
+    if (!input.concepto || !input.concepto.trim()) {
+      throw new Error('El concepto o descripción de la cuenta es requerido.');
+    }
+    if (!input.montoTotal || Number(input.montoTotal) <= 0) {
+      throw new Error('El monto total debe ser mayor a 0.');
+    }
+    return this.repo.createCuentaPorPagarManual(input);
   }
 
   // ── Métodos de Pago ────────────────────────────────────────────────────────

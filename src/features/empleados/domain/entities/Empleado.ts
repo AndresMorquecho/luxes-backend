@@ -2,6 +2,7 @@ export interface EmpleadoProps {
   id: string;
   nombre: string;
   cedula: string;
+  fechaNacimiento?: string | null;
   telefono: string;
   correo: string;
   cuentaBanco: string;
@@ -24,6 +25,7 @@ export class Empleado {
   readonly id: string;
   readonly nombre: string;
   readonly cedula: string;
+  readonly fechaNacimiento?: string | null;
   readonly telefono: string;
   readonly correo: string;
   readonly cuentaBanco: string;
@@ -45,6 +47,7 @@ export class Empleado {
     this.id = props.id;
     this.nombre = props.nombre;
     this.cedula = props.cedula;
+    this.fechaNacimiento = props.fechaNacimiento ?? null;
     this.telefono = props.telefono;
     this.correo = props.correo;
     this.cuentaBanco = props.cuentaBanco;
@@ -68,6 +71,7 @@ export class Empleado {
       id: this.id,
       nombre: this.nombre,
       cedula: this.cedula,
+      fechaNacimiento: this.fechaNacimiento,
       telefono: this.telefono,
       correo: this.correo,
       cuentaBanco: this.cuentaBanco,

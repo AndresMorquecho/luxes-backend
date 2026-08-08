@@ -378,6 +378,7 @@ model Empleado {
   id           String             @id
   nombre       String
   cedula       String             @unique
+  fechaNacimiento DateTime?       @map("fecha_nacimiento") @db.Date
   telefono     String             @default("")
   correo       String             @default("")
   cuentaBanco  String             @default("") @map("cuenta_banco")

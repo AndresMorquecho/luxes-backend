@@ -6,6 +6,7 @@ import type {
   MetodoPagoData,
   AbonoCompraData,
   CuentaPorPagarData,
+  CreateCuentaPorPagarManualInput,
   DetalleCompraInput,
   DetalleCompraData,
 } from '../../../domain/ports/ComprasRepositoryPort.js';
@@ -1098,6 +1099,130 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       include: { ordenCompra: { include: { proveedor: true } } },
     });
     return row as unknown as CuentaPorPagarData;
+  }
+
+  async createCuentaPorPagarManual(input: CreateCuentaPorPagarManualInput): Promise<CuentaPorPagarData> {
+    const {
+      usuarioId,
+      proveedorId,
+      proveedorNombreManual,
+      concepto,
+      montoTotal,
+      fechaEmision,
+      fechaVencimiento,
+      proyectoId,
+      notas,
+      abonoInicial,
+    } = input;
+
+    // 1. Obtener o crear proveedor si es nombre manual
+    let finalProveedorId = proveedorId && proveedorId.trim() !== '' ? proveedorId : null;
+    if (!finalProveedorId && proveedorNombreManual && proveedorNombreManual.trim() !== '') {
+      const existing = await this.prisma.proveedor.findFirst({
+        where: { nombre: { equals: proveedorNombreManual.trim(), mode: 'insensitive' } },
+      });
+      if (existing) {
+        finalProveedorId = existing.id;
+      } else {
+        const newProv = await this.prisma.proveedor.create({
+          data: {
+            nombre: proveedorNombreManual.trim(),
+            estado: 'activo',
+          },
+        });
+        finalProveedorId = newProv.id;
+      }
+    }
+
+    // 2. Generar número de orden manual
+    const countManual = await this.prisma.ordenCompra.count({
+      where: { numero: { startsWith: 'ORC_MAN_' } },
+    });
+    const numero = `ORC_MAN_${String(countManual + 1).padStart(3, '0')}`;
+
+    const fechaEmisionDate = fechaEmision ? new Date(fechaEmision) : new Date();
+    const fechaVencimientoDate = fechaVencimiento ? new Date(fechaVencimiento) : null;
+
+    const abonoMonto = (abonoInicial && Number(abonoInicial.monto) > 0) ? Number(abonoInicial.monto) : 0;
+    const initialSaldo = Math.max(0, montoTotal - abonoMonto);
+    const initialEstado = initialSaldo <= 0 ? 'pagado' : abonoMonto > 0 ? 'parcial' : 'pendiente';
+    const estadoPagoOrden = initialEstado === 'pendiente' ? 'sin_pagar' : initialEstado;
+
+    // 3. Crear OrdenCompra + DetalleCompra + CuentaPorPagar
+    const orden = await this.prisma.ordenCompra.create({
+      data: {
+        numero,
+        usuarioId,
+        proveedorId: finalProveedorId,
+        fecha: fechaEmisionDate,
+        subtotal: montoTotal,
+        impuesto: 0,
+        total: montoTotal,
+        concepto: concepto || 'Cuenta por pagar manual',
+        notas: notas || null,
+        estado: 'aprobada',
+        estadoPago: estadoPagoOrden,
+        proyectoId: proyectoId || null,
+        detalles: {
+          create: [
+            {
+              descripcion: concepto || 'Cuenta por pagar manual',
+              cantidad: 1,
+              precioUnitario: montoTotal,
+              subtotal: montoTotal,
+            },
+          ],
+        },
+        cuentaPorPagar: {
+          create: {
+            montoTotal,
+            montoPagado: abonoMonto,
+            saldo: initialSaldo,
+            fechaVencimiento: fechaVencimientoDate,
+            estado: initialEstado,
+          },
+        },
+      },
+      include: {
+        cuentaPorPagar: true,
+        proveedor: true,
+      },
+    });
+
+    // 4. Registrar Abono / Cheque si se especificó abonoInicial
+    if (abonoMonto > 0 && abonoInicial?.metodoPagoId) {
+      await this.prisma.abonoCompra.create({
+        data: {
+          ordenCompraId: orden.id,
+          metodoPagoId: abonoInicial.metodoPagoId,
+          monto: abonoMonto,
+          referencia: abonoInicial.referencia || 'Abono inicial al registrar cuenta',
+          registradoPorUserId: usuarioId,
+        },
+      });
+
+      if (abonoInicial.esChequePosfechado && abonoInicial.numeroCheque && abonoInicial.fechaCobro) {
+        await this.prisma.chequeCompra.create({
+          data: {
+            ordenCompraId: orden.id,
+            metodoPagoId: abonoInicial.metodoPagoId,
+            numeroCheque: abonoInicial.numeroCheque,
+            monto: abonoMonto,
+            fechaCobro: new Date(abonoInicial.fechaCobro),
+            referencia: abonoInicial.referencia || null,
+            registradoPorUserId: usuarioId,
+            estado: 'PENDIENTE',
+          },
+        });
+      }
+    }
+
+    const createdCxP = await this.prisma.cuentaPorPagar.findUnique({
+      where: { id: orden.cuentaPorPagar!.id },
+      include: { ordenCompra: { include: { proveedor: true } } },
+    });
+
+    return createdCxP as unknown as CuentaPorPagarData;
   }
 
   // ── Métodos de Pago ────────────────────────────────────────────────────────

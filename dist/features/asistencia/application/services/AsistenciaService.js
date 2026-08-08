@@ -78,116 +78,149 @@ export class AsistenciaService {
     constructor(asistenciaRepository) {
         this.asistenciaRepository = asistenciaRepository;
     }
+    static autoAsistenciaPromise = null;
     async evaluarAutoAsistencias() {
-        try {
-            let empsAuto = [];
+        if (AsistenciaService.autoAsistenciaPromise) {
+            return AsistenciaService.autoAsistenciaPromise;
+        }
+        AsistenciaService.autoAsistenciaPromise = (async () => {
             try {
-                empsAuto = await prisma.empleado.findMany({
-                    where: { autoAsistencia: true },
-                    select: { id: true, nombre: true, tipoContrato: true },
-                });
+                let empsAuto = [];
+                try {
+                    empsAuto = await prisma.empleado.findMany({
+                        where: { autoAsistencia: true },
+                        select: { id: true, nombre: true, tipoContrato: true },
+                    });
+                }
+                catch {
+                    empsAuto = [];
+                }
+                if (!empsAuto || empsAuto.length === 0)
+                    return;
+                const ahoraUTC = new Date();
+                const ahoraEC = new Date(ahoraUTC.getTime() - 5 * 60 * 60 * 1000);
+                const dayOfWeek = ahoraEC.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
+                // Si es Domingo, no se realiza marcación automática (Día de descanso)
+                if (dayOfWeek === 0)
+                    return;
+                const hoyStr = ahoraEC.toISOString().split('T')[0];
+                const { diaConfig } = await getHorarioDelDia(hoyStr);
+                if (!diaConfig)
+                    return;
+                const currentMinutes = ahoraEC.getHours() * 60 + ahoraEC.getMinutes();
+                const parseMin = (timeStr) => {
+                    if (!timeStr || typeof timeStr !== 'string')
+                        return null;
+                    const [h, m] = timeStr.split(':').map(Number);
+                    if (isNaN(h) || isNaN(m))
+                        return null;
+                    return h * 60 + m;
+                };
+                const entradaMin = parseMin(diaConfig.entrada) ?? (dayOfWeek === 6 ? 9 * 60 : 8 * 60);
+                const inicioAlmMin = parseMin(diaConfig.inicioAlmuerzo);
+                const finAlmMin = parseMin(diaConfig.finAlmuerzo);
+                const salidaMin = parseMin(diaConfig.salida) ?? (dayOfWeek === 6 ? 14 * 60 : 17 * 60 + 30);
+                const LUXES_OFFICE_LAT = -2.14000;
+                const LUXES_OFFICE_LNG = -79.60597;
+                const startOfDay = new Date(`${hoyStr}T00:00:00.000-05:00`);
+                const endOfDay = new Date(`${hoyStr}T23:59:59.999-05:00`);
+                for (const emp of empsAuto) {
+                    const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(emp.id);
+                    let hasEntrada = todayMarks.some((m) => m.tipo === 'ENTRADA');
+                    let hasInicioAlm = todayMarks.some((m) => m.tipo === 'INICIO_ALMUERZO');
+                    let hasFinAlm = todayMarks.some((m) => m.tipo === 'FIN_ALMUERZO');
+                    let hasSalida = todayMarks.some((m) => m.tipo === 'SALIDA');
+                    const hasPermiso = todayMarks.some((m) => m.tipo === 'PERMISO');
+                    if (hasPermiso)
+                        continue;
+                    // 1. ENTRADA
+                    if (currentMinutes >= entradaMin && !hasEntrada) {
+                        const exists = await prisma.asistencia.findFirst({
+                            where: { empleadoId: emp.id, tipo: 'ENTRADA', fechaHora: { gte: startOfDay, lte: endOfDay } },
+                        });
+                        if (!exists) {
+                            const horaEntrada = diaConfig.entrada || (dayOfWeek === 6 ? '09:00' : '08:00');
+                            const dtEntrada = new Date(`${hoyStr}T${horaEntrada}:00.000-05:00`);
+                            await this.asistenciaRepository.create({
+                                empleadoId: emp.id,
+                                tipo: 'ENTRADA',
+                                label: 'Entrada',
+                                fechaHora: dtEntrada.toISOString(),
+                                ubicacionLat: LUXES_OFFICE_LAT,
+                                ubicacionLng: LUXES_OFFICE_LNG,
+                            });
+                        }
+                        hasEntrada = true;
+                    }
+                    // 2. INICIO_ALMUERZO (Solo si el día tiene horario de almuerzo configurado)
+                    if (inicioAlmMin !== null && currentMinutes >= inicioAlmMin && hasEntrada && !hasInicioAlm) {
+                        const exists = await prisma.asistencia.findFirst({
+                            where: { empleadoId: emp.id, tipo: 'INICIO_ALMUERZO', fechaHora: { gte: startOfDay, lte: endOfDay } },
+                        });
+                        if (!exists) {
+                            const horaInicioAlm = diaConfig.inicioAlmuerzo || '13:00';
+                            const dtInicioAlm = new Date(`${hoyStr}T${horaInicioAlm}:00.000-05:00`);
+                            await this.asistenciaRepository.create({
+                                empleadoId: emp.id,
+                                tipo: 'INICIO_ALMUERZO',
+                                label: 'Salida Almuerzo',
+                                fechaHora: dtInicioAlm.toISOString(),
+                                ubicacionLat: LUXES_OFFICE_LAT,
+                                ubicacionLng: LUXES_OFFICE_LNG,
+                            });
+                        }
+                        hasInicioAlm = true;
+                    }
+                    // 3. FIN_ALMUERZO (Solo si inició almuerzo y el día contempla fin de almuerzo)
+                    if (finAlmMin !== null && currentMinutes >= finAlmMin && hasInicioAlm && !hasFinAlm) {
+                        const exists = await prisma.asistencia.findFirst({
+                            where: { empleadoId: emp.id, tipo: 'FIN_ALMUERZO', fechaHora: { gte: startOfDay, lte: endOfDay } },
+                        });
+                        if (!exists) {
+                            const horaFinAlm = diaConfig.finAlmuerzo || '14:00';
+                            const dtFinAlm = new Date(`${hoyStr}T${horaFinAlm}:00.000-05:00`);
+                            await this.asistenciaRepository.create({
+                                empleadoId: emp.id,
+                                tipo: 'FIN_ALMUERZO',
+                                label: 'Regreso Almuerzo',
+                                fechaHora: dtFinAlm.toISOString(),
+                                ubicacionLat: LUXES_OFFICE_LAT,
+                                ubicacionLng: LUXES_OFFICE_LNG,
+                            });
+                        }
+                        hasFinAlm = true;
+                    }
+                    // 4. SALIDA
+                    const canMarkSalida = hasFinAlm || (diaConfig.almuerzoOpcional && hasEntrada) || hasEntrada;
+                    if (currentMinutes >= salidaMin && canMarkSalida && !hasSalida) {
+                        const exists = await prisma.asistencia.findFirst({
+                            where: { empleadoId: emp.id, tipo: 'SALIDA', fechaHora: { gte: startOfDay, lte: endOfDay } },
+                        });
+                        if (!exists) {
+                            const horaSalida = diaConfig.salida || (dayOfWeek === 6 ? '14:00' : '17:30');
+                            const dtSalida = new Date(`${hoyStr}T${horaSalida}:00.000-05:00`);
+                            await this.asistenciaRepository.create({
+                                empleadoId: emp.id,
+                                tipo: 'SALIDA',
+                                label: 'Salida Trabajo',
+                                fechaHora: dtSalida.toISOString(),
+                                ubicacionLat: LUXES_OFFICE_LAT,
+                                ubicacionLng: LUXES_OFFICE_LNG,
+                            });
+                            await incrementarDiasLaborados(emp.id, dtSalida);
+                        }
+                        hasSalida = true;
+                    }
+                }
             }
-            catch {
-                empsAuto = [];
+            catch (err) {
+                console.error('[evaluarAutoAsistencias] Error:', err);
             }
-            if (!empsAuto || empsAuto.length === 0)
-                return;
-            const ahoraUTC = new Date();
-            const ahoraEC = new Date(ahoraUTC.getTime() - 5 * 60 * 60 * 1000);
-            const dayOfWeek = ahoraEC.getDay(); // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
-            // Si es Domingo, no se realiza marcación automática (Día de descanso)
-            if (dayOfWeek === 0)
-                return;
-            const hoyStr = ahoraEC.toISOString().split('T')[0];
-            const { diaConfig } = await getHorarioDelDia(hoyStr);
-            if (!diaConfig)
-                return;
-            const currentMinutes = ahoraEC.getHours() * 60 + ahoraEC.getMinutes();
-            const parseMin = (timeStr) => {
-                if (!timeStr || typeof timeStr !== 'string')
-                    return null;
-                const [h, m] = timeStr.split(':').map(Number);
-                if (isNaN(h) || isNaN(m))
-                    return null;
-                return h * 60 + m;
-            };
-            const entradaMin = parseMin(diaConfig.entrada) ?? (dayOfWeek === 6 ? 9 * 60 : 8 * 60);
-            const inicioAlmMin = parseMin(diaConfig.inicioAlmuerzo);
-            const finAlmMin = parseMin(diaConfig.finAlmuerzo);
-            const salidaMin = parseMin(diaConfig.salida) ?? (dayOfWeek === 6 ? 14 * 60 : 17 * 60 + 30);
-            const LUXES_OFFICE_LAT = -2.14000;
-            const LUXES_OFFICE_LNG = -79.60597;
-            for (const emp of empsAuto) {
-                const todayMarks = await this.asistenciaRepository.findTodayByEmpleado(emp.id);
-                const hasEntrada = todayMarks.some((m) => m.tipo === 'ENTRADA');
-                const hasInicioAlm = todayMarks.some((m) => m.tipo === 'INICIO_ALMUERZO');
-                const hasFinAlm = todayMarks.some((m) => m.tipo === 'FIN_ALMUERZO');
-                const hasSalida = todayMarks.some((m) => m.tipo === 'SALIDA');
-                const hasPermiso = todayMarks.some((m) => m.tipo === 'PERMISO');
-                if (hasPermiso)
-                    continue;
-                // 1. ENTRADA
-                if (currentMinutes >= entradaMin && !hasEntrada) {
-                    const horaEntrada = diaConfig.entrada || (dayOfWeek === 6 ? '09:00' : '08:00');
-                    const dtEntrada = new Date(`${hoyStr}T${horaEntrada}:00.000-05:00`);
-                    await this.asistenciaRepository.create({
-                        empleadoId: emp.id,
-                        tipo: 'ENTRADA',
-                        label: 'Entrada',
-                        fechaHora: dtEntrada.toISOString(),
-                        ubicacionLat: LUXES_OFFICE_LAT,
-                        ubicacionLng: LUXES_OFFICE_LNG,
-                    });
-                    continue;
-                }
-                // 2. INICIO_ALMUERZO (Solo si el día tiene horario de almuerzo configurado)
-                if (inicioAlmMin !== null && currentMinutes >= inicioAlmMin && hasEntrada && !hasInicioAlm) {
-                    const horaInicioAlm = diaConfig.inicioAlmuerzo || '13:00';
-                    const dtInicioAlm = new Date(`${hoyStr}T${horaInicioAlm}:00.000-05:00`);
-                    await this.asistenciaRepository.create({
-                        empleadoId: emp.id,
-                        tipo: 'INICIO_ALMUERZO',
-                        label: 'Salida Almuerzo',
-                        fechaHora: dtInicioAlm.toISOString(),
-                        ubicacionLat: LUXES_OFFICE_LAT,
-                        ubicacionLng: LUXES_OFFICE_LNG,
-                    });
-                    continue;
-                }
-                // 3. FIN_ALMUERZO (Solo si inició almuerzo y el día contempla fin de almuerzo)
-                if (finAlmMin !== null && currentMinutes >= finAlmMin && hasInicioAlm && !hasFinAlm) {
-                    const horaFinAlm = diaConfig.finAlmuerzo || '14:00';
-                    const dtFinAlm = new Date(`${hoyStr}T${horaFinAlm}:00.000-05:00`);
-                    await this.asistenciaRepository.create({
-                        empleadoId: emp.id,
-                        tipo: 'FIN_ALMUERZO',
-                        label: 'Regreso Almuerzo',
-                        fechaHora: dtFinAlm.toISOString(),
-                        ubicacionLat: LUXES_OFFICE_LAT,
-                        ubicacionLng: LUXES_OFFICE_LNG,
-                    });
-                    continue;
-                }
-                // 4. SALIDA
-                const canMarkSalida = hasFinAlm || (diaConfig.almuerzoOpcional && hasEntrada) || hasEntrada;
-                if (currentMinutes >= salidaMin && canMarkSalida && !hasSalida) {
-                    const horaSalida = diaConfig.salida || (dayOfWeek === 6 ? '14:00' : '17:30');
-                    const dtSalida = new Date(`${hoyStr}T${horaSalida}:00.000-05:00`);
-                    await this.asistenciaRepository.create({
-                        empleadoId: emp.id,
-                        tipo: 'SALIDA',
-                        label: 'Salida Trabajo',
-                        fechaHora: dtSalida.toISOString(),
-                        ubicacionLat: LUXES_OFFICE_LAT,
-                        ubicacionLng: LUXES_OFFICE_LNG,
-                    });
-                    await incrementarDiasLaborados(emp.id, dtSalida);
-                }
+            finally {
+                AsistenciaService.autoAsistenciaPromise = null;
             }
-        }
-        catch (err) {
-            console.error('[evaluarAutoAsistencias] Error:', err);
-        }
+        })();
+        return AsistenciaService.autoAsistenciaPromise;
     }
     async getAutoAsistenciaStatus(empleadoId) {
         try {
@@ -657,5 +690,162 @@ export class AsistenciaService {
                 fechaHora: { gte: start, lte: end },
             },
         });
+    }
+    async adminEditarONuevaMarcacion(input) {
+        const { asistenciaId, empleadoId, tipo, fechaHora, eliminarMultaAsociada } = input;
+        const empleado = await prisma.empleado.findUnique({
+            where: { id: empleadoId },
+            select: { id: true, nombre: true },
+        });
+        if (!empleado) {
+            throw new Error(`Empleado con ID '${empleadoId}' no encontrado.`);
+        }
+        const targetDate = new Date(fechaHora);
+        if (isNaN(targetDate.getTime())) {
+            throw new Error(`La fecha u hora ingresada no es válida (${fechaHora}).`);
+        }
+        const ecTimeStr = new Date(targetDate.getTime() - 5 * 3600 * 1000).toISOString();
+        const dateStr = ecTimeStr.slice(0, 10);
+        const horaMarcacionStr = ecTimeStr.slice(11, 16);
+        const labelMap = {
+            ENTRADA: 'Entrada',
+            INICIO_ALMUERZO: 'Salida Almuerzo',
+            FIN_ALMUERZO: 'Regreso Almuerzo',
+            SALIDA: 'Salida',
+        };
+        const label = labelMap[tipo] || tipo;
+        let resultAsistencia;
+        if (asistenciaId) {
+            resultAsistencia = await prisma.asistencia.update({
+                where: { id: asistenciaId },
+                data: {
+                    tipo,
+                    label,
+                    fechaHora: targetDate,
+                },
+            });
+        }
+        else {
+            resultAsistencia = await prisma.asistencia.create({
+                data: {
+                    empleadoId,
+                    tipo,
+                    label,
+                    fechaHora: targetDate.toISOString(),
+                },
+            });
+        }
+        // ── Lógica de Multas (Eliminación o Recálculo sin duplicar) ───────────
+        try {
+            const { fechaInicio, fechaFin } = getQuincenaPeriod(targetDate);
+            const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
+            const periodEnd = new Date(`${fechaFin}T23:59:59.999Z`);
+            const defaultIng = { horasExtras: 0, trabajosEnEmpresa: 0, fondosReserva: 0 };
+            const defaultEgr = { extensionConyuge: 0, prestamoQuirografario: 0, anticipos: 0, multas: 0, dctoFiesta: 0, dctoHerramientas: 0, dctoGenerico: 0, permisosDetalle: [] };
+            let existingNomina = await prisma.nominaRegistro.findFirst({
+                where: { empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+            });
+            if (!existingNomina) {
+                existingNomina = await prisma.nominaRegistro.create({
+                    data: {
+                        empleadoId,
+                        fechaInicio: periodStart,
+                        fechaFin: periodEnd,
+                        diasLaborables: 15,
+                        diasLaborados: 0,
+                        permisoHoras: 0,
+                        ingresos: defaultIng,
+                        egresos: defaultEgr,
+                        abonos: [],
+                        estado: 'PENDIENTE',
+                    },
+                });
+            }
+            const egresosObj = typeof existingNomina.egresos === 'string'
+                ? JSON.parse(existingNomina.egresos)
+                : (existingNomina.egresos || defaultEgr);
+            let permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? [...egresosObj.permisosDetalle] : [];
+            const targetFineType = tipo === 'ENTRADA' ? 'ATRASO_QR' : tipo === 'FIN_ALMUERZO' ? 'ATRASO_QR_ALMUERZO' : null;
+            if (eliminarMultaAsociada && targetFineType) {
+                permisosDetalle = permisosDetalle.filter((p) => !(p.fecha === dateStr && p.tipo === targetFineType));
+            }
+            else if (!eliminarMultaAsociada && targetFineType) {
+                // Evaluar si el nuevo horario genera atraso usando la misma fórmula de tramos del QR
+                const { diaConfig } = await getHorarioDelDia(dateStr);
+                const { calcularMultaAtraso } = await import('../../../../shared/utils/horarioLaboralHelpers.js');
+                let multaDolares = 0;
+                let atrasoMinutos = 0;
+                let motivoStr = '';
+                if (tipo === 'ENTRADA' && diaConfig?.entrada) {
+                    const [eh, em] = diaConfig.entrada.split(':').map(Number);
+                    const [mh, mm] = horaMarcacionStr.split(':').map(Number);
+                    atrasoMinutos = (mh * 60 + mm) - (eh * 60 + em);
+                    const tolerancia = Number(diaConfig?.toleranciaEntrada ?? 8);
+                    multaDolares = calcularMultaAtraso(atrasoMinutos, tolerancia);
+                    if (multaDolares > 0) {
+                        motivoStr = `Atraso entrada QR ${horaMarcacionStr} (+${atrasoMinutos} min)`;
+                    }
+                }
+                else if (tipo === 'FIN_ALMUERZO') {
+                    const dayStart = new Date(`${dateStr}T00:00:00.000-05:00`);
+                    const dayEnd = new Date(`${dateStr}T23:59:59.999-05:00`);
+                    const inicioAlm = await prisma.asistencia.findFirst({
+                        where: { empleadoId, tipo: 'INICIO_ALMUERZO', fechaHora: { gte: dayStart, lte: dayEnd } },
+                    });
+                    if (inicioAlm) {
+                        const diffMins = (targetDate.getTime() - new Date(inicioAlm.fechaHora).getTime()) / 60000;
+                        const configuredMins = diaConfig?.inicioAlmuerzo && diaConfig?.finAlmuerzo
+                            ? (Number(diaConfig.finAlmuerzo.split(':')[0]) * 60 + Number(diaConfig.finAlmuerzo.split(':')[1])) -
+                                (Number(diaConfig.inicioAlmuerzo.split(':')[0]) * 60 + Number(diaConfig.inicioAlmuerzo.split(':')[1]))
+                            : 60;
+                        atrasoMinutos = Math.round(diffMins - configuredMins);
+                        const tolerancia = Number(diaConfig?.toleranciaAlmuerzo ?? 8);
+                        multaDolares = calcularMultaAtraso(atrasoMinutos, tolerancia);
+                        if (multaDolares > 0) {
+                            motivoStr = `Atraso reg. almuerzo QR ${horaMarcacionStr} (+${atrasoMinutos} min)`;
+                        }
+                    }
+                }
+                const existingIndex = permisosDetalle.findIndex((p) => p.fecha === dateStr && p.tipo === targetFineType);
+                if (multaDolares > 0) {
+                    const fineItem = {
+                        id: existingIndex >= 0 ? permisosDetalle[existingIndex].id : `qr-${tipo.toLowerCase()}-${Date.now()}`,
+                        fecha: dateStr,
+                        horaMarcacion: horaMarcacionStr,
+                        horas: multaDolares,
+                        multaDolares,
+                        atrasoMinutos: Math.round(atrasoMinutos),
+                        motivo: motivoStr,
+                        tipo: targetFineType,
+                    };
+                    if (existingIndex >= 0) {
+                        permisosDetalle[existingIndex] = fineItem; // Actualizar existente en vez de duplicar
+                    }
+                    else {
+                        permisosDetalle.push(fineItem);
+                    }
+                }
+                else {
+                    // Si el horario ingresado NO es atrasado, eliminar cualquier multa previa existente para este día
+                    if (existingIndex >= 0) {
+                        permisosDetalle.splice(existingIndex, 1);
+                    }
+                }
+            }
+            const newPermisoHoras = permisosDetalle
+                .filter((r) => !r.eliminado)
+                .reduce((sum, item) => sum + Number(item.multaDolares ?? item.horas ?? 0), 0);
+            await prisma.nominaRegistro.update({
+                where: { id: existingNomina.id },
+                data: {
+                    permisoHoras: newPermisoHoras,
+                    egresos: { ...egresosObj, permisosDetalle },
+                },
+            });
+        }
+        catch (err) {
+            console.error('[ADMIN-EDIT] Error al procesar multa en nómina:', err);
+        }
+        return { ...resultAsistencia, nombreEmpleado: empleado.nombre };
     }
 }

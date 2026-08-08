@@ -242,4 +242,37 @@ export class AsistenciaController {
       });
     }
   }
+
+  async adminEditarONuevaMarcacion(req: Request, res: Response): Promise<Response> {
+    try {
+      const { asistenciaId, empleadoId, tipo, fechaHora, eliminarMultaAsociada } = req.body;
+
+      if (!empleadoId || !tipo || !fechaHora) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'El ID de empleado, tipo y fecha/hora son requeridos.' },
+        });
+      }
+
+      const result = await this.asistenciaService.adminEditarONuevaMarcacion({
+        asistenciaId: asistenciaId || null,
+        empleadoId: String(empleadoId).trim(),
+        tipo: String(tipo).trim(),
+        fechaHora: String(fechaHora).trim(),
+        eliminarMultaAsociada: Boolean(eliminarMultaAsociada),
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al procesar edición manual';
+      console.error('[asistencia/manual-edit]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message },
+      });
+    }
+  }
 }

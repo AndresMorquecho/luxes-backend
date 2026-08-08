@@ -2,6 +2,7 @@ export class Empleado {
     id;
     nombre;
     cedula;
+    fechaNacimiento;
     telefono;
     correo;
     cuentaBanco;
@@ -22,6 +23,7 @@ export class Empleado {
         this.id = props.id;
         this.nombre = props.nombre;
         this.cedula = props.cedula;
+        this.fechaNacimiento = props.fechaNacimiento ?? null;
         this.telefono = props.telefono;
         this.correo = props.correo;
         this.cuentaBanco = props.cuentaBanco;
@@ -44,6 +46,7 @@ export class Empleado {
             id: this.id,
             nombre: this.nombre,
             cedula: this.cedula,
+            fechaNacimiento: this.fechaNacimiento,
             telefono: this.telefono,
             correo: this.correo,
             cuentaBanco: this.cuentaBanco,

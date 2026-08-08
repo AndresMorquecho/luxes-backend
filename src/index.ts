@@ -134,15 +134,14 @@ async function bootstrap() {
     console.error('[Bootstrap] Error al verificar tabla cheques_compra:', error);
   }
 
-  // Verificar/Crear columna auto_asistencia en empleados
+  // Verificar/Crear columnas en empleados
   try {
     const { prisma } = await import('./config/prismaClient.js');
-    await prisma.$executeRawUnsafe(`
-      ALTER TABLE empleados ADD COLUMN IF NOT EXISTS auto_asistencia BOOLEAN DEFAULT FALSE;
-    `);
-    console.log('[Bootstrap] Columna auto_asistencia en empleados verificada.');
+    await prisma.$executeRawUnsafe(`ALTER TABLE empleados ADD COLUMN IF NOT EXISTS auto_asistencia BOOLEAN DEFAULT FALSE;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE empleados ADD COLUMN IF NOT EXISTS fecha_nacimiento DATE;`);
+    console.log('[Bootstrap] Columnas auto_asistencia y fecha_nacimiento en empleados verificadas.');
   } catch (error) {
-    console.error('[Bootstrap] Error al verificar columna auto_asistencia:', error);
+    console.error('[Bootstrap] Error al verificar columnas en empleados:', error);
   }
 
   // Corregir desfase de zona horaria (UTC vs America/Guayaquil) en registros de horas extras existentes (aprobadas y pendientes)

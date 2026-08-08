@@ -371,6 +371,31 @@ export class ComprasController {
             return this.fail(res, e);
         }
     }
+    async createCuentaPorPagarManual(req, res) {
+        try {
+            const usuarioId = req.user?.id || req.body?.usuarioId;
+            if (!usuarioId) {
+                return res.status(401).json({ success: false, error: 'Usuario no autenticado.' });
+            }
+            const { proveedorId, proveedorNombreManual, concepto, montoTotal, fechaEmision, fechaVencimiento, proyectoId, notas, abonoInicial, } = req.body || {};
+            const data = await this.service.createCuentaPorPagarManual({
+                usuarioId,
+                proveedorId,
+                proveedorNombreManual,
+                concepto,
+                montoTotal: Number(montoTotal),
+                fechaEmision,
+                fechaVencimiento,
+                proyectoId,
+                notas,
+                abonoInicial,
+            });
+            return res.status(201).json({ success: true, data });
+        }
+        catch (e) {
+            return this.fail(res, e, 400);
+        }
+    }
     // ── Métodos de Pago ────────────────────────────────────────────────────────
     async listMetodosPago(req, res) {
         try {

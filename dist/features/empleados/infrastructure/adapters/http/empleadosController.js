@@ -6,6 +6,7 @@ import { parseBase64Image } from '../../../../../shared/utils/base64Helper.js';
 const parseBody = (body) => ({
     nombre: String(body.nombre ?? ''),
     cedula: String(body.cedula ?? ''),
+    fechaNacimiento: body.fechaNacimiento ? String(body.fechaNacimiento) : null,
     telefono: String(body.telefono ?? ''),
     correo: String(body.correo ?? ''),
     username: body.username ? String(body.username) : undefined,

@@ -175,6 +175,15 @@ export class ComprasService {
     getCuentasPorPagar(options) {
         return this.repo.findAllCuentasPorPagar(options);
     }
+    async createCuentaPorPagarManual(input) {
+        if (!input.concepto || !input.concepto.trim()) {
+            throw new Error('El concepto o descripción de la cuenta es requerido.');
+        }
+        if (!input.montoTotal || Number(input.montoTotal) <= 0) {
+            throw new Error('El monto total debe ser mayor a 0.');
+        }
+        return this.repo.createCuentaPorPagarManual(input);
+    }
     // ── Métodos de Pago ────────────────────────────────────────────────────────
     getMetodosPago(desde, hasta) {
         return this.repo.findAllMetodosPago(desde, hasta);

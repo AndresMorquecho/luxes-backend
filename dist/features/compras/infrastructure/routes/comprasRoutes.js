@@ -13,6 +13,7 @@ export function createComprasRoutes(ctrl) {
     router.delete('/proveedores/:id', (req, res) => ctrl.deleteProveedor(req, res));
     // ── Cuentas por Pagar ──────────────────────────────────────────────────────
     router.get('/cuentas-por-pagar', (req, res) => ctrl.listCuentasPorPagar(req, res));
+    router.post('/cuentas-por-pagar/manual', (req, res) => ctrl.createCuentaPorPagarManual(req, res));
     // ── Métodos de Pago ────────────────────────────────────────────────────────
     router.get('/metodos-pago', (req, res) => ctrl.listMetodosPago(req, res));
     router.post('/metodos-pago', (req, res) => ctrl.createMetodoPago(req, res));

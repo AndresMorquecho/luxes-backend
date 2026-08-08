@@ -32,6 +32,10 @@ export function createAsistenciaRoutes(controller: AsistenciaController): Router
     controller.toggleAutoAsistenciaStatus(req, res)
   );
 
+  router.post('/manual-edit', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) =>
+    controller.adminEditarONuevaMarcacion(req, res)
+  );
+
   return router;
 }
 

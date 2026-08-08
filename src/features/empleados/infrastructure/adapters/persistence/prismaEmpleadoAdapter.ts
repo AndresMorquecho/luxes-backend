@@ -7,6 +7,7 @@ const mapRecord = (record: {
   id: string;
   nombre: string;
   cedula: string;
+  fechaNacimiento?: Date | null;
   telefono: string;
   correo: string;
   cuentaBanco: string;
@@ -29,6 +30,7 @@ const mapRecord = (record: {
     id: record.id,
     nombre: record.nombre,
     cedula: record.cedula,
+    fechaNacimiento: record.fechaNacimiento ? new Date(record.fechaNacimiento).toISOString().split('T')[0] : null,
     telefono: record.telefono,
     correo: record.correo,
     cuentaBanco: record.cuentaBanco,
@@ -51,6 +53,7 @@ const toDbData = (data: EmpleadoInput) => {
   const record: Record<string, unknown> = {
     nombre: data.nombre,
     cedula: data.cedula,
+    fechaNacimiento: data.fechaNacimiento ? new Date(`${String(data.fechaNacimiento).split('T')[0]}T12:00:00Z`) : null,
     telefono: data.telefono ?? '',
     correo: data.correo ?? '',
     cuentaBanco: data.cuentaBanco ?? '',

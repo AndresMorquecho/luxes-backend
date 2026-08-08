@@ -24,6 +24,26 @@ export interface MetodoPagoData {
   netoPeriod?: number;
 }
 
+export interface CreateCuentaPorPagarManualInput {
+  usuarioId: string;
+  proveedorId?: string;
+  proveedorNombreManual?: string;
+  concepto: string;
+  montoTotal: number;
+  fechaEmision?: Date | string;
+  fechaVencimiento?: Date | string | null;
+  proyectoId?: string | null;
+  notas?: string;
+  abonoInicial?: {
+    metodoPagoId: string;
+    monto: number;
+    referencia?: string;
+    esChequePosfechado?: boolean;
+    numeroCheque?: string;
+    fechaCobro?: Date | string;
+  };
+}
+
 export interface DetalleCompraInput {
   descripcion: string;
   cantidad: number;
@@ -239,6 +259,8 @@ export interface ComprasRepositoryPort {
     saldo: number;
     estado: string;
   }): Promise<CuentaPorPagarData>;
+
+  createCuentaPorPagarManual(input: CreateCuentaPorPagarManualInput): Promise<CuentaPorPagarData>;
 
   // ── Métodos de Pago ──
   findAllMetodosPago(desde?: Date, hasta?: Date): Promise<MetodoPagoData[]>;
