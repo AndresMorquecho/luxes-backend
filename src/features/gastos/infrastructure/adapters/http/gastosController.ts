@@ -541,46 +541,72 @@ export class GastosController {
         egresosDetalle[origId].total += monto;
       }
 
-      // 2.5 Obtener el último cierre de caja registrado ANTERIOR a la fecha de consulta (para arrastrar saldos)
-      const ultimoCierre = await prisma.cierreCaja.findFirst({
-        where: { fechaFin: { lt: desdeDate } },
-        orderBy: { fechaFin: 'desc' }
+      // 2.5 Calcular el Saldo de Arrastre acumulado (saldoInicial real) para cada cuenta HASTA la fecha de consulta (exclusivo)
+      const abonosProformaPrev = await prisma.abonoProforma.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { lt: desdeDate } }
+      } as any);
+
+      const ingresosManualesPrev = await prisma.ingreso.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { lt: desdeDate } }
+      } as any);
+
+      const transRecibidasPrev = await prisma.transferencia.groupBy({
+        by: ['destinoMetodoId'],
+        _sum: { monto: true },
+        where: { fecha: { lt: desdeDate } }
+      } as any);
+
+      const gastosPrev = await prisma.gasto.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { lt: desdeDate } }
+      } as any);
+
+      const abonosCompraPrev = await prisma.abonoCompra.groupBy({
+        by: ['metodoPagoId'],
+        _sum: { monto: true },
+        where: { fecha: { lt: desdeDate } }
+      } as any);
+
+      const transEnviadasPrev = await prisma.transferencia.groupBy({
+        by: ['origenMetodoId'],
+        _sum: { monto: true },
+        where: { fecha: { lt: desdeDate } }
+      } as any);
+
+      const mapPrevSum = (items: any[], key = 'metodoPagoId') => {
+        const map: Record<string, number> = {};
+        for (const item of items) {
+          const id = item[key];
+          if (id) map[id] = Number(item._sum.monto || 0);
+        }
+        return map;
+      };
+
+      const ingProformaPrevMap = mapPrevSum(abonosProformaPrev);
+      const ingManualPrevMap = mapPrevSum(ingresosManualesPrev);
+      const transRecibidasPrevMap = mapPrevSum(transRecibidasPrev, 'destinoMetodoId');
+
+      const gastosPrevMap = mapPrevSum(gastosPrev);
+      const abonosCompraPrevMap = mapPrevSum(abonosCompraPrev);
+      const transEnviadasPrevMap = mapPrevSum(transEnviadasPrev, 'origenMetodoId');
+
+      const saldosInicialesMap: Record<string, number> = {};
+      const metodosPagoAll = await prisma.metodoPago.findMany();
+
+      metodosPagoAll.forEach(m => {
+        const ingPrev = (ingProformaPrevMap[m.id] || 0) + (ingManualPrevMap[m.id] || 0) + (transRecibidasPrevMap[m.id] || 0);
+        const egrPrev = (gastosPrevMap[m.id] || 0) + (abonosCompraPrevMap[m.id] || 0) + (transEnviadasPrevMap[m.id] || 0);
+        saldosInicialesMap[m.id] = ingPrev - egrPrev;
       });
 
-      const saldosInicialesPrevios: Record<string, number> = {};
-
-      if (ultimoCierre) {
-        try {
-          let parsedDetalle: any = null;
-          if (typeof ultimoCierre.metodosDetalle === 'string') {
-            parsedDetalle = JSON.parse(ultimoCierre.metodosDetalle);
-          } else if (ultimoCierre.metodosDetalle) {
-            parsedDetalle = ultimoCierre.metodosDetalle;
-          }
-
-          let metodosArr: any[] = [];
-          if (Array.isArray(parsedDetalle)) {
-            metodosArr = parsedDetalle;
-          } else if (parsedDetalle && typeof parsedDetalle === 'object') {
-            metodosArr = parsedDetalle.metodos || parsedDetalle.metodosDetalle || [];
-          }
-
-          metodosArr.forEach(m => {
-            const mId = m.metodoPagoId || m.id;
-            if (mId) {
-              const valFinal = m.saldoFinal !== undefined ? Number(m.saldoFinal) : Number(m.balance || 0);
-              saldosInicialesPrevios[mId] = valFinal;
-            }
-          });
-        } catch (err) {
-          console.error("Error al parsear saldos iniciales del ultimo cierre:", err);
-        }
-      }
-
       // 3. Consolidar por métodos de pago
-      const metodosPago = await prisma.metodoPago.findMany();
-      const metodosDetalleList = metodosPago.map(m => {
-        const saldoInicial = saldosInicialesPrevios[m.id] !== undefined ? saldosInicialesPrevios[m.id] : Number((m as any).saldoInicial || 0);
+      const metodosDetalleList = metodosPagoAll.map(m => {
+        const saldoInicial = saldosInicialesMap[m.id] || 0;
         const ingreso = ingresosDetalle[m.id]?.total || 0;
         const egreso = egresosDetalle[m.id]?.total || 0;
         return {
