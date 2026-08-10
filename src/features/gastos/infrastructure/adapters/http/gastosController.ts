@@ -390,7 +390,12 @@ export class GastosController {
         },
         include: { 
           metodoPago: true,
-          registradoPor: { select: { id: true, nombre: true } }
+          registradoPor: { select: { id: true, nombre: true } },
+          proforma: {
+            include: {
+              cliente: true
+            }
+          }
         },
       });
 
@@ -458,7 +463,12 @@ export class GastosController {
         where: { fecha: { gte: desdeDate, lte: hastaLimit } },
         include: { 
           metodoPago: true,
-          registradoPor: { select: { id: true, nombre: true } }
+          registradoPor: { select: { id: true, nombre: true } },
+          ordenCompra: {
+            include: {
+              proveedor: true
+            }
+          }
         },
       });
 
@@ -650,11 +660,73 @@ export class GastosController {
 
       const usuariosDetalle = Object.values(usuariosDetalleMap);
 
+      // Construir listado detallado de ítems de ingresos reales
+      const itemsIngresosList = [
+        ...abonosProforma.map(ab => ({
+          id: ab.id,
+          fecha: ab.fecha,
+          cliente: ab.proforma?.cliente?.nombre || ab.proforma?.clienteNombre || 'Cliente General',
+          metodoPagoId: ab.metodoPagoId,
+          metodoPagoNombre: ab.metodoPago?.nombre || 'Efectivo Caja Chica',
+          monto: Number(ab.monto),
+          proformaNumero: ab.proforma?.id || ab.proformaId || '',
+          ordenPedido: '',
+          detalle: ab.referencia || `ABONO PROFORMA #${ab.proforma?.id || ab.proformaId || ''}`
+        })),
+        ...ingresosManuales.map(ing => ({
+          id: ing.id,
+          fecha: ing.fecha,
+          cliente: ing.cliente || 'Ingreso Caja',
+          metodoPagoId: ing.metodoPagoId,
+          metodoPagoNombre: ing.metodoPago?.nombre || 'Efectivo Caja Chica',
+          monto: Number(ing.monto),
+          proformaNumero: '',
+          ordenPedido: '',
+          detalle: ing.concepto || ing.notas || 'INGRESO DE CAJA'
+        }))
+      ].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+
+      // Construir listado detallado de ítems de egresos reales
+      const itemsEgresosList = [
+        ...gastos.map(g => ({
+          id: g.id,
+          fecha: g.fecha,
+          proveedor: g.proveedor || 'Gasto General',
+          metodoPagoId: g.metodoPagoId,
+          metodoPagoNombre: g.metodoPago?.nombre || 'Efectivo Caja Chica',
+          monto: Number(g.monto),
+          facturaNumero: '',
+          ivaPorcentaje: '',
+          detalle: g.concepto || g.notas || 'GASTO GENERAL'
+        })),
+        ...abonos.map(ab => ({
+          id: ab.id,
+          fecha: ab.fecha,
+          proveedor: ab.ordenCompra?.proveedor?.nombre || 'Proveedor Compra',
+          metodoPagoId: ab.metodoPagoId,
+          metodoPagoNombre: ab.metodoPago?.nombre || 'Efectivo Caja Chica',
+          monto: Number(ab.monto),
+          facturaNumero: ab.ordenCompra?.numero || '',
+          ivaPorcentaje: '',
+          detalle: ab.referencia || 'PAGO COMPRA PROVEEDOR'
+        }))
+      ].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+
+      const cierreExistente = await prisma.cierreCaja.findFirst({
+        where: {
+          fechaInicio: { lte: desdeDate },
+          fechaFin: { gte: desdeDate }
+        }
+      });
+
       return res.status(200).json({
         success: true,
         data: {
           fechaInicio: desde,
           fechaFin: hasta,
+          esCerrado: Boolean(cierreExistente),
+          cierreExistenteId: cierreExistente?.id || null,
+          observacionesCierre: cierreExistente?.observaciones || null,
           totalIngresos,
           totalEgresos,
           balance: totalIngresos - totalEgresos,
@@ -667,6 +739,7 @@ export class GastosController {
             abonosIniciales: abonosInicialesSum,
             abonosPosteriores: abonosPosterioresSum,
             otrosIngresos: ingresosManualesSum,
+            items: itemsIngresosList,
           },
 
           // Secciones de Egresos
@@ -675,6 +748,7 @@ export class GastosController {
             gastosAuto: egresosAutoSum,
             gastosCompras: egresosComprasSum,
             gastosPagos: egresosPagosSum,
+            items: itemsEgresosList,
           },
 
           // Detalle por Usuario
