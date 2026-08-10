@@ -482,17 +482,54 @@ export class GastosController {
                 }
                 egresosDetalle[origId].total += monto;
             }
+            // 2.5 Obtener el último cierre de caja registrado ANTERIOR a la fecha de consulta (para arrastrar saldos)
+            const ultimoCierre = await prisma.cierreCaja.findFirst({
+                where: { fechaFin: { lt: desdeDate } },
+                orderBy: { fechaFin: 'desc' }
+            });
+            const saldosInicialesPrevios = {};
+            if (ultimoCierre) {
+                try {
+                    let parsedDetalle = null;
+                    if (typeof ultimoCierre.metodosDetalle === 'string') {
+                        parsedDetalle = JSON.parse(ultimoCierre.metodosDetalle);
+                    }
+                    else if (ultimoCierre.metodosDetalle) {
+                        parsedDetalle = ultimoCierre.metodosDetalle;
+                    }
+                    let metodosArr = [];
+                    if (Array.isArray(parsedDetalle)) {
+                        metodosArr = parsedDetalle;
+                    }
+                    else if (parsedDetalle && typeof parsedDetalle === 'object') {
+                        metodosArr = parsedDetalle.metodos || parsedDetalle.metodosDetalle || [];
+                    }
+                    metodosArr.forEach(m => {
+                        const mId = m.metodoPagoId || m.id;
+                        if (mId) {
+                            const valFinal = m.saldoFinal !== undefined ? Number(m.saldoFinal) : Number(m.balance || 0);
+                            saldosInicialesPrevios[mId] = valFinal;
+                        }
+                    });
+                }
+                catch (err) {
+                    console.error("Error al parsear saldos iniciales del ultimo cierre:", err);
+                }
+            }
             // 3. Consolidar por métodos de pago
             const metodosPago = await prisma.metodoPago.findMany();
             const metodosDetalleList = metodosPago.map(m => {
+                const saldoInicial = saldosInicialesPrevios[m.id] !== undefined ? saldosInicialesPrevios[m.id] : Number(m.saldoInicial || 0);
                 const ingreso = ingresosDetalle[m.id]?.total || 0;
                 const egreso = egresosDetalle[m.id]?.total || 0;
                 return {
                     metodoPagoId: m.id,
                     nombre: m.nombre,
+                    saldoInicial: saldoInicial,
                     ingresos: ingreso,
                     egresos: egreso,
-                    balance: ingreso - egreso,
+                    balance: saldoInicial + ingreso - egreso,
+                    saldoFinal: saldoInicial + ingreso - egreso,
                 };
             });
             // Incluir no clasificados si existen montos
@@ -502,9 +539,11 @@ export class GastosController {
                 metodosDetalleList.push({
                     metodoPagoId: 'no_especificado',
                     nombre: 'No especificado',
+                    saldoInicial: 0,
                     ingresos: noEspIng,
                     egresos: noEspEgr,
                     balance: noEspIng - noEspEgr,
+                    saldoFinal: noEspIng - noEspEgr,
                 });
             }
             // 4. Segmentación por Secciones de Ingresos (Abonos Iniciales vs Posteriores)
