@@ -179,6 +179,26 @@ export class ComprasService {
   async deleteOrden(id: string): Promise<void> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) throw new Error('Orden de compra no encontrada.');
+
+    const detalles = orden.detalles || [];
+    const haRecibido =
+      orden.estado === 'recibida' ||
+      orden.estado === 'parcialmente_recibida' ||
+      detalles.some((d) => (d.cantidadRecibida ?? 0) > 0);
+
+    if (haRecibido) {
+      throw new Error(
+        'No se puede eliminar una orden de compra que ya fue recepcionada (parcial o totalmente) en almacén.'
+      );
+    }
+
+    const abonos = orden.abonos || [];
+    if (abonos.length > 0) {
+      throw new Error(
+        'No se puede eliminar una orden de compra que ya tiene abonos o pagos procesados. Primero debe anular los abonos.'
+      );
+    }
+
     return this.repo.deleteOrden(id);
   }
 

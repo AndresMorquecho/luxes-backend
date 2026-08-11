@@ -773,7 +773,13 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
   }
 
   async deleteOrden(id: string): Promise<void> {
-    await this.prisma.ordenCompra.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await (tx as any).chequeCompra.deleteMany({ where: { ordenCompraId: id } });
+      await tx.abonoCompra.deleteMany({ where: { ordenCompraId: id } });
+      await tx.cuentaPorPagar.deleteMany({ where: { ordenCompraId: id } });
+      await tx.detalleCompra.deleteMany({ where: { ordenCompraId: id } });
+      await tx.ordenCompra.delete({ where: { id } });
+    });
   }
 
   // ── Abonos ─────────────────────────────────────────────────────────────────

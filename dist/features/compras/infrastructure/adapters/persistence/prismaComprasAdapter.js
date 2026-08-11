@@ -651,7 +651,13 @@ export class PrismaComprasAdapter {
         });
     }
     async deleteOrden(id) {
-        await this.prisma.ordenCompra.delete({ where: { id } });
+        await this.prisma.$transaction(async (tx) => {
+            await tx.chequeCompra.deleteMany({ where: { ordenCompraId: id } });
+            await tx.abonoCompra.deleteMany({ where: { ordenCompraId: id } });
+            await tx.cuentaPorPagar.deleteMany({ where: { ordenCompraId: id } });
+            await tx.detalleCompra.deleteMany({ where: { ordenCompraId: id } });
+            await tx.ordenCompra.delete({ where: { id } });
+        });
     }
     // ── Abonos ─────────────────────────────────────────────────────────────────
     async findAbonosByOrden(ordenId) {
