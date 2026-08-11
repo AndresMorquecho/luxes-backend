@@ -41,6 +41,15 @@ async function nextTransferenciaId(): Promise<string> {
   return `TRF-${String(max + 1).padStart(3, '0')}`;
 }
 
+function parseGastoFecha(fechaInput: any): Date {
+  if (!fechaInput) return new Date();
+  const str = String(fechaInput).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return new Date(`${str}T12:00:00.000Z`);
+  }
+  return new Date(str);
+}
+
 /**
  * Checks if a given date falls within any closed cash-register period.
  * Returns the overlapping CierreCaja record or null.
@@ -252,7 +261,7 @@ export class GastosController {
       }
 
       // Verificar si la fecha cae en un período cerrado
-      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      const cierreBloqueante = await findCierreThatCovers(parseGastoFecha(b.fecha));
       if (cierreBloqueante) {
         const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
         const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
@@ -267,7 +276,7 @@ export class GastosController {
           id,
           concepto: b.concepto,
           categoria: b.categoria ?? 'oficina',
-          fecha: new Date(b.fecha),
+          fecha: parseGastoFecha(b.fecha),
           monto: Number(b.monto),
           proveedor: b.proveedor ?? '',
           notas: b.notas ?? '',
@@ -295,7 +304,7 @@ export class GastosController {
       }
 
       // Verificar si la fecha cae en un período cerrado
-      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      const cierreBloqueante = await findCierreThatCovers(parseGastoFecha(b.fecha));
       if (cierreBloqueante) {
         const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
         const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
@@ -307,7 +316,7 @@ export class GastosController {
         data: {
           concepto: b.concepto,
           categoria: b.categoria,
-          fecha: new Date(b.fecha),
+          fecha: parseGastoFecha(b.fecha),
           monto: Number(b.monto),
           proveedor: b.proveedor ?? '',
           notas: b.notas ?? '',
@@ -1982,7 +1991,7 @@ export class GastosController {
       }
 
       // Verificar si la fecha cae en un período cerrado
-      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      const cierreBloqueante = await findCierreThatCovers(parseGastoFecha(b.fecha));
       if (cierreBloqueante) {
         const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
         const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
@@ -1997,7 +2006,7 @@ export class GastosController {
           id,
           concepto: b.concepto,
           categoria: b.categoria ?? 'Otros',
-          fecha: new Date(b.fecha),
+          fecha: parseGastoFecha(b.fecha),
           monto: Number(b.monto),
           cliente: b.cliente ?? '',
           notas: b.notas ?? '',
@@ -2024,7 +2033,7 @@ export class GastosController {
       }
 
       // Verificar si la fecha cae en un período cerrado
-      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      const cierreBloqueante = await findCierreThatCovers(parseGastoFecha(b.fecha));
       if (cierreBloqueante) {
         const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
         const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
@@ -2048,7 +2057,7 @@ export class GastosController {
         data: {
           concepto: b.concepto,
           categoria: b.categoria ?? 'Otros',
-          fecha: new Date(b.fecha),
+          fecha: parseGastoFecha(b.fecha),
           monto: Number(b.monto),
           cliente: b.cliente ?? '',
           notas: b.notas ?? '',
@@ -2161,7 +2170,7 @@ export class GastosController {
       }
 
       // Verificar si la fecha cae en un período cerrado
-      const cierreBloqueante = await findCierreThatCovers(new Date(b.fecha));
+      const cierreBloqueante = await findCierreThatCovers(parseGastoFecha(b.fecha));
       if (cierreBloqueante) {
         const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
         const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
@@ -2177,7 +2186,7 @@ export class GastosController {
           origenMetodoId: b.origenMetodoId,
           destinoMetodoId: b.destinoMetodoId,
           monto: Number(b.monto),
-          fecha: new Date(b.fecha),
+          fecha: parseGastoFecha(b.fecha),
           referencia: b.referencia ?? '',
           registradoPorUserId,
         },
