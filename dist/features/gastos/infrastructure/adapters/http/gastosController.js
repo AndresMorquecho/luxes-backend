@@ -128,7 +128,7 @@ export class GastosController {
                     metodoPago: g.metodoPago,
                     registradoPor: g.registradoPor,
                     origen: isVehiculo ? 'vehiculo' : isNomina ? 'nomina' : 'otros_gastos',
-                    readonly: isVehiculo || isNomina,
+                    readonly: isNomina,
                     referencia: '',
                 };
             });
