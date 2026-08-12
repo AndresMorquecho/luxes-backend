@@ -747,7 +747,8 @@ export class GastosController {
           monto: Number(ab.monto),
           proformaNumero: ab.proforma?.id || ab.proformaId || '',
           ordenPedido: '',
-          detalle: ab.referencia || `ABONO PROFORMA #${ab.proforma?.id || ab.proformaId || ''}`
+          detalle: ab.referencia || `ABONO PROFORMA #${ab.proforma?.id || ab.proformaId || ''}`,
+          esTransferencia: false,
         })),
         ...ingresosManuales.map(ing => ({
           id: ing.id,
@@ -758,7 +759,20 @@ export class GastosController {
           monto: Number(ing.monto),
           proformaNumero: '',
           ordenPedido: '',
-          detalle: ing.concepto || ing.notas || 'INGRESO DE CAJA'
+          detalle: ing.concepto || ing.notas || 'INGRESO DE CAJA',
+          esTransferencia: false,
+        })),
+        ...transferencias.map(t => ({
+          id: `${t.id}-ingreso`,
+          fecha: t.fecha,
+          cliente: (t.destinoMetodo?.nombre || 'CUENTA DESTINO').toUpperCase(),
+          metodoPagoId: t.destinoMetodoId,
+          metodoPagoNombre: t.destinoMetodo?.nombre || 'Destino',
+          monto: Number(t.monto),
+          proformaNumero: '',
+          ordenPedido: '',
+          detalle: t.referencia ? `TRANSFERENCIA RECIBIDA DE ${t.origenMetodo?.nombre || 'Cuenta Origen'} - ${t.referencia}` : `TRANSFERENCIA RECIBIDA DE ${t.origenMetodo?.nombre || 'Cuenta Origen'}`,
+          esTransferencia: true,
         }))
       ].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
@@ -773,7 +787,8 @@ export class GastosController {
           monto: Number(g.monto),
           facturaNumero: '',
           ivaPorcentaje: '',
-          detalle: g.concepto || g.notas || 'GASTO GENERAL'
+          detalle: g.concepto || g.notas || 'GASTO GENERAL',
+          esTransferencia: false,
         })),
         ...abonos.map(ab => ({
           id: ab.id,
@@ -784,7 +799,20 @@ export class GastosController {
           monto: Number(ab.monto),
           facturaNumero: ab.ordenCompra?.numero || '',
           ivaPorcentaje: '',
-          detalle: ab.referencia || 'PAGO COMPRA PROVEEDOR'
+          detalle: ab.referencia || 'PAGO COMPRA PROVEEDOR',
+          esTransferencia: false,
+        })),
+        ...transferencias.map(t => ({
+          id: `${t.id}-egreso`,
+          fecha: t.fecha,
+          proveedor: (t.origenMetodo?.nombre || 'CUENTA ORIGEN').toUpperCase(),
+          metodoPagoId: t.origenMetodoId,
+          metodoPagoNombre: t.origenMetodo?.nombre || 'Origen',
+          monto: Number(t.monto),
+          facturaNumero: '',
+          ivaPorcentaje: '',
+          detalle: t.referencia ? `TRANSFERENCIA ENVIADA A ${t.destinoMetodo?.nombre || 'Cuenta Destino'} - ${t.referencia}` : `TRANSFERENCIA ENVIADA A ${t.destinoMetodo?.nombre || 'Cuenta Destino'}`,
+          esTransferencia: true,
         }))
       ].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
@@ -807,8 +835,8 @@ export class GastosController {
           totalEgresos,
           balance: totalIngresos - totalEgresos,
           metodosDetalle: metodosDetalleList,
-          ingresosConteo: abonosProforma.length + ingresosManuales.length,
-          egresosConteo: gastos.length + abonos.length,
+          ingresosConteo: itemsIngresosList.length,
+          egresosConteo: itemsEgresosList.length,
 
           // Secciones de Ingresos
           seccionIngresos: {
