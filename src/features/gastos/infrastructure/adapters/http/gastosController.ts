@@ -900,6 +900,9 @@ export class GastosController {
           observaciones: b.observaciones ?? '',
           usuarioId,
         },
+        include: {
+          usuario: { select: { nombre: true } },
+        },
       });
 
       return res.status(201).json({ success: true, data: cierre });
