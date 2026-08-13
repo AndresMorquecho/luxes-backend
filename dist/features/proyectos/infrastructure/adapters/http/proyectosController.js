@@ -68,59 +68,46 @@ function parseFaseDatos(datos) {
     }
 }
 async function getPersonalEncuesta(proyectoId, datosInstalacion, instalacion) {
-    const personalList = [];
+    const personalMap = new Map();
+    const addPersona = (idStr, nombreRaw, rolStr) => {
+        const nombre = (nombreRaw || '').trim();
+        if (!nombre || nombre === '—')
+            return;
+        const key = nombre.toLowerCase();
+        if (personalMap.has(key)) {
+            const existing = personalMap.get(key);
+            if (!existing.roles.includes(rolStr)) {
+                existing.roles.push(rolStr);
+            }
+        }
+        else {
+            personalMap.set(key, {
+                empleadoId: idStr,
+                id: idStr,
+                nombre: nombre,
+                roles: [rolStr],
+            });
+        }
+    };
     // 1. Personal de taller/instalación
     const desdeDatos = datosInstalacion.personalAsignado;
     if (Array.isArray(desdeDatos) && desdeDatos.length > 0) {
         desdeDatos.forEach((p, index) => {
-            personalList.push({
-                empleadoId: String(p.empleadoId || p.id || `personal-${index}`),
-                id: String(p.empleadoId || p.id || `personal-${index}`),
-                nombre: String(p.nombre || ''),
-                rol: String(p.rol || 'Técnico'),
-            });
+            if (p.nombre) {
+                addPersona(String(p.empleadoId || p.id || `personal-${index}`), String(p.nombre), String(p.rol || 'Instalador Principal'));
+            }
         });
     }
     else if (instalacion && Array.isArray(instalacion.personalAsignado)) {
         instalacion.personalAsignado.forEach((p, index) => {
-            personalList.push({
-                empleadoId: p.empleadoId || `personal-${index}`,
-                id: p.empleadoId || `personal-${index}`,
-                nombre: p.empleado?.nombre || '',
-                rol: p.rol || 'Técnico',
-            });
+            if (p.empleado?.nombre) {
+                addPersona(p.empleadoId || `personal-${index}`, p.empleado.nombre, p.rol || 'Instalador Principal');
+            }
         });
     }
     try {
-        // 2. Diseñador (de la fase de DISEÑO)
-        const faseDiseno = await prisma.proyectoFase.findUnique({
-            where: {
-                proyectoId_fase: {
-                    proyectoId: String(proyectoId),
-                    fase: 'DISEÑO',
-                },
-            },
-        });
-        if (faseDiseno?.datos) {
-            try {
-                const datosDiseno = JSON.parse(faseDiseno.datos);
-                if (datosDiseno && datosDiseno.disenadorNombre) {
-                    const existeDisenador = personalList.some((p) => p.nombre.toLowerCase() === datosDiseno.disenadorNombre.toLowerCase());
-                    if (!existeDisenador) {
-                        personalList.push({
-                            empleadoId: 'disenador',
-                            id: 'disenador',
-                            nombre: datosDiseno.disenadorNombre,
-                            rol: 'Diseñador/Aprobador',
-                        });
-                    }
-                }
-            }
-            catch (e) {
-                console.error('[getPersonalEncuesta] Error parsing diseño data:', e);
-            }
-        }
-        // 3. Ventas (de las proformas vinculadas al proyecto desde la fase COTIZACION)
+        // 2. Atención al Cliente (Usuario que creó/vinculó la proforma)
+        let nombreAtencionCliente = '';
         const faseCotizacion = await prisma.proyectoFase.findUnique({
             where: {
                 proyectoId_fase: {
@@ -133,31 +120,93 @@ async function getPersonalEncuesta(proyectoId, datosInstalacion, instalacion) {
             try {
                 const datosCotizacion = JSON.parse(faseCotizacion.datos);
                 if (datosCotizacion && Array.isArray(datosCotizacion.cotizacionesSeleccionadas)) {
-                    datosCotizacion.cotizacionesSeleccionadas.forEach((c) => {
-                        const atiendeVal = c.atiende || c.creadoPor;
-                        if (atiendeVal && atiendeVal !== '—') {
-                            const existeVentas = personalList.some((pa) => pa.nombre.toLowerCase() === atiendeVal.toLowerCase());
-                            if (!existeVentas) {
-                                personalList.push({
-                                    empleadoId: `ventas-${c.id}`,
-                                    id: `ventas-${c.id}`,
-                                    nombre: atiendeVal,
-                                    rol: 'Asesor de Ventas',
-                                });
-                            }
+                    for (const c of datosCotizacion.cotizacionesSeleccionadas) {
+                        const cand = c.atiende || c.creadoPor || c.usuarioNombre || c.vendedor;
+                        if (cand && cand !== '—') {
+                            nombreAtencionCliente = cand;
+                            break;
                         }
-                    });
+                    }
                 }
             }
             catch (e) {
                 console.error('[getPersonalEncuesta] Error parsing cotización data:', e);
             }
         }
+        if (!nombreAtencionCliente) {
+            try {
+                const proformas = await prisma.proforma.findMany({
+                    where: {
+                        OR: [
+                            { datos: { contains: String(proyectoId) } },
+                            { clienteNombre: { equals: String(proyectoId) } },
+                        ],
+                    },
+                    select: { atiende: true, creadoPor: true, vendedor: true },
+                    take: 1,
+                }).catch(() => []);
+                if (proformas.length > 0) {
+                    nombreAtencionCliente = proformas[0].atiende || proformas[0].vendedor || proformas[0].creadoPor || '';
+                }
+            }
+            catch (e) { }
+        }
+        if (nombreAtencionCliente && nombreAtencionCliente !== '—') {
+            addPersona('atencion-cliente', nombreAtencionCliente, 'Atención al Cliente');
+        }
+        // 3. Diseñador (Usuario de la fase de DISEÑO)
+        let nombreDisenador = '';
+        const faseDiseno = await prisma.proyectoFase.findUnique({
+            where: {
+                proyectoId_fase: {
+                    proyectoId: String(proyectoId),
+                    fase: 'DISEÑO',
+                },
+            },
+        });
+        if (faseDiseno?.datos) {
+            try {
+                const datosDiseno = JSON.parse(faseDiseno.datos);
+                if (datosDiseno) {
+                    nombreDisenador =
+                        datosDiseno.disenadorNombre ||
+                            datosDiseno.aprobadoPor ||
+                            datosDiseno.subidoPor ||
+                            datosDiseno.creadoPor ||
+                            datosDiseno.enviadoImpresionPor ||
+                            '';
+                    if (!nombreDisenador && Array.isArray(datosDiseno.lotes)) {
+                        for (const lot of datosDiseno.lotes) {
+                            const cand = lot.aprobadoPor ||
+                                lot.subidoPor ||
+                                lot.creadoPor ||
+                                lot.enviadoImpresionPor ||
+                                lot.disenadorNombre;
+                            if (cand) {
+                                nombreDisenador = cand;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (e) {
+                console.error('[getPersonalEncuesta] Error parsing diseño data:', e);
+            }
+        }
+        if (nombreDisenador && nombreDisenador !== '—') {
+            addPersona('disenador', nombreDisenador, 'Diseñador');
+        }
     }
     catch (dbErr) {
         console.error('[getPersonalEncuesta] Error querying DB:', dbErr);
     }
-    return personalList;
+    return Array.from(personalMap.values()).map((p) => ({
+        empleadoId: p.empleadoId,
+        id: p.id,
+        nombre: p.nombre,
+        rol: p.roles.join(' / '),
+    }));
 }
 function getInstalacionCompletionErrors(datos, ordenesCompra = []) {
     const faltantes = [];
@@ -167,10 +216,6 @@ function getInstalacionCompletionErrors(datos, ordenesCompra = []) {
     const personal = datos.personalAsignado;
     if (!Array.isArray(personal) || personal.length === 0) {
         faltantes.push('Debe asignar al menos un técnico');
-    }
-    const materiales = datos.materiales;
-    if (!Array.isArray(materiales) || materiales.length === 0) {
-        faltantes.push('Debe registrar al menos un material');
     }
     const evidencias = datos.evidencias;
     if (!Array.isArray(evidencias) || evidencias.length === 0) {
@@ -892,34 +937,31 @@ export class ProyectosController {
             }
             if (seCompletaInstalacion) {
                 try {
-                    const faltantesAdmin = getInstalacionCompletionErrors(datosMerged, proyecto.ordenesCompra || []);
-                    const faseDestinoLabel = FASE_LABELS[nuevaFaseActual] || nuevaFaseActual;
-                    let body = `La instalación del proyecto "${proyecto?.nombre || id}" ha sido completada en el sitio. El proyecto avanzó automáticamente a ${faseDestinoLabel}. [PROYECTO_ID:${id}]`;
-                    if (faltantesAdmin.length > 0) {
-                        body += ` Pendiente: ${faltantesAdmin.join('; ')}.`;
-                    }
                     const payload = {
-                        title: 'Instalación Completada',
-                        body,
+                        title: 'Instalación Finalizada 🛠️',
+                        body: `La instalación del proyecto "${proyecto?.nombre || id}" fue completada en sitio. Revisa y envía la encuesta al cliente.`,
                         icon: '/LogoGlobo.png',
                         badge: '/LogoGlobo.png',
                         data: {
-                            url: `/proyectos/${id}`,
+                            url: `/proyectos/${id}?tab=COMPLETADO`,
                             action: 'view_project',
                             proyectoId: id,
                             autoAvance: true,
                         },
                     };
-                    await prisma.notification.create({
-                        data: {
-                            title: payload.title,
-                            message: payload.body,
-                            rol: 'admin',
-                            createdBy: 'Taller',
-                        },
-                    });
-                    await sendPushToRole('admin', payload);
-                    console.log(`[Proyecto ${id}] Notificación de instalación completada enviada a administradores`);
+                    const targetRoles = ['admin', 'ventas', 'disenador'];
+                    for (const roleName of targetRoles) {
+                        await prisma.notification.create({
+                            data: {
+                                title: payload.title,
+                                message: payload.body,
+                                rol: roleName,
+                                createdBy: 'Taller',
+                            },
+                        }).catch(() => { });
+                        await sendPushToRole(roleName, payload).catch(() => { });
+                    }
+                    console.log(`[Proyecto ${id}] Notificación de instalación completada enviada a admin, ventas y diseño`);
                 }
                 catch (notifError) {
                     console.error('[Proyecto] Error sending push notification for completed installation:', notifError);
