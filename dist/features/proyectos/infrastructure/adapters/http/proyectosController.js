@@ -718,6 +718,35 @@ export class ProyectosController {
             const datosAGuardar = String(fase) === 'INSTALACION'
                 ? datosMerged
                 : { ...datosFaseAnterior, ...datos };
+            // Marcar como completadas las fases anteriores en la base de datos
+            const targetIdx = FASES_ORDEN.indexOf(String(fase));
+            if (targetIdx > 0) {
+                for (let i = 0; i < targetIdx; i++) {
+                    const prevFaseName = FASES_ORDEN[i];
+                    const prevFaseObj = proyecto.fases?.find((f) => f.fase === prevFaseName);
+                    if (!prevFaseObj?.completada) {
+                        await prisma.proyectoFase.upsert({
+                            where: {
+                                proyectoId_fase: {
+                                    proyectoId: String(id),
+                                    fase: prevFaseName,
+                                },
+                            },
+                            update: {
+                                completada: true,
+                                fechaCompletada: prevFaseObj?.fechaCompletada || new Date(),
+                            },
+                            create: {
+                                proyectoId: String(id),
+                                fase: prevFaseName,
+                                completada: true,
+                                fechaCompletada: new Date(),
+                                datos: '{}',
+                            },
+                        });
+                    }
+                }
+            }
             await prisma.proyectoFase.upsert({
                 where: {
                     proyectoId_fase: {
