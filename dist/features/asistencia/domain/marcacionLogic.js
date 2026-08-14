@@ -49,7 +49,32 @@ export function getOpcionesMarcacion(marks, tipoContrato = 'Tiempo Completo', di
         return [];
     const opciones = [];
     if (!tipos.has('ENTRADA')) {
-        opciones.push(TIPOS_SELECCIONABLES[0]);
+        // Marcación de ENTRADA solo permitida entre las 07:00 a. m. y las 14:00 p. m.
+        const nowEcuador = new Date(Date.now() - 5 * 60 * 60 * 1000);
+        const currentMin = nowEcuador.getUTCHours() * 60 + nowEcuador.getUTCMinutes();
+        const minEntradaValida = 7 * 60; // 07:00 AM
+        const maxEntradaValida = 14 * 60; // 14:00 PM (02:00 PM)
+        if (currentMin >= minEntradaValida && currentMin <= maxEntradaValida) {
+            opciones.push(TIPOS_SELECCIONABLES[0]); // ENTRADA
+        }
+        // Si ya pasó de las 14:00 y olvidó marcar ENTRADA en la mañana:
+        // Permitir marcar SALIDA o FIN_HORAS_EXTRA en la tarde/noche.
+        // El backend creará automáticamente la ENTRADA a las 08:00 a.m. sin multa.
+        if (currentMin > maxEntradaValida) {
+            const parseTimeToMin = (timeStr) => {
+                if (!timeStr)
+                    return null;
+                const [h, m] = timeStr.split(':').map(Number);
+                return isNaN(h) || isNaN(m) ? null : h * 60 + m;
+            };
+            const salidaMin = parseTimeToMin(diaConfig?.salida) ?? (17 * 60 + 30);
+            if (currentMin >= salidaMin) {
+                opciones.push(TIPOS_SELECCIONABLES[3]); // SALIDA
+            }
+            if (currentMin >= salidaMin + 30) {
+                opciones.push(TIPOS_SELECCIONABLES[4]); // FIN_HORAS_EXTRA
+            }
+        }
         return opciones;
     }
     if (tipoContrato === 'Medio Día') {

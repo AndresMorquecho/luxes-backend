@@ -356,6 +356,27 @@ export class AsistenciaService {
 
     let horasExtra: Record<string, unknown> | undefined;
 
+    // ── Auto-register ENTRADA at configured 08:00 AM if employee forgot morning scan ──
+    if (['SALIDA', 'FIN_HORAS_EXTRA', 'SALIDA_PERMISO'].includes(proxima.tipo)) {
+      const hasEntradaPrevia = todayMarks.some((m) => m.tipo === 'ENTRADA');
+      if (!hasEntradaPrevia) {
+        const entradaHoraConfig = diaConfig?.entrada || '08:00';
+        const [eh, em] = entradaHoraConfig.split(':').map(Number);
+        const [yy, mo, dd] = dateStr.split('-').map(Number);
+        // Build configured entrance timestamp in UTC (Ecuador = UTC-5 → add 5h)
+        const entradaAutoUTC = new Date(Date.UTC(yy, mo - 1, dd, eh + 5, em, 0));
+        await this.asistenciaRepository.create({
+          empleadoId: input.empleadoId,
+          tipo: 'ENTRADA',
+          label: 'Entrada (automático)',
+          fechaHora: entradaAutoUTC.toISOString(),
+          ubicacionLat: input.ubicacionLat,
+          ubicacionLng: input.ubicacionLng,
+        });
+        console.log(`[QR-AUTO-ENT] Auto-created ENTRADA at ${entradaHoraConfig} for ${input.empleadoId} (morning ENTRADA was missed)`);
+      }
+    }
+
     // ── SALIDA ────────────────────────────────────────────────────────────────
     if (proxima.tipo === 'SALIDA') {
       // Overtime is NOT created automatically on SALIDA.
@@ -640,6 +661,13 @@ export class AsistenciaService {
 
     // ── ENTRADA con atraso ───────────────────────────────────────────────────
     if (proxima.tipo === 'ENTRADA') {
+      const minutosActual = ahoraEC.getUTCHours() * 60 + ahoraEC.getUTCMinutes();
+
+      // Validar ventana permitida de entrada: entre 07:00 a. m. y 14:00 p. m.
+      if (minutosActual < 7 * 60 || minutosActual > 14 * 60) {
+        throw new Error('La marcación de entrada solo está permitida entre las 07:00 a. m. y las 14:00 p. m.');
+      }
+
       // Load config for tolerance and bracket calculation
       const horariosConfigEnt = (await (await import('../../infrastructure/adapters/persistence/horarioLaboralStore.js')).loadHorariosLaborales()) as any;
       const toleranciaEnt = Number(horariosConfigEnt.toleranciaMinutos ?? 8);
@@ -648,7 +676,6 @@ export class AsistenciaService {
       // Calculate minutes late from the configured entrada time
       const entradaHora: string = diaConfig?.entrada ?? '08:00';
       const [eh, em] = entradaHora.split(':').map(Number);
-      const minutosActual = ahoraEC.getUTCHours() * 60 + ahoraEC.getUTCMinutes();
       const minutosEntrada = eh * 60 + em;
       const atrasoMinutosEnt = Math.max(0, minutosActual - minutosEntrada);
       const horaMarcacion = `${String(ahoraEC.getUTCHours()).padStart(2,'0')}:${String(ahoraEC.getUTCMinutes()).padStart(2,'0')}`;
@@ -915,11 +942,15 @@ export class AsistenciaService {
           if (tipo === 'ENTRADA' && diaConfig?.entrada) {
             const [eh, em] = diaConfig.entrada.split(':').map(Number);
             const [mh, mm] = horaMarcacionStr.split(':').map(Number);
-            atrasoMinutos = (mh * 60 + mm) - (eh * 60 + em);
-            const tolerancia = Number((diaConfig as any)?.toleranciaEntrada ?? 8);
-            multaDolares = calcularMultaAtraso(atrasoMinutos, tolerancia);
-            if (multaDolares > 0) {
-              motivoStr = `Atraso entrada QR ${horaMarcacionStr} (+${atrasoMinutos} min)`;
+            const marcacionMins = mh * 60 + mm;
+            // Solo calcular atraso de ENTRADA si la hora está en la ventana de 07:00 a 14:00
+            if (marcacionMins >= 7 * 60 && marcacionMins <= 14 * 60) {
+              atrasoMinutos = marcacionMins - (eh * 60 + em);
+              const tolerancia = Number((diaConfig as any)?.toleranciaEntrada ?? 8);
+              multaDolares = calcularMultaAtraso(atrasoMinutos, tolerancia);
+              if (multaDolares > 0) {
+                motivoStr = `Atraso entrada QR ${horaMarcacionStr} (+${atrasoMinutos} min)`;
+              }
             }
           } else if (tipo === 'FIN_ALMUERZO') {
             const dayStart = new Date(`${dateStr}T00:00:00.000-05:00`);
