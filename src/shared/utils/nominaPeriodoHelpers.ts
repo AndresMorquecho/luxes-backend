@@ -110,9 +110,6 @@ export function calcDiasLaborados(
     isDiaLaboralSemana(f.fecha),
   );
 
-  const lunSatEnPeriodo = iterDatesInPeriod(fechaInicio, fechaFin).filter(isDiaLaboralSemana).length;
-  const diasRequeridosAsistencia = Math.max(0, lunSatEnPeriodo - feriadosDelPeriodo.length);
-
   let diasFeriado = 0;
   if (hasContract) {
     for (const f of feriadosDelPeriodo) {
@@ -124,17 +121,13 @@ export function calcDiasLaborados(
 
   let diasLaborados = diasAsistencia + diasFeriado;
 
-  // Contrato: domingos del período cuentan si asistió todos los lun–sáb requeridos (sin feriado).
-  if (hasContract && diasAsistencia >= diasRequeridosAsistencia && diasRequeridosAsistencia > 0) {
-    diasLaborados += countDomingosEnPeriodo(fechaInicio, fechaFin);
+  // Para colaboradores con contrato formal, los domingos son descanso remunerado automático:
+  if (hasContract) {
+    const domingos = countDomingosEnPeriodo(fechaInicio, fechaFin);
+    diasLaborados += domingos;
   }
 
-  // Por asistencia: quincena completa si marcó todos los lun–sáb del período.
-  if (!hasContract && diasAsistencia >= diasRequeridosAsistencia && diasRequeridosAsistencia > 0) {
-    diasLaborados = calcDiasLaborables(fechaInicio, fechaFin, feriados);
-  }
-
-  const diasLaborables = calcDiasLaborables(fechaInicio, fechaFin, feriados);
+  const diasLaborables = hasContract ? 15 : calcDiasLaborables(fechaInicio, fechaFin, feriados);
   diasLaborados = Math.min(diasLaborados, diasLaborables);
 
   return { diasAsistencia, diasFeriado, diasLaborados };
