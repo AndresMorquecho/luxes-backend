@@ -321,6 +321,20 @@ export class VehiculosController {
         }
     }
     // --- CONTROLES DE VEHÍCULO ───────────────────────────────────────────────
+    async uploadControlFoto(req, res) {
+        try {
+            const file = req.file;
+            if (!file) {
+                return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No se envió ninguna foto' } });
+            }
+            const url = `/uploads/vehiculos/controles/${file.filename}`;
+            return res.status(200).json({ success: true, data: { url } });
+        }
+        catch (error) {
+            console.error('[controles/uploadFoto]', error);
+            return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al subir foto de control' } });
+        }
+    }
     async listControles(req, res) {
         try {
             const { id: vehiculoId } = req.params;
@@ -385,6 +399,10 @@ export class VehiculosController {
                     bandas: Boolean(b.bandas),
                     otroCheckNombre: String(b.otroCheckNombre ?? ''),
                     otroCheckValor: Boolean(b.otroCheckValor),
+                    fotoGasolinaInicio: b.fotoGasolinaInicio ? String(b.fotoGasolinaInicio) : null,
+                    fotoKmInicio: b.fotoKmInicio ? String(b.fotoKmInicio) : null,
+                    fotoKmFin: b.fotoKmFin ? String(b.fotoKmFin) : null,
+                    fotoGasolinaFin: b.fotoGasolinaFin ? String(b.fotoGasolinaFin) : null,
                     observacion: String(b.observacion ?? ''),
                     sugerencia: String(b.sugerencia ?? ''),
                 },

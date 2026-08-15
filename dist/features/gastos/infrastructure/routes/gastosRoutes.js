@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
+import { createUploadMiddleware } from '../../../../shared/middleware/uploadMiddleware.js';
 export function createGastosRoutes(gastosController, vehiculosController, gastosFijosController) {
     const gastosRouter = Router();
     const vehiculosRouter = Router();
+    const controlFotoUpload = createUploadMiddleware('vehiculos/controles');
     // Middleware para restringir acceso al módulo de finanzas a Ventas y Diseñador
     gastosRouter.use((req, res, next) => {
         const userRole = (req.user?.rol || '').toLowerCase().trim();
@@ -62,6 +64,7 @@ export function createGastosRoutes(gastosController, vehiculosController, gastos
     vehiculosRouter.put('/mantenimientos/:mantenimientoId', authMiddleware, (req, res) => vehiculosController.updateMantenimiento(req, res));
     vehiculosRouter.delete('/mantenimientos/:mantenimientoId', authMiddleware, (req, res) => vehiculosController.removeMantenimiento(req, res));
     // Controles de Checklist
+    vehiculosRouter.post('/controles/upload', authMiddleware, controlFotoUpload.single('foto'), (req, res) => vehiculosController.uploadControlFoto(req, res));
     vehiculosRouter.get('/:id/controles', authMiddleware, (req, res) => vehiculosController.listControles(req, res));
     vehiculosRouter.post('/:id/controles', authMiddleware, (req, res) => vehiculosController.createControl(req, res));
     return { gastosRouter, vehiculosRouter };
