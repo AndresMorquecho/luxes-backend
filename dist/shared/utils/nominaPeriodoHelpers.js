@@ -51,8 +51,19 @@ export function calcDiasLaborables(fechaInicio, fechaFin, feriados = []) {
     const feriadosCount = feriadosEnPeriodo(feriados, fechaInicio, fechaFin).length;
     return Math.max(0, total - feriadosCount);
 }
-function countDomingosEnPeriodo(fechaInicio, fechaFin) {
-    return iterDatesInPeriod(fechaInicio, fechaFin).filter((d) => !isDiaLaboralSemana(d)).length;
+function getTodayEcuadorKey() {
+    const d = new Date(Date.now() - 5 * 60 * 60 * 1000);
+    return d.toISOString().split('T')[0];
+}
+function countDomingosOcurridosEnPeriodo(fechaInicio, fechaFin) {
+    const todayKey = getTodayEcuadorKey();
+    const ini = fechaInicio.slice(0, 10);
+    const fin = fechaFin.slice(0, 10);
+    // Si el período es estrictamente futuro respecto a hoy, no han ocurrido domingos
+    if (ini > todayKey)
+        return 0;
+    // Solo contar domingos dentro del período que ya hayan transcurrido hasta hoy
+    return iterDatesInPeriod(ini, fin).filter((d) => !isDiaLaboralSemana(d) && d <= todayKey).length;
 }
 function groupMarcacionesByDay(marcaciones) {
     const map = new Map();
@@ -93,10 +104,12 @@ export function calcDiasLaborados(marcaciones, feriados, fechaInicio, fechaFin, 
         }
     }
     let diasLaborados = diasAsistencia + diasFeriado;
-    // Para colaboradores con contrato formal, los domingos son descanso remunerado automático:
-    if (hasContract) {
-        const domingos = countDomingosEnPeriodo(fechaInicio, fechaFin);
-        diasLaborados += domingos;
+    // Para colaboradores con contrato formal:
+    // Solo se suman los domingos que YA han ocurrido hasta hoy en ese período,
+    // y únicamente si el colaborador registra asistencias o feriados en el período:
+    if (hasContract && (diasAsistencia > 0 || diasFeriado > 0)) {
+        const domingosOcurridos = countDomingosOcurridosEnPeriodo(fechaInicio, fechaFin);
+        diasLaborados += domingosOcurridos;
     }
     const diasLaborables = hasContract ? 15 : calcDiasLaborables(fechaInicio, fechaFin, feriados);
     diasLaborados = Math.min(diasLaborados, diasLaborables);
