@@ -76,8 +76,18 @@ async function nextGastoId(): Promise<string> {
   return `GTO-${String(max + 1).padStart(3, '0')}`;
 }
 
-async function findCierreThatCovers(fecha: Date) {
-  const d = new Date(fecha);
+function toGastoDate(f: string | Date | undefined): Date {
+  if (!f) return new Date();
+  if (typeof f === 'string') {
+    const datePart = f.split('T')[0];
+    return new Date(`${datePart}T12:00:00`);
+  }
+  const datePart = f.toISOString().split('T')[0];
+  return new Date(`${datePart}T12:00:00`);
+}
+
+async function findCierreThatCovers(fecha: Date | string) {
+  const d = toGastoDate(fecha);
   d.setHours(0, 0, 0, 0);
   const dEnd = new Date(d);
   dEnd.setHours(23, 59, 59, 999);
@@ -927,7 +937,7 @@ export class NominaController {
 
           if (!oldAbMatch) {
             // Abono NUEVO: validar que la fecha no caiga en caja cerrada
-            const cierreBloqueante = await findCierreThatCovers(new Date(ab.fecha));
+            const cierreBloqueante = await findCierreThatCovers(toGastoDate(ab.fecha));
             if (cierreBloqueante) {
               const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
               const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
@@ -958,7 +968,7 @@ export class NominaController {
                   id: ab.id,
                   concepto: `Pago de Nómina - ${empleadoNombre} (${fStart})`,
                   categoria: 'nomina',
-                  fecha: new Date(ab.fecha),
+                  fecha: toGastoDate(ab.fecha),
                   monto: Number(ab.monto),
                   proveedor: empleadoNombre,
                   metodoPagoId: ab.metodoPagoId,
@@ -990,7 +1000,7 @@ export class NominaController {
                 }
 
                 // Validar que la nueva fecha no esté en período cerrado
-                const cierreNuevo = await findCierreThatCovers(new Date(ab.fecha));
+                const cierreNuevo = await findCierreThatCovers(toGastoDate(ab.fecha));
                 if (cierreNuevo) {
                   const fi = cierreNuevo.fechaInicio.toISOString().split('T')[0];
                   const ff = cierreNuevo.fechaFin.toISOString().split('T')[0];
@@ -1008,7 +1018,7 @@ export class NominaController {
                   where: { id: ab.id },
                   data: {
                     monto: Number(ab.monto),
-                    fecha: new Date(ab.fecha),
+                    fecha: toGastoDate(ab.fecha),
                     metodoPagoId: ab.metodoPagoId,
                     proveedor: empleadoNombre,
                     concepto: `Pago de Nómina - ${empleadoNombre} (${fStart})`,
