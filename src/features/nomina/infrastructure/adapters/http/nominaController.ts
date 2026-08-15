@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+﻿import { Request, Response } from 'express';
 import ExcelJS from 'exceljs';
 import fs from 'fs';
 import path from 'path';
@@ -584,9 +584,11 @@ export class NominaController {
 
         const empIngresos = ingresosByEmpleado.get(emp.id) || [];
         let trabEmpSum = 0;
+        let otrosIngresosSum = 0;
         for (const i of empIngresos) {
           const mVal = Number(i.monto);
           if (i.tipo === 'TRAB_EMP') trabEmpSum += mVal;
+          else if (i.tipo === 'OTROS') otrosIngresosSum += mVal;
         }
 
         const empEgresos = egresosByEmpleado.get(emp.id) || [];
@@ -607,6 +609,7 @@ export class NominaController {
           decimoCuarto: decimoCuartoQuincenal,
           horasExtras: horasExtrasSum,
           trabajosEnEmpresa: trabEmpSum,
+          otrosIngresos: otrosIngresosSum,
           fondosReserva: 0,
         };
 
@@ -651,6 +654,7 @@ export class NominaController {
               decimoCuarto: decimoCuartoQuincenal,
               horasExtras: horasExtrasSum,
               trabajosEnEmpresa: trabEmpSum,
+              otrosIngresos: otrosIngresosSum,
             };
 
             const updatedEgresos = {
@@ -1558,17 +1562,20 @@ export class NominaController {
       });
 
       let trabEmpSum = 0;
+      let otrosIngresosSum = 0;
 
       for (const i of detailedIngresos) {
         const mVal = Number(i.monto);
         if (i.tipo === 'TRAB_EMP') trabEmpSum += mVal;
+        else if (i.tipo === 'OTROS') otrosIngresosSum += mVal;
       }
 
       const currentIngresos = (payroll.ingresos as any) || {};
       const updatedIngresos = {
         ...currentIngresos,
         horasExtras: horasExtrasSum,
-        trabajosEnEmpresa: trabEmpSum
+        trabajosEnEmpresa: trabEmpSum,
+        otrosIngresos: otrosIngresosSum
       };
 
       await prisma.nominaRegistro.update({
@@ -1655,6 +1662,7 @@ export class NominaController {
         const he = rawNomina?.ingresos?.horasExtras ? Number(rawNomina.ingresos.horasExtras) : 0;
         const te = rawNomina?.ingresos?.trabajosEnEmpresa ? Number(rawNomina.ingresos.trabajosEnEmpresa) : 0;
         const fr = rawNomina?.ingresos?.fondosReserva ? Number(rawNomina.ingresos.fondosReserva) : 0;
+        const otrosI = rawNomina?.ingresos?.otrosIngresos ? Number(rawNomina.ingresos.otrosIngresos) : 0;
         
         const d3 = rawNomina?.ingresos?.decimoTercero ? Number(rawNomina.ingresos.decimoTercero) : decimoTerceroVal;
         const d4 = rawNomina?.ingresos?.decimoCuarto ? Number(rawNomina.ingresos.decimoCuarto) : decimoCuartoVal;
@@ -1669,7 +1677,7 @@ export class NominaController {
         const dctoFiesta = rawNomina?.egresos?.dctoFiesta ? Number(rawNomina.egresos.dctoFiesta) : 0;
         const dctoHerramientas = rawNomina?.egresos?.dctoHerramientas ? Number(rawNomina.egresos.dctoHerramientas) : 0;
 
-        const sumaIngresos = d3 + d4 + he + te + fr;
+        const sumaIngresos = d3 + d4 + he + te + otrosI + fr;
         const sumaEgresos = iess + ant + multas + otrosE + extConyuge + quirografario + dctoHoras + dctoFiesta + dctoHerramientas;
         
         const netoRecibir = (totalB + sumaIngresos) - sumaEgresos;
@@ -1682,7 +1690,7 @@ export class NominaController {
           diario: sueldo,
           diasT,
           sueldoB: totalB,
-          ingresosVar: he + te,
+          ingresosVar: he + te + otrosI,
           decimo3: d3,
           decimo4: d4,
           fRes: fr,
