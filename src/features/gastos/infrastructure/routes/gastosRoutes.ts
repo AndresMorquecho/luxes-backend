@@ -86,6 +86,8 @@ export function createGastosRoutes(
   vehiculosRouter.post('/controles/upload', authMiddleware, controlFotoUpload.single('foto'), (req, res) => vehiculosController.uploadControlFoto(req, res));
   vehiculosRouter.get('/:id/controles', authMiddleware, (req, res) => vehiculosController.listControles(req, res));
   vehiculosRouter.post('/:id/controles', authMiddleware, (req, res) => vehiculosController.createControl(req, res));
+  vehiculosRouter.put('/controles/:controlId', authMiddleware, (req, res) => vehiculosController.updateControl(req, res));
+  vehiculosRouter.delete('/controles/:controlId', authMiddleware, (req, res) => vehiculosController.removeControl(req, res));
 
   return { gastosRouter, vehiculosRouter };
 }
