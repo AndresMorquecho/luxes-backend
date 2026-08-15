@@ -15,6 +15,16 @@ async function nextProformaId() {
 }
 const toDateStr = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
 const toDateTimeStr = (d) => d ? new Date(d).toISOString() : '';
+const parseAbonoDate = (dateVal) => {
+    if (!dateVal)
+        return new Date();
+    const str = String(dateVal).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        return new Date(`${str}T12:00:00.000Z`);
+    }
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? new Date() : d;
+};
 /**
  * Crea UNA sola notificación en BD por cada rol canónico y envía UN push por rol canónico.
  * Esto evita duplicados: antes se creaba una notif por cada alias ('admin', 'administrador')
@@ -536,7 +546,8 @@ export class ProformasController {
         try {
             const { id } = req.params;
             const b = req.body || {};
-            const { monto, metodoPagoId, referencia, aplicarIva, comprobanteUrl } = b;
+            const { monto, metodoPagoId, referencia, aplicarIva, comprobanteUrl, fecha } = b;
+            const fechaAbono = parseAbonoDate(fecha);
             const userRole = (req.user?.rol || '').toUpperCase();
             const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
             if (!isAdmin) {
@@ -584,6 +595,7 @@ export class ProformasController {
                             proformaId: proforma.id,
                             metodoPagoId: validMetodoId || String(metodoPagoId || ''),
                             monto: abonoMonto,
+                            fecha: fechaAbono,
                             referencia: referencia ?? '',
                             comprobanteUrl: comprobanteUrl ?? null,
                             registradoPorUserId: registradoPorUserId ?? undefined,
@@ -667,7 +679,8 @@ export class ProformasController {
     async registrarAbono(req, res) {
         try {
             const { id } = req.params;
-            const { monto, metodoPagoId, referencia, comprobanteUrl } = req.body || {};
+            const { monto, metodoPagoId, referencia, comprobanteUrl, fecha } = req.body || {};
+            const fechaAbono = parseAbonoDate(fecha);
             if (monto === undefined || !metodoPagoId) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Monto y método de pago son requeridos' } });
             }
@@ -703,6 +716,7 @@ export class ProformasController {
                         proformaId: proforma.id,
                         metodoPagoId: String(metodoPagoId),
                         monto: abonoMonto,
+                        fecha: fechaAbono,
                         referencia: referencia ?? '',
                         comprobanteUrl: comprobanteUrl ?? null,
                         registradoPorUserId: registradoPorUserId ?? undefined,
@@ -728,8 +742,9 @@ export class ProformasController {
     async editarAbono(req, res) {
         try {
             const { id, abonoId } = req.params;
-            const { monto, metodoPagoId, referencia, comprobanteUrl } = req.body || {};
+            const { monto, metodoPagoId, referencia, comprobanteUrl, fecha } = req.body || {};
             const nuevoMonto = Number(monto);
+            const fechaUpdate = fecha ? parseAbonoDate(fecha) : undefined;
             const userRole = (req.user?.rol || '').toUpperCase();
             const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
             if (!isAdmin) {
@@ -772,6 +787,7 @@ export class ProformasController {
                         monto: nuevoMonto,
                         metodoPagoId: String(metodoPagoId),
                         referencia: referencia ?? '',
+                        ...(fechaUpdate ? { fecha: fechaUpdate } : {}),
                         ...(comprobanteUrl !== undefined ? { comprobanteUrl: comprobanteUrl || null } : {}),
                         registradoPorUserId: registradoPorUserId ?? undefined,
                     },
