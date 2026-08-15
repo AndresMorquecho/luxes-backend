@@ -803,26 +803,41 @@ export class NominaController {
                     }
                 }
             }
-            // 3. Identificar abonos nuevos, asignarles ID secuencial si es necesario y crear el Gasto
+            // 3. Procesar abonos (nuevos y modificados), sincronizando con Gasto y validando cierres
             for (const ab of newAbonos) {
                 if (ab.metodoPagoId) {
                     if (!ab.id || !ab.id.startsWith('GTO-')) {
                         ab.id = await nextGastoId();
                     }
-                    const existsInOld = oldAbonos.some(o => o.id === ab.id);
-                    if (!existsInOld) {
+                    const oldAbMatch = oldAbonos.find(o => o.id === ab.id);
+                    const fStart = new Date(data.fechaInicio).toLocaleDateString('es-EC', { month: 'short', year: 'numeric' });
+                    const mp = await prisma.metodoPago.findUnique({ where: { id: ab.metodoPagoId } });
+                    ab.metodoPagoNombre = mp?.nombre || 'No especificado';
+                    if (!oldAbMatch) {
+                        // Abono NUEVO: validar que la fecha no caiga en caja cerrada
+                        const cierreBloqueante = await findCierreThatCovers(new Date(ab.fecha));
+                        if (cierreBloqueante) {
+                            const fi = cierreBloqueante.fechaInicio.toISOString().split('T')[0];
+                            const ff = cierreBloqueante.fechaFin.toISOString().split('T')[0];
+                            return res.status(403).json({
+                                success: false,
+                                error: {
+                                    code: 'PERIODO_CERRADO',
+                                    message: `No se puede registrar el pago en la fecha ${ab.fecha} porque pertenece a un período de caja cerrado (${fi} al ${ff}).`
+                                }
+                            });
+                        }
                         const existingGasto = await prisma.gasto.findUnique({ where: { id: ab.id } });
                         if (!existingGasto) {
-                            const fStart = new Date(data.fechaInicio).toLocaleDateString('es-EC', { month: 'short', year: 'numeric' });
-                            const mp = await prisma.metodoPago.findUnique({ where: { id: ab.metodoPagoId } });
-                            ab.metodoPagoNombre = mp?.nombre || 'No especificado';
                             const userObj = registradoPorUserId
                                 ? await prisma.user.findUnique({ where: { id: registradoPorUserId }, select: { nombre: true } })
                                 : null;
-                            ab.usuarioNombre = userObj?.nombre || 'Usuario';
-                            const now = new Date();
-                            const pad = (n) => String(n).padStart(2, '0');
-                            ab.fechaHora = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+                            ab.usuarioNombre = userObj?.nombre || ab.usuarioNombre || 'Usuario';
+                            if (!ab.fechaHora) {
+                                const now = new Date();
+                                const pad = (n) => String(n).padStart(2, '0');
+                                ab.fechaHora = `${ab.fecha || now.toISOString().slice(0, 10)} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+                            }
                             await prisma.gasto.create({
                                 data: {
                                     id: ab.id,
@@ -835,6 +850,59 @@ export class NominaController {
                                     registradoPorUserId: registradoPorUserId ?? undefined,
                                 }
                             });
+                        }
+                    }
+                    else {
+                        // Abono EXISTENTE: verificar si fue modificado (monto, fecha, metodoPagoId)
+                        const hasChanged = Number(oldAbMatch.monto) !== Number(ab.monto) ||
+                            String(oldAbMatch.metodoPagoId) !== String(ab.metodoPagoId) ||
+                            String(oldAbMatch.fecha).slice(0, 10) !== String(ab.fecha).slice(0, 10);
+                        if (hasChanged) {
+                            const existingGasto = await prisma.gasto.findUnique({ where: { id: ab.id } });
+                            if (existingGasto) {
+                                // Validar que la fecha original no esté en período cerrado
+                                const cierreOriginal = await findCierreThatCovers(existingGasto.fecha);
+                                if (cierreOriginal) {
+                                    const fi = cierreOriginal.fechaInicio.toISOString().split('T')[0];
+                                    const ff = cierreOriginal.fechaFin.toISOString().split('T')[0];
+                                    return res.status(403).json({
+                                        success: false,
+                                        error: {
+                                            code: 'PERIODO_CERRADO',
+                                            message: `No se puede modificar el pago porque su fecha original pertenece a un período de caja cerrado (${fi} al ${ff}).`
+                                        }
+                                    });
+                                }
+                                // Validar que la nueva fecha no esté en período cerrado
+                                const cierreNuevo = await findCierreThatCovers(new Date(ab.fecha));
+                                if (cierreNuevo) {
+                                    const fi = cierreNuevo.fechaInicio.toISOString().split('T')[0];
+                                    const ff = cierreNuevo.fechaFin.toISOString().split('T')[0];
+                                    return res.status(403).json({
+                                        success: false,
+                                        error: {
+                                            code: 'PERIODO_CERRADO',
+                                            message: `No se puede mover el pago a la fecha ${ab.fecha} porque pertenece a un período de caja cerrado (${fi} al ${ff}).`
+                                        }
+                                    });
+                                }
+                                // Actualizar el Gasto correspondiente
+                                await prisma.gasto.update({
+                                    where: { id: ab.id },
+                                    data: {
+                                        monto: Number(ab.monto),
+                                        fecha: new Date(ab.fecha),
+                                        metodoPagoId: ab.metodoPagoId,
+                                        proveedor: empleadoNombre,
+                                        concepto: `Pago de Nómina - ${empleadoNombre} (${fStart})`,
+                                    }
+                                });
+                                // Si la fecha cambió, sincronizar la fecha en fechaHora
+                                if (String(oldAbMatch.fecha).slice(0, 10) !== String(ab.fecha).slice(0, 10)) {
+                                    const timePart = (ab.fechaHora || '').split(' ')[1] || '00:00';
+                                    ab.fechaHora = `${ab.fecha} ${timePart}`;
+                                }
+                            }
                         }
                     }
                 }
