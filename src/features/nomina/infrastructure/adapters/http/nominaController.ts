@@ -1264,13 +1264,13 @@ export class NominaController {
           empleadoId: String(empleadoId),
           tipo: String(tipo),
           monto: Number(monto),
-          fecha: new Date(String(fecha)),
+          fecha: toGastoDate(fecha),
           motivo: motivo || ''
         }
       });
 
       // Recalcular la nómina del período correspondiente para este empleado
-      await this.recalculatePayrollForEgreso(String(empleadoId), new Date(String(fecha)));
+      await this.recalculatePayrollForEgreso(String(empleadoId), toGastoDate(fecha));
 
       return res.status(201).json({
         success: true,
@@ -1334,12 +1334,13 @@ export class NominaController {
   }
 
   private async recalculatePayrollForEgreso(empleadoId: string, fechaEgreso: Date): Promise<void> {
+    const fEgreso = toGastoDate(fechaEgreso);
     // Buscar la nómina que contenga la fecha del egreso para este empleado
     const payroll = await prisma.nominaRegistro.findFirst({
       where: {
         empleadoId,
-        fechaInicio: { lte: fechaEgreso },
-        fechaFin: { gte: fechaEgreso }
+        fechaInicio: { lte: fEgreso },
+        fechaFin: { gte: fEgreso }
       }
     });
 
@@ -1396,8 +1397,8 @@ export class NominaController {
 
       if (fechaInicio && fechaFin) {
         whereClause.fecha = {
-          gte: new Date(String(fechaInicio)),
-          lte: new Date(String(fechaFin))
+          gte: toGastoDate(String(fechaInicio)),
+          lte: toGastoDate(String(fechaFin))
         };
       }
 
@@ -1450,13 +1451,13 @@ export class NominaController {
           empleadoId: String(empleadoId),
           tipo: String(tipo),
           monto: Number(monto),
-          fecha: new Date(String(fecha)),
+          fecha: toGastoDate(fecha),
           motivo: motivo || ''
         }
       });
 
       // Recalcular la nómina del período correspondiente para este empleado
-      await this.recalculatePayrollForIngreso(String(empleadoId), new Date(String(fecha)));
+      await this.recalculatePayrollForIngreso(String(empleadoId), toGastoDate(fecha));
 
       return res.status(201).json({
         success: true,
@@ -1520,12 +1521,13 @@ export class NominaController {
   }
 
   private async recalculatePayrollForIngreso(empleadoId: string, fechaIngreso: Date): Promise<void> {
+    const fIngreso = toGastoDate(fechaIngreso);
     // Buscar la nómina que contenga la fecha del ingreso para este empleado
     const payroll = await prisma.nominaRegistro.findFirst({
       where: {
         empleadoId,
-        fechaInicio: { lte: fechaIngreso },
-        fechaFin: { gte: fechaIngreso }
+        fechaInicio: { lte: fIngreso },
+        fechaFin: { gte: fIngreso }
       }
     });
 
