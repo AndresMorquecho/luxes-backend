@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import { safeRemoveDir } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
+import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 
 import { ensureThumbFor } from '../../../../../shared/adapters/http/mediaThumbnailController.js';
 
@@ -1607,10 +1608,10 @@ export class ProyectosController {
     try {
       const { desde, hasta } = req.query;
       let dateFilter: any = {};
-      if (desde) dateFilter.gte = new Date(String(desde));
-      if (hasta) dateFilter.lte = new Date(String(hasta));
+      if (desde) dateFilter.gte = parseEcuadorStartDate(String(desde));
+      if (hasta) dateFilter.lte = parseEcuadorEndDate(String(hasta));
 
-      const hasDateFilter = desde || hasta;
+      const hasDateFilter = Boolean(desde || hasta);
 
       // 1. Proyectos completados (Tiempos de entrega)
       const completedWhere: any = { estado: 'COMPLETADO' };
@@ -1719,8 +1720,8 @@ export class ProyectosController {
             
             // Si hay filtro de fecha, validar contra la fecha de respuesta de la encuesta
             if (hasDateFilter && fechaSurvey) {
-              if (desde && fechaSurvey < new Date(String(desde))) continue;
-              if (hasta && fechaSurvey > new Date(String(hasta))) continue;
+              if (desde && fechaSurvey < parseEcuadorStartDate(String(desde))) continue;
+              if (hasta && fechaSurvey > parseEcuadorEndDate(String(hasta))) continue;
             }
 
             totalEncuestas++;

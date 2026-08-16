@@ -27,6 +27,15 @@ async function nextGastoId(): Promise<string> {
   return `GTO-${String(max + 1).padStart(3, '0')}`;
 }
 
+function parseFechaMantenimiento(fechaInput: any): Date {
+  if (!fechaInput) return new Date();
+  const str = String(fechaInput).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return new Date(`${str}T12:00:00.000-05:00`);
+  }
+  return new Date(str);
+}
+
 export class VehiculosController {
   // --- VEHÍCULOS ---
 
@@ -222,7 +231,7 @@ export class VehiculosController {
           id: gastoId,
           concepto: `Mantenimiento Vehículo: Placa ${vehiculo.placa} (${b.tipo})`,
           categoria: 'vehiculos',
-          fecha: new Date(b.fechaRealizado),
+          fecha: parseFechaMantenimiento(b.fechaRealizado),
           monto: Number(b.monto),
           proveedor: b.proveedor ?? '',
           notas: b.notas ?? '',
@@ -237,7 +246,7 @@ export class VehiculosController {
           vehiculoId: String(vehiculoId),
           tipo: b.tipo,
           descripcion: b.descripcion ?? '',
-          fechaRealizado: new Date(b.fechaRealizado),
+          fechaRealizado: parseFechaMantenimiento(b.fechaRealizado),
           fechaProxima: b.fechaProxima ? new Date(b.fechaProxima) : null,
           kilometraje: b.kilometraje ? Number(b.kilometraje) : null,
           kmProximo: b.kmProximo ? Number(b.kmProximo) : null,
@@ -287,7 +296,7 @@ export class VehiculosController {
           where: { id: mantenimiento.gastoId },
           data: {
             concepto: `Mantenimiento Vehículo: Placa ${mantenimiento.vehiculo.placa} (${b.tipo})`,
-            fecha: new Date(b.fechaRealizado),
+            fecha: parseFechaMantenimiento(b.fechaRealizado),
             monto: Number(b.monto),
             proveedor: b.proveedor ?? '',
             notas: b.notas ?? '',
@@ -302,7 +311,7 @@ export class VehiculosController {
         data: {
           tipo: b.tipo,
           descripcion: b.descripcion ?? '',
-          fechaRealizado: new Date(b.fechaRealizado),
+          fechaRealizado: parseFechaMantenimiento(b.fechaRealizado),
           fechaProxima: b.fechaProxima ? new Date(b.fechaProxima) : null,
           kilometraje: b.kilometraje ? Number(b.kilometraje) : null,
           kmProximo: b.kmProximo ? Number(b.kmProximo) : null,

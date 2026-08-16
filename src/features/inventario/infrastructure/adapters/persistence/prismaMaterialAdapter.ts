@@ -5,7 +5,7 @@ import type {
   MovimientoData,
   PrestamoData,
 } from '../../../domain/ports/MaterialRepositoryPort.js';
-import { formatDateOnly } from '../../../../../shared/utils/dateOnly.js';
+import { formatDateOnly, parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 
 const ESTADOS_COMPRA_VALIDOS = new Set(['aprobada', 'recibida', 'parcialmente_recibida']);
 
@@ -297,15 +297,12 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     if (options.fechaInicio || options.fechaFin) {
       const fechaSalida: Record<string, Date> = {};
       if (options.fechaInicio) {
-        const start = new Date(options.fechaInicio);
+        const start = parseEcuadorStartDate(options.fechaInicio);
         if (!Number.isNaN(start.getTime())) fechaSalida.gte = start;
       }
       if (options.fechaFin) {
-        const end = new Date(options.fechaFin);
-        if (!Number.isNaN(end.getTime())) {
-          end.setHours(23, 59, 59, 999);
-          fechaSalida.lte = end;
-        }
+        const end = parseEcuadorEndDate(options.fechaFin);
+        if (!Number.isNaN(end.getTime())) fechaSalida.lte = end;
       }
       if (Object.keys(fechaSalida).length > 0) where.fechaSalida = fechaSalida;
     }

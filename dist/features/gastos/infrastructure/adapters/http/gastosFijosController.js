@@ -302,7 +302,7 @@ export class GastosFijosController {
             }
             const montoFinal = monto && monto > 0 ? monto : Number(gf.montoEstimado);
             const fechaPagoStr = fecha || getTodayString();
-            const fechaPagoDate = new Date(`${fechaPagoStr}T00:00:00.000Z`);
+            const fechaPagoDate = new Date(`${fechaPagoStr}T12:00:00.000-05:00`);
             // Generar ID único para el gasto
             const timestamp = Date.now().toString(36);
             const random = Math.random().toString(36).substring(2, 6);

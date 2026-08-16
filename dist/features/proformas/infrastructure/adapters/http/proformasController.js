@@ -4,6 +4,7 @@ import { Decimal } from '@prisma/client/runtime/library';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { logAuditAction } from '../../../../../shared/services/auditLogService.js';
 import { safeUnlinkFile } from '../../../../../shared/utils/pathSafetyHelper.js';
+import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 /** Genera el siguiente ID con formato PRO-### */
 async function nextProformaId() {
     const rows = await prisma.proforma.findMany({ select: { id: true } });
@@ -20,7 +21,7 @@ const parseAbonoDate = (dateVal) => {
         return new Date();
     const str = String(dateVal).trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-        return new Date(`${str}T12:00:00.000Z`);
+        return new Date(`${str}T12:00:00.000-05:00`);
     }
     const d = new Date(str);
     return isNaN(d.getTime()) ? new Date() : d;
@@ -240,13 +241,10 @@ export class ProformasController {
             if (fechaDesde || fechaHasta) {
                 where.fecha = {};
                 if (fechaDesde) {
-                    const desdeStr = String(fechaDesde);
-                    where.fecha.gte = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+                    where.fecha.gte = parseEcuadorStartDate(String(fechaDesde));
                 }
                 if (fechaHasta) {
-                    // Incluir todo el día hasta las 23:59:59
-                    const hastaStr = String(fechaHasta);
-                    where.fecha.lte = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+                    where.fecha.lte = parseEcuadorEndDate(String(fechaHasta));
                 }
             }
             // Ejecutar consulta con paginación

@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import { safeRemoveDir } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
+import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 import { ensureThumbFor } from '../../../../../shared/adapters/http/mediaThumbnailController.js';
 const PROYECTOS_UPLOADS_ROOT = path.resolve('uploads/proyectos');
 /** Quita previewDataUrl (base64) del grafo de fases para no inflar JSON de API. */
@@ -1460,10 +1461,10 @@ export class ProyectosController {
             const { desde, hasta } = req.query;
             let dateFilter = {};
             if (desde)
-                dateFilter.gte = new Date(String(desde));
+                dateFilter.gte = parseEcuadorStartDate(String(desde));
             if (hasta)
-                dateFilter.lte = new Date(String(hasta));
-            const hasDateFilter = desde || hasta;
+                dateFilter.lte = parseEcuadorEndDate(String(hasta));
+            const hasDateFilter = Boolean(desde || hasta);
             // 1. Proyectos completados (Tiempos de entrega)
             const completedWhere = { estado: 'COMPLETADO' };
             if (hasDateFilter)
@@ -1563,9 +1564,9 @@ export class ProyectosController {
                         const fechaSurvey = encuesta.fechaRespuesta ? new Date(encuesta.fechaRespuesta) : null;
                         // Si hay filtro de fecha, validar contra la fecha de respuesta de la encuesta
                         if (hasDateFilter && fechaSurvey) {
-                            if (desde && fechaSurvey < new Date(String(desde)))
+                            if (desde && fechaSurvey < parseEcuadorStartDate(String(desde)))
                                 continue;
-                            if (hasta && fechaSurvey > new Date(String(hasta)))
+                            if (hasta && fechaSurvey > parseEcuadorEndDate(String(hasta)))
                                 continue;
                         }
                         totalEncuestas++;

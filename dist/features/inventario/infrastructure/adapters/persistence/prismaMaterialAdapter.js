@@ -1,4 +1,4 @@
-import { formatDateOnly } from '../../../../../shared/utils/dateOnly.js';
+import { formatDateOnly, parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 const ESTADOS_COMPRA_VALIDOS = new Set(['aprobada', 'recibida', 'parcialmente_recibida']);
 export class PrismaMaterialAdapter {
     prisma;
@@ -238,16 +238,14 @@ export class PrismaMaterialAdapter {
         if (options.fechaInicio || options.fechaFin) {
             const fechaSalida = {};
             if (options.fechaInicio) {
-                const start = new Date(options.fechaInicio);
+                const start = parseEcuadorStartDate(options.fechaInicio);
                 if (!Number.isNaN(start.getTime()))
                     fechaSalida.gte = start;
             }
             if (options.fechaFin) {
-                const end = new Date(options.fechaFin);
-                if (!Number.isNaN(end.getTime())) {
-                    end.setHours(23, 59, 59, 999);
+                const end = parseEcuadorEndDate(options.fechaFin);
+                if (!Number.isNaN(end.getTime()))
                     fechaSalida.lte = end;
-                }
             }
             if (Object.keys(fechaSalida).length > 0)
                 where.fechaSalida = fechaSalida;

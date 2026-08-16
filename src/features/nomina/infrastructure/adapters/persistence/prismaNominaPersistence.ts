@@ -1,5 +1,6 @@
 import { prisma } from '../../../../../config/prismaClient.js';
 import { Prisma } from '@prisma/client';
+import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 
 const SECUENCIA_MARCACIONES = [
   { tipo: 'ENTRADA', label: 'Entrada' },
@@ -46,10 +47,10 @@ export class PrismaNominaPersistence {
     if (filters.fechaInicio || filters.fechaFin) {
       where.fechaHora = {};
       if (filters.fechaInicio) {
-        where.fechaHora.gte = new Date(`${filters.fechaInicio}T00:00:00.000Z`);
+        where.fechaHora.gte = parseEcuadorStartDate(filters.fechaInicio);
       }
       if (filters.fechaFin) {
-        where.fechaHora.lte = new Date(`${filters.fechaFin}T23:59:59.999Z`);
+        where.fechaHora.lte = parseEcuadorEndDate(filters.fechaFin);
       }
     }
 
@@ -78,8 +79,8 @@ export class PrismaNominaPersistence {
     if (!empleado) return null;
 
     const hoy = formatDate(new Date());
-    const inicio = new Date(`${hoy}T00:00:00.000Z`);
-    const fin = new Date(`${hoy}T23:59:59.999Z`);
+    const inicio = parseEcuadorStartDate(hoy);
+    const fin = parseEcuadorEndDate(hoy);
 
     const registrosHoy = await prisma.asistencia.findMany({
       where: { empleadoId, fechaHora: { gte: inicio, lte: fin } },

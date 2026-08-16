@@ -295,11 +295,11 @@ export class ComprasController {
             }
             // Verificar si la fecha del abono cae en un período cerrado de caja
             const { prisma } = await import('../../../../../config/prismaClient.js');
-            const fechaAbono = req.body.fecha ? new Date(req.body.fecha) : new Date();
+            const fechaAbono = req.body.fecha ? parseEcuadorStartDate(req.body.fecha) : new Date();
             const cierreBloqueante = await prisma.cierreCaja.findFirst({
                 where: {
-                    fechaInicio: { lte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 23, 59, 59, 999) },
-                    fechaFin: { gte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 0, 0, 0, 0) },
+                    fechaInicio: { lte: fechaAbono },
+                    fechaFin: { gte: fechaAbono },
                 },
             });
             if (cierreBloqueante) {
@@ -339,8 +339,8 @@ export class ComprasController {
                 const fechaAbono = new Date(targetAbono.fecha);
                 const cierreBloqueante = await prisma.cierreCaja.findFirst({
                     where: {
-                        fechaInicio: { lte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 23, 59, 59, 999) },
-                        fechaFin: { gte: new Date(fechaAbono.getFullYear(), fechaAbono.getMonth(), fechaAbono.getDate(), 0, 0, 0, 0) },
+                        fechaInicio: { lte: fechaAbono },
+                        fechaFin: { gte: fechaAbono },
                     },
                 });
                 if (cierreBloqueante) {
