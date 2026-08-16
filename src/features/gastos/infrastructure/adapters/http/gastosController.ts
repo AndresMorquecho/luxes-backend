@@ -1,7 +1,13 @@
 import type { Request, Response } from 'express';
 import { prisma } from '../../../../../config/prismaClient.js';
 import { Prisma } from '@prisma/client';
-import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
+import { 
+  parseEcuadorStartDate, 
+  parseEcuadorEndDate, 
+  getEcuadorDateString, 
+  buildEcuadorQueryRange, 
+  parseDateOnly 
+} from '../../../../../shared/utils/dateOnly.js';
 
 async function nextGastoId(): Promise<string> {
   const rows = await prisma.gasto.findMany({ select: { id: true } });
@@ -46,7 +52,7 @@ function parseGastoFecha(fechaInput: any): Date {
   if (!fechaInput) return new Date();
   const str = String(fechaInput).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    return new Date(`${str}T12:00:00.000Z`);
+    return new Date(`${str}T12:00:00.000-05:00`);
   }
   return new Date(str);
 }
@@ -56,11 +62,14 @@ function parseGastoFecha(fechaInput: any): Date {
  * Returns the overlapping CierreCaja record or null.
  */
 async function findCierreThatCovers(fecha: Date | string) {
-  const f = typeof fecha === 'string' ? new Date(fecha) : fecha;
+  const dayStr = getEcuadorDateString(fecha);
+  if (!dayStr) return null;
+  const dayDate = parseDateOnly(dayStr);
+  if (!dayDate) return null;
   return prisma.cierreCaja.findFirst({
     where: {
-      fechaInicio: { lte: f },
-      fechaFin: { gte: f },
+      fechaInicio: { lte: dayDate },
+      fechaFin: { gte: dayDate },
     },
   });
 }
@@ -383,14 +392,18 @@ export class GastosController {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Fechas desde y hasta son requeridas' } });
       }
 
-      const desdeDate = parseEcuadorStartDate(String(desde));
-      const hastaLimit = parseEcuadorEndDate(String(hasta));
+      const desdeStr = String(desde).split('T')[0];
+      const hastaStr = String(hasta).split('T')[0];
+      const { gte, lte } = buildEcuadorQueryRange(desdeStr, hastaStr);
+
+      const isInRange = (itemDate?: Date | string | null) => {
+        const ecDay = getEcuadorDateString(itemDate);
+        return Boolean(ecDay && ecDay >= desdeStr && ecDay <= hastaStr);
+      };
 
       // 1. Obtener ingresos (abonos reales de proformas)
-      const abonosProforma = await prisma.abonoProforma.findMany({
-        where: {
-          fecha: { gte: desdeDate, lte: hastaLimit },
-        },
+      const rawAbonosProforma = await prisma.abonoProforma.findMany({
+        where: { fecha: { gte, lte } },
         include: { 
           metodoPago: true,
           registradoPor: { select: { id: true, nombre: true } },
@@ -403,10 +416,8 @@ export class GastosController {
       });
 
       // 1.5 Obtener ingresos manuales de caja
-      const ingresosManuales = await prisma.ingreso.findMany({
-        where: {
-          fecha: { gte: desdeDate, lte: hastaLimit },
-        },
+      const rawIngresosManuales = await prisma.ingreso.findMany({
+        where: { fecha: { gte, lte } },
         include: {
           metodoPago: true,
           registradoPor: { select: { id: true, nombre: true } }
@@ -414,15 +425,51 @@ export class GastosController {
       });
 
       // 1.6 Obtener transferencias entre cuentas
-      const transferencias = await prisma.transferencia.findMany({
-        where: {
-          fecha: { gte: desdeDate, lte: hastaLimit }
-        },
+      const rawTransferencias = await prisma.transferencia.findMany({
+        where: { fecha: { gte, lte } },
         include: {
           origenMetodo: true,
           destinoMetodo: true,
         }
       });
+
+      // 2. Obtener egresos (gastos + abonos de compra)
+      const rawGastos = await prisma.gasto.findMany({
+        where: { fecha: { gte, lte } },
+        include: { 
+          metodoPago: true,
+          registradoPor: { select: { id: true, nombre: true } },
+          mantenimientos: true
+        },
+      });
+
+      const rawAbonosCompra = await prisma.abonoCompra.findMany({
+        where: { fecha: { gte, lte } },
+        include: { 
+          metodoPago: true,
+          registradoPor: { select: { id: true, nombre: true } },
+          ordenCompra: {
+            include: {
+              proveedor: true
+            }
+          }
+        },
+      });
+
+      const rawAnticipos = await prisma.egreso.findMany({
+        where: {
+          tipo: 'ANTICIPO',
+          fecha: { gte, lte }
+        }
+      });
+
+      // Filtrar exactamente al día de Ecuador
+      const abonosProforma = rawAbonosProforma.filter(ab => isInRange(ab.fecha));
+      const ingresosManuales = rawIngresosManuales.filter(ing => isInRange(ing.fecha));
+      const transferencias = rawTransferencias.filter(t => isInRange(t.fecha));
+      const gastos = rawGastos.filter(g => isInRange(g.fecha));
+      const abonos = rawAbonosCompra.filter(a => isInRange(a.fecha));
+      const anticipos = rawAnticipos.filter(ant => isInRange(ant.fecha));
 
       // Calcular montos de ingresos por método de pago
       const ingresosDetalle: Record<string, { id: string; nombre: string; total: number }> = {};
@@ -451,41 +498,6 @@ export class GastosController {
         }
         ingresosDetalle[methodId].total += total;
       }
-
-      // 2. Obtener egresos (gastos + abonos de compra)
-      const gastos = await prisma.gasto.findMany({
-        where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-        include: { 
-          metodoPago: true,
-          registradoPor: { select: { id: true, nombre: true } },
-          mantenimientos: true
-        },
-      });
-
-      const abonos = await prisma.abonoCompra.findMany({
-        where: { fecha: { gte: desdeDate, lte: hastaLimit } },
-        include: { 
-          metodoPago: true,
-          registradoPor: { select: { id: true, nombre: true } },
-          ordenCompra: {
-            include: {
-              proveedor: true
-            }
-          }
-        },
-      });
-
-      const anticipos = await prisma.egreso.findMany({
-        where: {
-          tipo: 'ANTICIPO',
-          fecha: { gte: desdeDate, lte: hastaLimit }
-        }
-      });
-
-      const nominas = await prisma.nominaRegistro.findMany({
-        // For nomina, since payments can happen anytime during the period, 
-        // we'll filter them below by the abono's date if it exists
-      });
 
       // Calcular montos de egresos por método de pago
       const egresosDetalle: Record<string, { id: string; nombre: string; total: number }> = {};
@@ -545,58 +557,57 @@ export class GastosController {
       }
 
       // 2.5 Calcular el Saldo de Arrastre acumulado (saldoInicial real) para cada cuenta HASTA la fecha de consulta (exclusivo)
-      const abonosProformaPrev = await prisma.abonoProforma.groupBy({
-        by: ['metodoPagoId'],
-        _sum: { monto: true },
-        where: { fecha: { lt: desdeDate } }
-      } as any);
-
-      const ingresosManualesPrev = await prisma.ingreso.groupBy({
-        by: ['metodoPagoId'],
-        _sum: { monto: true },
-        where: { fecha: { lt: desdeDate } }
-      } as any);
-
-      const transRecibidasPrev = await prisma.transferencia.groupBy({
-        by: ['destinoMetodoId'],
-        _sum: { monto: true },
-        where: { fecha: { lt: desdeDate } }
-      } as any);
-
-      const gastosPrev = await prisma.gasto.groupBy({
-        by: ['metodoPagoId'],
-        _sum: { monto: true },
-        where: { fecha: { lt: desdeDate } }
-      } as any);
-
-      const abonosCompraPrev = await prisma.abonoCompra.groupBy({
-        by: ['metodoPagoId'],
-        _sum: { monto: true },
-        where: { fecha: { lt: desdeDate } }
-      } as any);
-
-      const transEnviadasPrev = await prisma.transferencia.groupBy({
-        by: ['origenMetodoId'],
-        _sum: { monto: true },
-        where: { fecha: { lt: desdeDate } }
-      } as any);
-
-      const mapPrevSum = (items: any[], key = 'metodoPagoId') => {
-        const map: Record<string, number> = {};
-        for (const item of items) {
-          const id = item[key];
-          if (id) map[id] = Number(item._sum.monto || 0);
-        }
-        return map;
+      const isBeforeDesde = (itemDate?: Date | string | null) => {
+        const ecDay = getEcuadorDateString(itemDate);
+        return Boolean(ecDay && ecDay < desdeStr);
       };
 
-      const ingProformaPrevMap = mapPrevSum(abonosProformaPrev);
-      const ingManualPrevMap = mapPrevSum(ingresosManualesPrev);
-      const transRecibidasPrevMap = mapPrevSum(transRecibidasPrev, 'destinoMetodoId');
+      const [allAbonosProformaPrev, allIngresosManualesPrev, allTransPrev, allGastosPrev, allAbonosCompraPrev] = await Promise.all([
+        prisma.abonoProforma.findMany({ where: { fecha: { lt: lte } } }),
+        prisma.ingreso.findMany({ where: { fecha: { lt: lte } } }),
+        prisma.transferencia.findMany({ where: { fecha: { lt: lte } } }),
+        prisma.gasto.findMany({ where: { fecha: { lt: lte } } }),
+        prisma.abonoCompra.findMany({ where: { fecha: { lt: lte } } }),
+      ]);
 
-      const gastosPrevMap = mapPrevSum(gastosPrev);
-      const abonosCompraPrevMap = mapPrevSum(abonosCompraPrev);
-      const transEnviadasPrevMap = mapPrevSum(transEnviadasPrev, 'origenMetodoId');
+      const ingProformaPrevMap: Record<string, number> = {};
+      allAbonosProformaPrev.filter(ab => isBeforeDesde(ab.fecha)).forEach(ab => {
+        if (ab.metodoPagoId) {
+          ingProformaPrevMap[ab.metodoPagoId] = (ingProformaPrevMap[ab.metodoPagoId] || 0) + Number(ab.monto);
+        }
+      });
+
+      const ingManualPrevMap: Record<string, number> = {};
+      allIngresosManualesPrev.filter(ing => isBeforeDesde(ing.fecha)).forEach(ing => {
+        if (ing.metodoPagoId) {
+          ingManualPrevMap[ing.metodoPagoId] = (ingManualPrevMap[ing.metodoPagoId] || 0) + Number(ing.monto);
+        }
+      });
+
+      const transRecibidasPrevMap: Record<string, number> = {};
+      const transEnviadasPrevMap: Record<string, number> = {};
+      allTransPrev.filter(t => isBeforeDesde(t.fecha)).forEach(t => {
+        if (t.destinoMetodoId) {
+          transRecibidasPrevMap[t.destinoMetodoId] = (transRecibidasPrevMap[t.destinoMetodoId] || 0) + Number(t.monto);
+        }
+        if (t.origenMetodoId) {
+          transEnviadasPrevMap[t.origenMetodoId] = (transEnviadasPrevMap[t.origenMetodoId] || 0) + Number(t.monto);
+        }
+      });
+
+      const gastosPrevMap: Record<string, number> = {};
+      allGastosPrev.filter(g => isBeforeDesde(g.fecha)).forEach(g => {
+        if (g.metodoPagoId) {
+          gastosPrevMap[g.metodoPagoId] = (gastosPrevMap[g.metodoPagoId] || 0) + Number(g.monto);
+        }
+      });
+
+      const abonosCompraPrevMap: Record<string, number> = {};
+      allAbonosCompraPrev.filter(ab => isBeforeDesde(ab.fecha)).forEach(ab => {
+        if (ab.metodoPagoId) {
+          abonosCompraPrevMap[ab.metodoPagoId] = (abonosCompraPrevMap[ab.metodoPagoId] || 0) + Number(ab.monto);
+        }
+      });
 
       const saldosInicialesMap: Record<string, number> = {};
       const metodosPagoAll = await prisma.metodoPago.findMany();
@@ -810,10 +821,12 @@ export class GastosController {
         }))
       ].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
+      const dayStartDate = parseDateOnly(desdeStr);
+      const dayEndDate = parseDateOnly(hastaStr);
       const cierreExistente = await prisma.cierreCaja.findFirst({
         where: {
-          fechaInicio: { lte: hastaLimit },
-          fechaFin: { gte: desdeDate }
+          fechaInicio: { lte: dayEndDate! },
+          fechaFin: { gte: dayStartDate! }
         }
       });
 
@@ -867,8 +880,12 @@ export class GastosController {
       }
 
       // Verificar que no exista un cierre que se solape con este rango
-      const fi = parseEcuadorStartDate(b.fechaInicio);
-      const ff = parseEcuadorEndDate(b.fechaFin);
+      const fi = parseDateOnly(b.fechaInicio);
+      const ff = parseDateOnly(b.fechaFin);
+      if (!fi || !ff) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Fechas de inicio y fin son inválidas' } });
+      }
+
       const solapado = await prisma.cierreCaja.findFirst({
         where: {
           fechaInicio: { lte: ff },
@@ -933,19 +950,24 @@ export class GastosController {
       const { desde, hasta, tipo, metodoPagoId } = req.query;
 
       // Default: últimos 30 días
-      let desdeDate = new Date();
-      desdeDate.setDate(desdeDate.getDate() - 30);
-      desdeDate = parseEcuadorStartDate(desdeDate.toISOString().slice(0, 10));
+      let desdeStr = desde ? String(desde).split('T')[0] : '';
+      let hastaStr = hasta ? String(hasta).split('T')[0] : '';
 
-      if (desde) {
-        desdeDate = parseEcuadorStartDate(String(desde));
+      if (!desdeStr) {
+        const d = new Date();
+        d.setDate(d.getDate() - 30);
+        desdeStr = d.toISOString().slice(0, 10);
+      }
+      if (!hastaStr) {
+        hastaStr = new Date().toISOString().slice(0, 10);
       }
 
-      let hastaLimit = parseEcuadorEndDate(new Date().toISOString().slice(0, 10));
+      const { gte, lte } = buildEcuadorQueryRange(desdeStr, hastaStr);
 
-      if (hasta) {
-        hastaLimit = parseEcuadorEndDate(String(hasta));
-      }
+      const isInRange = (itemDate?: Date | string | null) => {
+        const ecDay = getEcuadorDateString(itemDate);
+        return Boolean(ecDay && ecDay >= desdeStr && ecDay <= hastaStr);
+      };
 
       interface Movimiento {
         id: string;
@@ -971,7 +993,7 @@ export class GastosController {
       // 1. INGRESOS — AbonoProforma Y Ingreso Manual
       if (!tipo || tipo === 'todos' || tipo === 'ingreso') {
         const whereIngreso: any = {
-          fecha: { gte: desdeDate, lte: hastaLimit },
+          fecha: { gte, lte },
         };
         if (metodoPagoId) whereIngreso.metodoPagoId = String(metodoPagoId);
 
@@ -990,6 +1012,7 @@ export class GastosController {
         });
 
         for (const ab of abonosProforma) {
+          if (!isInRange(ab.fecha)) continue;
           movimientos.push({
             id: ab.id,
             tipo: 'ingreso',
@@ -1008,7 +1031,7 @@ export class GastosController {
 
         // Ingresos manuales
         const whereIngresoManual: any = {
-          fecha: { gte: desdeDate, lte: hastaLimit },
+          fecha: { gte, lte },
         };
         if (metodoPagoId) whereIngresoManual.metodoPagoId = String(metodoPagoId);
 
@@ -1022,6 +1045,7 @@ export class GastosController {
         });
 
         for (const ing of ingresosManuales) {
+          if (!isInRange(ing.fecha)) continue;
           const combinedFecha = new Date(ing.fecha);
           if (ing.createdAt) {
             const timeRef = new Date(ing.createdAt);
@@ -1047,7 +1071,7 @@ export class GastosController {
 
       // 1.7 TRANSFERENCIAS entre cuentas (afectan origen como egreso y destino como ingreso)
       const whereTransferencia: any = {
-        fecha: { gte: desdeDate, lte: hastaLimit },
+        fecha: { gte, lte },
       };
       
       if (metodoPagoId) {
@@ -1068,6 +1092,7 @@ export class GastosController {
       });
 
       for (const t of transferencias) {
+        if (!isInRange(t.fecha)) continue;
         const combinedFecha = new Date(t.fecha);
         if (t.createdAt) {
           const timeRef = new Date(t.createdAt);
@@ -1149,7 +1174,7 @@ export class GastosController {
       // 2. EGRESOS — Gastos
       if (!tipo || tipo === 'todos' || tipo === 'egreso') {
         const whereGasto: any = {
-          fecha: { gte: desdeDate, lte: hastaLimit },
+          fecha: { gte, lte },
         };
         if (metodoPagoId) whereGasto.metodoPagoId = String(metodoPagoId);
 
@@ -1163,6 +1188,7 @@ export class GastosController {
         });
 
         for (const g of gastos) {
+          if (!isInRange(g.fecha)) continue;
           const combinedFecha = new Date(g.fecha);
           if (g.createdAt) {
             const timeRef = new Date(g.createdAt);
@@ -1190,7 +1216,7 @@ export class GastosController {
 
         // 3. EGRESOS — AbonoCompra
         const whereAbono: any = {
-          fecha: { gte: desdeDate, lte: hastaLimit },
+          fecha: { gte, lte },
         };
         if (metodoPagoId) whereAbono.metodoPagoId = String(metodoPagoId);
 
@@ -1212,6 +1238,7 @@ export class GastosController {
         });
 
         for (const ab of abonosCompra) {
+          if (!isInRange(ab.fecha)) continue;
           const ref = ab.referencia || '';
           const esPagoAjuste = /ajuste por edición/i.test(ref);
           const cxp = ab.ordenCompra?.cuentaPorPagar;
@@ -1241,12 +1268,13 @@ export class GastosController {
         const anticipos = await prisma.egreso.findMany({
           where: {
             tipo: 'ANTICIPO',
-            fecha: { gte: desdeDate, lte: hastaLimit }
+            fecha: { gte, lte }
           },
           include: { empleado: { select: { nombre: true } } }
         });
 
         for (const ant of anticipos) {
+          if (!isInRange(ant.fecha)) continue;
           movimientos.push({
             id: ant.id,
             tipo: 'egreso',
@@ -1263,8 +1291,6 @@ export class GastosController {
           });
         }
 
-
-
         // 4. EGRESOS — Saldos pendientes de órdenes de compra (compromiso, no caja)
         if (!metodoPagoId) {
           const cxpPendientes = await prisma.cuentaPorPagar.findMany({
@@ -1272,7 +1298,7 @@ export class GastosController {
               saldo: { gt: 0.01 },
               ordenCompra: {
                 estado: { in: ['aprobada', 'parcialmente_recibida'] },
-                fecha: { gte: desdeDate, lte: hastaLimit },
+                fecha: { gte, lte },
               },
             },
             include: {
@@ -1284,7 +1310,7 @@ export class GastosController {
 
           for (const cxp of cxpPendientes) {
             const oc = cxp.ordenCompra;
-            if (!oc) continue;
+            if (!oc || !isInRange(oc.fecha)) continue;
             const saldo = Number(cxp.saldo);
             const total = Number(cxp.montoTotal);
             movimientos.push({

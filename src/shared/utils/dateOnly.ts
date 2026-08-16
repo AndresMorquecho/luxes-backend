@@ -48,3 +48,33 @@ export function parseEcuadorEndDate(value?: string | Date | null): Date {
   return new Date(str);
 }
 
+/**
+ * Extrae la fecha en calendario de Ecuador (YYYY-MM-DD) para cualquier Date o string.
+ * - Si el timestamp es medianoche UTC (00:00:00.000Z), proviene de un selector de fecha calendario y toma la fecha UTC directa.
+ * - Si el timestamp tiene hora de transacción real (como las 8:13 p.m. de Ecuador -> 01:13:00 UTC), aplica el desplazamiento UTC-5 (-5h).
+ */
+export function getEcuadorDateString(d?: Date | string | null): string {
+  if (!d) return '';
+  const date = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(date.getTime())) return '';
+  const isMidnightUtc = date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0;
+  if (isMidnightUtc) {
+    return date.toISOString().split('T')[0];
+  }
+  const ec = new Date(date.getTime() - 5 * 3600 * 1000);
+  return ec.toISOString().split('T')[0];
+}
+
+/**
+ * Construye un rango de consulta en Prisma que cubre ampliamente:
+ * - Registros en tiempo real de Ecuador (desde 00:00:00-05:00 hasta hasta 23:59:59.999-05:00)
+ * - Registros con fecha de calendario guardados con medianoche UTC (desde 00:00:00Z)
+ */
+export function buildEcuadorQueryRange(desdeStr: string, hastaStr: string): { gte: Date; lte: Date } {
+  const cleanDesde = desdeStr.split('T')[0];
+  const gte = new Date(`${cleanDesde}T00:00:00.000Z`);
+  const lte = parseEcuadorEndDate(hastaStr);
+  return { gte, lte };
+}
+
+
