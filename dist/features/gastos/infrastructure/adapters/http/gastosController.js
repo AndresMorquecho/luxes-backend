@@ -1,5 +1,6 @@
 import { prisma } from '../../../../../config/prismaClient.js';
 import { Prisma } from '@prisma/client';
+import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 async function nextGastoId() {
     const rows = await prisma.gasto.findMany({ select: { id: true } });
     const max = rows.reduce((m, r) => {
@@ -50,14 +51,11 @@ function parseGastoFecha(fechaInput) {
  * Returns the overlapping CierreCaja record or null.
  */
 async function findCierreThatCovers(fecha) {
-    const d = new Date(fecha);
-    d.setHours(0, 0, 0, 0);
-    const dEnd = new Date(d);
-    dEnd.setHours(23, 59, 59, 999);
+    const f = typeof fecha === 'string' ? new Date(fecha) : fecha;
     return prisma.cierreCaja.findFirst({
         where: {
-            fechaInicio: { lte: dEnd },
-            fechaFin: { gte: d },
+            fechaInicio: { lte: f },
+            fechaFin: { gte: f },
         },
     });
 }
@@ -348,10 +346,8 @@ export class GastosController {
             if (!desde || !hasta) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Fechas desde y hasta son requeridas' } });
             }
-            const desdeStr = String(desde);
-            const desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
-            const hastaStr = String(hasta);
-            const hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+            const desdeDate = parseEcuadorStartDate(String(desde));
+            const hastaLimit = parseEcuadorEndDate(String(hasta));
             // 1. Obtener ingresos (abonos reales de proformas)
             const abonosProforma = await prisma.abonoProforma.findMany({
                 where: {
@@ -717,7 +713,7 @@ export class GastosController {
                     monto: Number(ab.monto),
                     facturaNumero: ab.ordenCompra?.numero || '',
                     ivaPorcentaje: '',
-                    detalle: ab.referencia || 'PAGO COMPRA PROVEEDOR',
+                    detalle: ab.referencia ? `Pago OC ${ab.ordenCompra?.numero || ''} — ${ab.referencia}` : `Pago OC ${ab.ordenCompra?.numero || ''} — PAGO COMPRA`,
                     esTransferencia: false,
                 })),
                 ...transferencias.map(t => ({
@@ -735,7 +731,7 @@ export class GastosController {
             ].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
             const cierreExistente = await prisma.cierreCaja.findFirst({
                 where: {
-                    fechaInicio: { lte: desdeDate },
+                    fechaInicio: { lte: hastaLimit },
                     fechaFin: { gte: desdeDate }
                 }
             });
@@ -785,8 +781,8 @@ export class GastosController {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Datos incompletos para cierre de caja' } });
             }
             // Verificar que no exista un cierre que se solape con este rango
-            const fi = new Date(String(b.fechaInicio).includes('T') ? b.fechaInicio : b.fechaInicio + 'T00:00:00');
-            const ff = new Date(String(b.fechaFin).includes('T') ? b.fechaFin : b.fechaFin + 'T23:59:59.999');
+            const fi = parseEcuadorStartDate(b.fechaInicio);
+            const ff = parseEcuadorEndDate(b.fechaFin);
             const solapado = await prisma.cierreCaja.findFirst({
                 where: {
                     fechaInicio: { lte: ff },
@@ -801,8 +797,8 @@ export class GastosController {
             const usuarioId = req.user?.id || null;
             const cierre = await prisma.cierreCaja.create({
                 data: {
-                    fechaInicio: new Date(b.fechaInicio),
-                    fechaFin: new Date(b.fechaFin),
+                    fechaInicio: fi,
+                    fechaFin: ff,
                     totalIngresos: Number(b.totalIngresos),
                     totalEgresos: Number(b.totalEgresos),
                     balance: Number(b.totalIngresos) - Number(b.totalEgresos),
@@ -846,16 +842,13 @@ export class GastosController {
             // Default: últimos 30 días
             let desdeDate = new Date();
             desdeDate.setDate(desdeDate.getDate() - 30);
-            desdeDate.setHours(0, 0, 0, 0);
+            desdeDate = parseEcuadorStartDate(desdeDate.toISOString().slice(0, 10));
             if (desde) {
-                const desdeStr = String(desde);
-                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+                desdeDate = parseEcuadorStartDate(String(desde));
             }
-            let hastaLimit = new Date();
-            hastaLimit.setHours(23, 59, 59, 999);
+            let hastaLimit = parseEcuadorEndDate(new Date().toISOString().slice(0, 10));
             if (hasta) {
-                const hastaStr = String(hasta);
-                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+                hastaLimit = parseEcuadorEndDate(String(hasta));
             }
             const movimientos = [];
             // 1. INGRESOS — AbonoProforma Y Ingreso Manual
@@ -1212,16 +1205,13 @@ export class GastosController {
             // Default: últimos 30 días
             let desdeDate = new Date();
             desdeDate.setDate(desdeDate.getDate() - 30);
-            desdeDate.setHours(0, 0, 0, 0);
+            desdeDate = parseEcuadorStartDate(desdeDate.toISOString().slice(0, 10));
             if (desde) {
-                const desdeStr = String(desde);
-                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+                desdeDate = parseEcuadorStartDate(String(desde));
             }
-            let hastaLimit = new Date();
-            hastaLimit.setHours(23, 59, 59, 999);
+            let hastaLimit = parseEcuadorEndDate(new Date().toISOString().slice(0, 10));
             if (hasta) {
-                const hastaStr = String(hasta);
-                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+                hastaLimit = parseEcuadorEndDate(String(hasta));
             }
             // 1. Usuarios y actividades
             const dbUsers = await prisma.user.findMany({
@@ -1772,9 +1762,9 @@ export class GastosController {
             if (startDateFiltro || endDateFiltro) {
                 where.fecha = {};
                 if (startDateFiltro)
-                    where.fecha.gte = new Date(startDateFiltro);
+                    where.fecha.gte = parseEcuadorStartDate(startDateFiltro);
                 if (endDateFiltro)
-                    where.fecha.lte = new Date(endDateFiltro + 'T23:59:59.999');
+                    where.fecha.lte = parseEcuadorEndDate(endDateFiltro);
             }
             if (search) {
                 where.OR = [
@@ -1932,9 +1922,9 @@ export class GastosController {
             if (startDateFiltro || endDateFiltro) {
                 where.fecha = {};
                 if (startDateFiltro)
-                    where.fecha.gte = new Date(startDateFiltro);
+                    where.fecha.gte = parseEcuadorStartDate(startDateFiltro);
                 if (endDateFiltro)
-                    where.fecha.lte = new Date(endDateFiltro + 'T23:59:59.999');
+                    where.fecha.lte = parseEcuadorEndDate(endDateFiltro);
             }
             if (search) {
                 where.referencia = { contains: search, mode: 'insensitive' };
@@ -2083,13 +2073,10 @@ export class GastosController {
             let desdeDate;
             let hastaLimit;
             if (desde) {
-                const desdeStr = String(desde);
-                // Use UTC midnight so @db.Date fields (stored as 2026-07-01T00:00:00Z) are included
-                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00Z');
+                desdeDate = parseEcuadorStartDate(String(desde));
             }
             if (hasta) {
-                const hastaStr = String(hasta);
-                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999Z');
+                hastaLimit = parseEcuadorEndDate(String(hasta));
             }
             const hasDateFilter = !!(desdeDate && hastaLimit);
             // --- 1. INGRESOS Y VENTAS POR MEDIO DE CONSECUCIÓN (LUXES, REDES, VENDEDORES) ---

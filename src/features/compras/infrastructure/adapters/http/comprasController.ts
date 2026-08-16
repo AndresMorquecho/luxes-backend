@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import type { ComprasService } from '../../../application/services/ComprasService.js';
+import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 
 export class ComprasController {
   constructor(private readonly service: ComprasService) {}
@@ -419,10 +420,8 @@ export class ComprasController {
       let hastaLimit: Date | undefined;
 
       if (desde && hasta) {
-        const desdeStr = String(desde);
-        desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
-        const hastaStr = String(hasta);
-        hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+        desdeDate = parseEcuadorStartDate(String(desde));
+        hastaLimit = parseEcuadorEndDate(String(hasta));
       }
 
       const data = await this.service.getMetodosPago(desdeDate, hastaLimit);

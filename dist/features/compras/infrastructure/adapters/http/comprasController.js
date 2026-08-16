@@ -1,3 +1,4 @@
+import { parseEcuadorStartDate, parseEcuadorEndDate } from '../../../../../shared/utils/dateOnly.js';
 export class ComprasController {
     service;
     constructor(service) {
@@ -403,10 +404,8 @@ export class ComprasController {
             let desdeDate;
             let hastaLimit;
             if (desde && hasta) {
-                const desdeStr = String(desde);
-                desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
-                const hastaStr = String(hasta);
-                hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+                desdeDate = parseEcuadorStartDate(String(desde));
+                hastaLimit = parseEcuadorEndDate(String(hasta));
             }
             const data = await this.service.getMetodosPago(desdeDate, hastaLimit);
             return this.ok(res, data);

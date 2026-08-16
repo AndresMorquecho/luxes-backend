@@ -57,20 +57,17 @@ function toGastoDate(f) {
         return new Date();
     if (typeof f === 'string') {
         const datePart = f.split('T')[0];
-        return new Date(`${datePart}T12:00:00`);
+        return new Date(`${datePart}T12:00:00.000-05:00`);
     }
     const datePart = f.toISOString().split('T')[0];
-    return new Date(`${datePart}T12:00:00`);
+    return new Date(`${datePart}T12:00:00.000-05:00`);
 }
 async function findCierreThatCovers(fecha) {
-    const d = toGastoDate(fecha);
-    d.setHours(0, 0, 0, 0);
-    const dEnd = new Date(d);
-    dEnd.setHours(23, 59, 59, 999);
+    const f = typeof fecha === 'string' ? new Date(fecha) : fecha;
     return prisma.cierreCaja.findFirst({
         where: {
-            fechaInicio: { lte: dEnd },
-            fechaFin: { gte: d },
+            fechaInicio: { lte: f },
+            fechaFin: { gte: f },
         },
     });
 }

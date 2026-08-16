@@ -17,3 +17,34 @@ export function formatDateOnly(value?: Date | string | null): string | null {
   const d = String(date.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+/**
+ * Parsea el inicio de un día en zona horaria de Ecuador (UTC-5).
+ * Ej: "2026-08-15" -> 2026-08-15T00:00:00.000-05:00 (05:00:00 UTC).
+ */
+export function parseEcuadorStartDate(value?: string | Date | null): Date {
+  if (!value) return new Date();
+  if (value instanceof Date) return value;
+  const str = String(value).trim();
+  const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) {
+    return new Date(`${match[1]}T00:00:00.000-05:00`);
+  }
+  return new Date(str);
+}
+
+/**
+ * Parsea el fin de un día en zona horaria de Ecuador (UTC-5).
+ * Ej: "2026-08-15" -> 2026-08-15T23:59:59.999-05:00 (04:59:59.999 UTC del día siguiente).
+ */
+export function parseEcuadorEndDate(value?: string | Date | null): Date {
+  if (!value) return new Date();
+  if (value instanceof Date) return value;
+  const str = String(value).trim();
+  const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) {
+    return new Date(`${match[1]}T23:59:59.999-05:00`);
+  }
+  return new Date(str);
+}
+
