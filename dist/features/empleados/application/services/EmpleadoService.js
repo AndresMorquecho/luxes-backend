@@ -95,7 +95,7 @@ export class EmpleadoService {
         if (data.foto !== undefined) {
             updateData.foto = await saveBase64FotoToFile(id, data.foto);
             if (current.foto && current.foto !== updateData.foto && current.foto.startsWith('/uploads/')) {
-                await safeUnlinkFile(path.resolve('uploads'), current.foto.replace('/uploads/', ''));
+                await safeUnlinkFile(path.resolve('uploads'), current.foto);
             }
         }
         if (data.contraseña?.trim()) {

@@ -45,27 +45,49 @@ async function collectDbUrls() {
     // 3. Proformas
     const abonosProforma = await prisma.abonoProforma.findMany({ select: { comprobanteUrl: true } });
     abonosProforma.forEach((a) => addUrl(a.comprobanteUrl));
-    // 4. Proyectos Fases (JSON)
-    const fases = await prisma.proyectoFase.findMany({ select: { datos: true } });
+    // 4. Proyectos Fases y Fases ALUX (JSON)
+    const [fases, proyectos] = await Promise.all([
+        prisma.proyectoFase.findMany({ select: { datos: true } }),
+        prisma.proyecto.findMany({ select: { fasesAlux: true } }),
+    ]);
+    const checkObj = (obj) => {
+        if (!obj || typeof obj !== 'object')
+            return;
+        if (typeof obj.url === 'string')
+            addUrl(obj.url);
+        if (typeof obj.imageUrl === 'string')
+            addUrl(obj.imageUrl);
+        if (Array.isArray(obj.archivosArte))
+            obj.archivosArte.forEach(checkObj);
+        if (Array.isArray(obj.evidencias))
+            obj.evidencias.forEach(checkObj);
+    };
     for (const fase of fases) {
         if (!fase.datos)
             continue;
         try {
             const parsed = JSON.parse(fase.datos);
-            const checkObj = (obj) => {
-                if (!obj || typeof obj !== 'object')
-                    return;
-                if (typeof obj.url === 'string')
-                    addUrl(obj.url);
-                if (Array.isArray(obj.archivosArte))
-                    obj.archivosArte.forEach(checkObj);
-                if (Array.isArray(obj.evidencias))
-                    obj.evidencias.forEach(checkObj);
-            };
             checkObj(parsed);
         }
         catch {
             // Ignorar errores de parseo JSON
+        }
+    }
+    for (const proy of proyectos) {
+        if (!proy.fasesAlux)
+            continue;
+        try {
+            const parsedAlux = typeof proy.fasesAlux === 'string' ? JSON.parse(proy.fasesAlux) : proy.fasesAlux;
+            if (Array.isArray(parsedAlux)) {
+                parsedAlux.forEach((fase) => {
+                    if (Array.isArray(fase?.evidencias)) {
+                        fase.evidencias.forEach(checkObj);
+                    }
+                });
+            }
+        }
+        catch {
+            // Ignorar errores de parseo
         }
     }
     // 5. Nómina Registros (JSON abonos)

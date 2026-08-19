@@ -86,6 +86,7 @@ router.get('/:id', (req, res) => controller.getById(req, res));
 router.post('/', (req, res) => controller.create(req, res));
 router.put('/:id', (req, res) => controller.update(req, res));
 router.delete('/:id', (req, res) => controller.remove(req, res));
+router.delete('/:id/archivos/:filename', (req, res) => controller.deleteArchivoProyecto(req, res));
 router.post('/:id/avanzar-fase', (req, res) => controller.avanzarFase(req, res));
 router.put('/:id/instalacion', (req, res) => controller.updateInstalacion(req, res));
 

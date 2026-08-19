@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { prisma } from '../../../../../config/prismaClient.js';
 import path from 'path';
 import fs from 'fs/promises';
-import { safeRemoveDir } from '../../../../../shared/utils/pathSafetyHelper.js';
+import { safeRemoveDir, safeUnlinkFile, safeResolvePath } from '../../../../../shared/utils/pathSafetyHelper.js';
 import { sendPushToRole, sendPushToAllActive } from '../../../../../shared/services/pushNotificationService.js';
 import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
 
@@ -1434,6 +1434,36 @@ export class ProyectosController {
       return res.status(404).json({
         success: false,
         error: { code: 'NOT_FOUND', message: 'Archivo no encontrado' },
+      });
+    }
+  }
+
+  /** Elimina un archivo individual de proyecto del disco de forma segura. */
+  async deleteArchivoProyecto(req: Request, res: Response): Promise<Response> {
+    try {
+      const proyectoId = String(req.params.id || '').trim();
+      const filename = decodeURIComponent(String(req.params.filename || '')).trim();
+      const safeName = path.basename(filename);
+
+      if (!proyectoId || !safeName || safeName === '.' || safeName === '..') {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_INPUT', message: 'Identificador de proyecto o archivo inválido' },
+        });
+      }
+
+      const fileRelative = `/uploads/proyectos/${proyectoId}/${safeName}`;
+      await safeUnlinkFile(path.resolve('uploads'), fileRelative);
+
+      return res.status(200).json({
+        success: true,
+        data: { proyectoId, filename: safeName },
+      });
+    } catch (error) {
+      console.error('[proyectos/deleteArchivoProyecto]', error);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar archivo' },
       });
     }
   }
