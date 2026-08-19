@@ -593,6 +593,38 @@ export class ProyectosController {
         include: proyectoInclude,
       });
 
+      // Notificar a trabajadores sobre cualquier proyecto nuevo
+      try {
+        const createdBy = (req as any).user?.nombre || proyecto.responsable || 'Sistema';
+        const clienteLabel = proyecto.clienteNombre || proyecto.clienteEmpresa || 'Sin cliente';
+
+        await prisma.notification.create({
+          data: {
+            title: 'Nuevo Proyecto Creado',
+            message: `Se ha creado el proyecto "${proyecto.nombre}" (${proyecto.id}) para ${clienteLabel}. Responsable: ${proyecto.responsable || 'Sin asignar'}.`,
+            rol: 'trabajador',
+            createdBy,
+          },
+        });
+
+        const payloadTrabajador = {
+          title: 'Nuevo Proyecto Creado',
+          body: `Proyecto "${proyecto.nombre}" (${proyecto.id}) — ${clienteLabel}`,
+          icon: '/LogoGlobo.png',
+          badge: '/LogoGlobo.png',
+          data: {
+            url: `/proyectos/${proyecto.id}`,
+            action: 'view_project',
+            proyectoId: proyecto.id,
+          },
+        };
+
+        await sendPushToRole('trabajador', payloadTrabajador);
+        console.log(`[Proyecto ${proyecto.id}] Notificación enviada al rol trabajador`);
+      } catch (notifError) {
+        console.error('[Proyecto Create] Error enviando notificación a trabajador:', notifError);
+      }
+
       // Si requiere instalación, enviar notificación push y de base de datos a administradores y taller
       if (proyecto.requiereInstalacion) {
         try {

@@ -26,6 +26,10 @@ function expandRoleAliases(role) {
         aliases.add('diseñador');
         aliases.add('disenador');
     }
+    if (r === 'trabajador') {
+        aliases.add('trabajador');
+        aliases.add('Trabajador');
+    }
     return Array.from(aliases);
 }
 /** Títulos de cola de impresión que no deben mostrarse al rol Taller. */

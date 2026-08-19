@@ -32,6 +32,7 @@ function expandPushRoleAliases(rol: string): string[] {
   if (r === 'admin' || r === 'administrador') return ['admin', 'administrador'];
   if (r === 'ventas' || r === 'diseñador' || r === 'disenador') return ['ventas', 'diseñador', 'disenador'];
   if (r === 'impresión' || r === 'impresion') return ['impresión', 'impresion'];
+  if (r === 'trabajador') return ['trabajador', 'Trabajador'];
   return [r];
 }
 
