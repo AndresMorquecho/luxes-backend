@@ -610,8 +610,8 @@ export class ProyectosController {
         const payloadTrabajador = {
           title: 'Nuevo Proyecto Creado',
           body: `Proyecto "${proyecto.nombre}" (${proyecto.id}) — ${clienteLabel}`,
-          icon: '/icon.png',
-          badge: '/icon.png',
+          icon: '/LogoGlobo.png',
+          badge: '/LogoGlobo.png',
           data: {
             url: `/proyectos/${proyecto.id}`,
             action: 'view_project',
@@ -643,8 +643,8 @@ export class ProyectosController {
           const payload = {
             title: 'Nuevo Proyecto con Instalación',
             body: `Se ha creado el proyecto "${proyecto.nombre}" con requerimiento de instalación.`,
-            icon: '/icon.png',
-            badge: '/icon.png',
+            icon: '/LogoGlobo.png',
+            badge: '/LogoGlobo.png',
             data: {
               url: `/instalaciones`,
               action: 'view_installations',
@@ -718,8 +718,8 @@ export class ProyectosController {
               const payload = {
                 title: 'Nueva Fase Creada',
                 body: `${userName} creó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
-                icon: '/icon.png',
-                badge: '/icon.png',
+                icon: '/LogoGlobo.png',
+                badge: '/LogoGlobo.png',
                 data: {
                   url: `/proyectos/${id}`,
                   action: 'view_project_phase',
@@ -752,8 +752,8 @@ export class ProyectosController {
                 const payload = {
                   title: 'Fase Completada ✅',
                   body: `${userName} completó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
-                  icon: '/icon.png',
-                  badge: '/icon.png',
+                  icon: '/LogoGlobo.png',
+                  badge: '/LogoGlobo.png',
                   data: {
                     url: `/proyectos/${id}`,
                     action: 'view_project_phase',
@@ -1125,8 +1125,8 @@ export class ProyectosController {
           await sendPushToRole('taller', {
             title: '🎨 Diseño Aprobado - Listo para Impresión',
             body: `El diseño del proyecto "${proyecto?.nombre || id}" ha sido aprobado y está listo para imprimir.`,
-            icon: '/icon.png',
-            badge: '/icon.png',
+            icon: '/LogoGlobo.png',
+            badge: '/LogoGlobo.png',
             data: {
               url: '/impresiones',
               action: 'view_design',
@@ -1153,8 +1153,8 @@ export class ProyectosController {
           const payload = {
             title: 'Instalación Iniciada',
             body: `El equipo técnico ha iniciado la instalación en sitio para el proyecto "${proyecto?.nombre || id}".`,
-            icon: '/icon.png',
-            badge: '/icon.png',
+            icon: '/LogoGlobo.png',
+            badge: '/LogoGlobo.png',
             data: {
               url: `/proyectos/${id}`,
               action: 'view_project',
@@ -1182,8 +1182,8 @@ export class ProyectosController {
           const payload = {
             title: 'Instalación Finalizada 🛠️',
             body: `La instalación del proyecto "${proyecto?.nombre || id}" fue completada en sitio. Revisa y envía la encuesta al cliente.`,
-            icon: '/icon.png',
-            badge: '/icon.png',
+            icon: '/LogoGlobo.png',
+            badge: '/LogoGlobo.png',
             data: {
               url: `/proyectos/${id}?tab=COMPLETADO`,
               action: 'view_project',
@@ -1753,8 +1753,8 @@ export class ProyectosController {
         const payload = {
           title: '⭐ Nueva encuesta de satisfacción',
           body: `El cliente calificó el proyecto "${proyecto.nombre}" con ${calificacionGeneral}/5 estrellas.`,
-          icon: '/icon.png',
-          badge: '/icon.png',
+          icon: '/LogoGlobo.png',
+          badge: '/LogoGlobo.png',
           data: {
             url: `/proyectos/${proyecto.id}`,
             action: 'view_project',

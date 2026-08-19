@@ -382,8 +382,8 @@ export async function notificarDevolucionHerramientasInstalacion(params: {
       await sendPushToUsers([userId], {
         title: etiquetaCantidad,
         body: `Tienes ${etiquetaCantidad} tras el proyecto "${params.proyectoNombre}".`,
-        icon: '/icon.png',
-        badge: '/icon.png',
+        icon: '/LogoGlobo.png',
+        badge: '/LogoGlobo.png',
         data: {
           url: '/devoluciones',
           proyectoId: params.proyectoId,
