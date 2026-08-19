@@ -4,5 +4,6 @@ export function createConfiguracionRoutes(controller) {
     const router = Router();
     router.get('/', authMiddleware, (req, res) => controller.get(req, res));
     router.put('/', authMiddleware, (req, res) => controller.update(req, res));
+    router.post('/', authMiddleware, (req, res) => controller.update(req, res));
     return router;
 }

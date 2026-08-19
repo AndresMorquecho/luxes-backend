@@ -112,3 +112,50 @@ export async function sendPushToUsers(userIds, payload) {
         throw error;
     }
 }
+/**
+ * Envía notificaciones push a todos los usuarios activos con suscripción push,
+ * opcionalmente excluyendo al usuario que emitió la acción.
+ */
+export async function sendPushToAllActive(payload, excludeUserId) {
+    try {
+        const where = {
+            estado: 'activo',
+            pushSubscriptions: {
+                some: {},
+            },
+        };
+        if (excludeUserId) {
+            where.id = { not: excludeUserId };
+        }
+        const users = await prisma.user.findMany({
+            where,
+            include: {
+                pushSubscriptions: true,
+            },
+        });
+        console.log(`[Push Notification] Sending to ${users.length} active users`);
+        const pushPayload = JSON.stringify(payload);
+        for (const user of users) {
+            for (const sub of user.pushSubscriptions) {
+                try {
+                    await webpush.sendNotification({
+                        endpoint: sub.endpoint,
+                        keys: { p256dh: sub.p256dh, auth: sub.auth },
+                    }, pushPayload);
+                    console.log(`[Push Notification] Sent to ${user.nombre} (${user.email})`);
+                }
+                catch (pushErr) {
+                    console.error(`[Push Notification Error] Failed for ${sub.endpoint}:`, pushErr.message);
+                    if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+                        await prisma.pushSubscription.delete({
+                            where: { endpoint: sub.endpoint },
+                        }).catch(() => { });
+                    }
+                }
+            }
+        }
+    }
+    catch (error) {
+        console.error('[Push Notification Service] Error:', error);
+    }
+}

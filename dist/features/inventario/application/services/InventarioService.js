@@ -118,8 +118,8 @@ export class InventarioService {
         });
         return updated;
     }
-    async getMaterialHistorial(id) {
-        return this.repo.getMaterialHistorial(id);
+    async getMaterialHistorial(id, options) {
+        return this.repo.getMaterialHistorial(id, options);
     }
     // ── Importación masiva ───────────────────────────────────────────────────────
     async importMateriales(categoria, items) {

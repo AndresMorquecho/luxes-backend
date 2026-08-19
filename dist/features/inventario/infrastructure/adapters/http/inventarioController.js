@@ -170,9 +170,11 @@ export class InventarioController {
     async createMovimiento(req, res) {
         try {
             const body = req.body;
+            const user = req.user;
             const fecha = body.fecha ? new Date(String(body.fecha)) : undefined;
             const data = await this.service.registrarMovimiento({
                 ...body,
+                userId: user?.id || (typeof body.userId === 'string' ? body.userId : undefined),
                 materialId: String(req.params.id),
                 ...(fecha && !Number.isNaN(fecha.getTime()) ? { fecha } : {}),
             });
@@ -217,7 +219,20 @@ export class InventarioController {
     }
     async getMaterialHistorial(req, res) {
         try {
-            const data = await this.service.getMaterialHistorial(String(req.params.id));
+            const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+            const limit = Math.max(1, parseInt(req.query.limit, 10) || 15);
+            const fechaInicio = typeof req.query.fechaInicio === 'string' && req.query.fechaInicio.trim() ? req.query.fechaInicio.trim() : undefined;
+            const fechaFin = typeof req.query.fechaFin === 'string' && req.query.fechaFin.trim() ? req.query.fechaFin.trim() : undefined;
+            const tipo = typeof req.query.tipo === 'string' && req.query.tipo.trim() ? req.query.tipo.trim() : undefined;
+            const usuario = typeof req.query.usuario === 'string' && req.query.usuario.trim() ? req.query.usuario.trim() : undefined;
+            const data = await this.service.getMaterialHistorial(String(req.params.id), {
+                page,
+                limit,
+                fechaInicio,
+                fechaFin,
+                tipo,
+                usuario,
+            });
             return this.ok(res, data);
         }
         catch (e) {

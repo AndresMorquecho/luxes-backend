@@ -132,6 +132,19 @@ export class PrismaMaterialAdapter {
     }
     async create(data) {
         const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data;
+        if (rest.codigo && typeof rest.codigo === 'string' && rest.codigo.trim()) {
+            const cleanCode = rest.codigo.trim();
+            const existing = await this.prisma.material.findFirst({
+                where: {
+                    codigo: { equals: cleanCode, mode: 'insensitive' },
+                    ocultado: false,
+                },
+                select: { id: true, nombre: true, codigo: true },
+            });
+            if (existing) {
+                throw new Error(`El código "${cleanCode}" ya está en uso por el producto "${existing.nombre}".`);
+            }
+        }
         let unidadMedidaId = data.unidadMedidaId;
         const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
         if (!unidadMedidaId && unitName) {
@@ -156,6 +169,20 @@ export class PrismaMaterialAdapter {
     }
     async update(id, data) {
         const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data;
+        if (rest.codigo && typeof rest.codigo === 'string' && rest.codigo.trim()) {
+            const cleanCode = rest.codigo.trim();
+            const existing = await this.prisma.material.findFirst({
+                where: {
+                    codigo: { equals: cleanCode, mode: 'insensitive' },
+                    id: { not: id },
+                    ocultado: false,
+                },
+                select: { id: true, nombre: true, codigo: true },
+            });
+            if (existing) {
+                throw new Error(`El código "${cleanCode}" ya está en uso por el producto "${existing.nombre}".`);
+            }
+        }
         let unidadMedidaId = data.unidadMedidaId;
         const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
         if (!unidadMedidaId && unitName) {
@@ -360,7 +387,7 @@ export class PrismaMaterialAdapter {
             });
         }
     }
-    async getMaterialHistorial(idOrCodigo) {
+    async getMaterialHistorial(idOrCodigo, options) {
         const material = await this.prisma.material.findFirst({
             where: {
                 OR: [
@@ -373,81 +400,74 @@ export class PrismaMaterialAdapter {
         if (!material)
             throw new Error('Material no encontrado.');
         const id = material.id;
-        // 1. Query Compras (DetalleCompra)
-        const detallesCompra = await this.prisma.detalleCompra.findMany({
-            where: { materialId: id },
-            include: {
-                ordenCompra: {
-                    include: { proveedor: true }
-                }
-            },
-            orderBy: { ordenCompra: { fecha: 'desc' } }
-        });
-        const compras = detallesCompra.map(d => ({
-            id: d.id,
-            ordenId: d.ordenCompraId,
-            numero: d.ordenCompra.numero,
-            fecha: d.ordenCompra.fecha ? formatDateOnly(d.ordenCompra.fecha) || '' : '',
-            fechaRecepcion: formatDateOnly(d.fechaRecepcion || d.ordenCompra.fechaRecepcion) || '',
-            proveedor: d.ordenCompra.proveedor?.nombre || 'Sin proveedor',
-            cantidad: d.cantidad,
-            cantidadRecibida: d.cantidadRecibida,
-            precioUnitario: d.precioUnitario,
-            subtotal: d.subtotal,
-            estado: d.ordenCompra.estado
-        }));
-        // 2. Query Movimientos (MovimientoInventario)
-        const movimientosDb = await this.prisma.movimientoInventario.findMany({
-            where: { materialId: id },
-            orderBy: { fecha: 'desc' }
-        });
+        // Build Where Clause for MovimientoInventario
+        const where = {
+            materialId: id,
+        };
+        if (options?.tipo && options.tipo !== 'todos' && options.tipo !== 'all') {
+            where.tipo = options.tipo.toLowerCase();
+        }
+        if (options?.fechaInicio || options?.fechaFin) {
+            const fechaFilter = {};
+            if (options.fechaInicio) {
+                const start = new Date(options.fechaInicio + 'T00:00:00');
+                if (!Number.isNaN(start.getTime()))
+                    fechaFilter.gte = start;
+            }
+            if (options.fechaFin) {
+                const end = new Date(options.fechaFin + 'T23:59:59.999');
+                if (!Number.isNaN(end.getTime()))
+                    fechaFilter.lte = end;
+            }
+            if (Object.keys(fechaFilter).length > 0) {
+                where.fecha = fechaFilter;
+            }
+        }
+        if (options?.usuario?.trim()) {
+            const searchUser = options.usuario.trim();
+            const matchedUsers = await this.prisma.user.findMany({
+                where: {
+                    OR: [
+                        { nombre: { contains: searchUser, mode: 'insensitive' } },
+                        { username: { contains: searchUser, mode: 'insensitive' } },
+                    ],
+                },
+                select: { id: true },
+            });
+            const userIds = matchedUsers.map(u => u.id);
+            where.userId = { in: userIds };
+        }
+        // Pagination
+        const page = Math.max(1, Number(options?.page) || 1);
+        const limit = Math.max(1, Number(options?.limit) || 15);
+        const skip = (page - 1) * limit;
+        const [movimientosDb, total] = await Promise.all([
+            this.prisma.movimientoInventario.findMany({
+                where,
+                orderBy: { fecha: 'desc' },
+                skip,
+                take: limit,
+            }),
+            this.prisma.movimientoInventario.count({ where }),
+        ]);
+        // Fetch user details for distinct userIds
+        const distinctUserIds = Array.from(new Set(movimientosDb.map(m => m.userId).filter(Boolean)));
+        const users = distinctUserIds.length > 0
+            ? await this.prisma.user.findMany({
+                where: { id: { in: distinctUserIds } },
+                select: { id: true, nombre: true, username: true, rol: true },
+            })
+            : [];
+        const userMap = new Map(users.map(u => [u.id, u]));
         const movimientos = movimientosDb.map(m => ({
             id: m.id,
             tipo: m.tipo,
             cantidad: m.cantidad,
             motivo: m.motivo,
-            fecha: m.fecha ? new Date(m.fecha).toISOString() : ''
+            fecha: m.fecha ? new Date(m.fecha).toISOString() : '',
+            userId: m.userId,
+            usuario: m.userId ? userMap.get(m.userId) || null : null,
         }));
-        // 3. Query Usos en Proyectos (ProyectoFase)
-        const fasesInstalacion = await this.prisma.proyectoFase.findMany({
-            where: {
-                fase: 'INSTALACION'
-            },
-            include: {
-                proyecto: true
-            }
-        });
-        const usos = [];
-        const matSku = material.codigo || '';
-        const matNombreLower = material.nombre.toLowerCase();
-        for (const fase of fasesInstalacion) {
-            if (!fase.datos)
-                continue;
-            try {
-                const datos = JSON.parse(fase.datos);
-                const materiales = datos.materiales;
-                if (Array.isArray(materiales)) {
-                    const matched = materiales.filter((m) => (m.sku && m.sku === matSku) ||
-                        (m.nombre && m.nombre.toLowerCase() === matNombreLower));
-                    for (const m of matched) {
-                        usos.push({
-                            proyectoId: fase.proyectoId,
-                            proyectoNombre: fase.proyecto.nombre,
-                            cliente: fase.proyecto.clienteEmpresa || fase.proyecto.clienteNombre || 'Sin cliente',
-                            cantidad: m.cantidadLaveada !== undefined ? m.cantidadLaveada : (m.cantidadLlevada !== undefined ? m.cantidadLlevada : (m.cantidad || 0)),
-                            unidad: m.unidad || '',
-                            fecha: datos.fechaInstalacion || (fase.fechaCompletada ? new Date(fase.fechaCompletada).toISOString().split('T')[0] : ''),
-                            responsable: m.responsable || datos.personalAsignado?.[0]?.nombre || 'Sin asignar',
-                            observacion: m.observacion || m.observaciones || ''
-                        });
-                    }
-                }
-            }
-            catch (err) {
-                console.error('Error parsing fase datos:', err);
-            }
-        }
-        usos.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
         return {
             material: {
                 id: material.id,
@@ -456,14 +476,24 @@ export class PrismaMaterialAdapter {
                 categoria: material.categoria,
                 tipo: material.tipo,
                 stockActual: material.stockActual,
+                stockMinimo: material.stockMinimo,
+                precioCosto: material.precioCosto,
+                marca: material.marca,
+                modelo: material.modelo,
+                serie: material.serie,
                 unidadMedida: material.unidadMedida ? {
+                    id: material.unidadMedida.id,
                     nombre: material.unidadMedida.nombre,
                     abreviacion: material.unidadMedida.abreviacion
-                } : { nombre: 'unidades', abreviacion: 'unid' }
+                } : { id: '', nombre: 'unidades', abreviacion: 'unid' }
             },
-            compras,
-            usos,
-            movimientos
+            movimientos,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit) || 1,
+            }
         };
     }
 }

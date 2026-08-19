@@ -1,7 +1,7 @@
 import { User } from '../../../domain/entities/User.js';
 import { UserRepositoryPort } from '../../../domain/ports/UserRepositoryPort.js';
 import { prisma } from '../../../../../config/prismaClient.js';
-/** El quiosco y cuentas de sistema usan users.rol; no deben reemplazarse por RBAC genérico. */
+/** Resuelve el rol normalizado del usuario: Administrador, Trabajador o asistencia */
 function resolveUserRol(dbUser) {
     const slug = (dbUser.rol || '').toLowerCase().trim();
     const username = (dbUser.username || '').toLowerCase().trim();
@@ -9,23 +9,16 @@ function resolveUserRol(dbUser) {
     const roleSlug = roleName.toLowerCase();
     if (slug === 'asistencia' || username === 'asistencia')
         return 'asistencia';
-    if (slug === 'taller' || username === 'taller')
-        return dbUser.rol || 'Taller';
-    // Cuenta principal de administración
-    if (username === 'admin') {
-        if (roleSlug === 'admin' || roleSlug === 'administrador')
-            return roleName;
-        if (slug === 'admin' || slug === 'administrador')
-            return dbUser.rol;
+    // Cuenta o rol de administración
+    if (username === 'admin' ||
+        slug === 'admin' ||
+        slug === 'administrador' ||
+        roleSlug === 'admin' ||
+        roleSlug === 'administrador') {
         return 'Administrador';
     }
-    // Cuentas admin/asistencia/taller: users.rol manda sobre un rol RBAC secundario (ej. Visor)
-    if (slug === 'admin' || slug === 'administrador')
-        return dbUser.rol;
-    // Sin slug de sistema en users.rol, pero el rol RBAC es administrador
-    if (roleSlug === 'admin' || roleSlug === 'administrador')
-        return roleName;
-    return roleName || dbUser.rol;
+    // Cualquier otro usuario es Trabajador
+    return 'Trabajador';
 }
 const formatFotoUrl = (empId, foto) => {
     if (!foto || !empId)

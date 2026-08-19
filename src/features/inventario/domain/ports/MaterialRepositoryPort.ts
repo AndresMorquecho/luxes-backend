@@ -93,7 +93,14 @@ export interface MaterialRepositoryPort {
   returnPrestamo(id: string, fechaRetorno: Date, observacionDevolucion?: string | null): Promise<PrestamoData>;
 
   // Historial
-  getMaterialHistorial(id: string): Promise<any>;
+  getMaterialHistorial(id: string, options?: {
+    page?: number;
+    limit?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
+    tipo?: string;
+    usuario?: string;
+  }): Promise<any>;
 
   // Stock helpers
   adjustStock(materialId: string, delta: number): Promise<void>;

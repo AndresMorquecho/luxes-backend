@@ -1,19 +1,15 @@
 /**
- * Devuelve la categoría de inventario que corresponde al rol del usuario.
- * Impresión y Taller solo ven su propio inventario; admin y otros pueden filtrar libremente.
+ * Devuelve la categoría de inventario si corresponde a un filtro específico.
+ * En la estructura simplificada (Admin / Trabajador), el inventario es unificado.
  */
-export function getInventarioCategoriaPorRol(rol?: string | null): string | undefined {
-  const r = (rol || '').toLowerCase();
-  if (r === 'impresión' || r === 'impresion') return 'Impresión';
-  if (r === 'taller') return 'Taller';
+export function getInventarioCategoriaPorRol(_rol?: string | null): string | undefined {
   return undefined;
 }
 
 export function resolveInventarioCategoria(
-  rol: string | undefined | null,
+  _rol: string | undefined | null,
   queryCategoria?: string
 ): string | undefined {
-  const locked = getInventarioCategoriaPorRol(rol);
-  if (locked) return locked;
   return queryCategoria || undefined;
 }
+

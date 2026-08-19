@@ -7,64 +7,28 @@ const PASSWORD = 'luxes2026';
 async function main() {
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
-  const impresionRole = await prisma.role.findFirst({
-    where: { name: { in: ['Impresión', 'Impresion'] } },
-  });
-  const tallerRole = await prisma.role.findFirst({
-    where: { name: 'Taller' },
-  });
-  const disenadorRole = await prisma.role.findFirst({
-    where: { name: { in: ['Ventas / Diseñador', 'Diseñador'] } },
+  const trabajadorRole = await prisma.role.findFirst({
+    where: { name: 'Trabajador' },
   });
 
   const users = [
     {
-      id: 'USR-003',
-      nombre: 'Impresor Principal',
-      email: 'impresion@luxes.com',
-      username: 'impresion',
-      rol: 'Impresión',
-      roleId: impresionRole?.id ?? null,
-      empleadoId: 'EMP-003',
-    },
-    {
-      id: 'USR-TALLER-001',
-      nombre: 'Taller Técnico',
-      email: 'taller@luxes.com',
-      username: 'taller',
-      rol: 'Taller',
-      roleId: tallerRole?.id ?? null,
-      empleadoId: 'EMP-TALLER-001',
-    },
-    {
-      id: 'USR-005',
-      nombre: 'Diseñador Creativo',
-      email: 'disenador@luxes.com',
-      username: 'disenador',
-      rol: 'Ventas / Diseñador',
-      roleId: disenadorRole?.id ?? null,
-      empleadoId: 'EMP-005',
+      id: 'USR-TRAB-001',
+      nombre: 'Trabajador Operativo',
+      email: 'trabajador@luxes.com',
+      username: 'trabajador',
+      rol: 'Trabajador',
+      roleId: trabajadorRole?.id ?? null,
+      empleadoId: 'EMP-TRAB-001',
     },
   ];
 
   const empleados = [
     {
-      id: 'EMP-003',
-      nombre: 'Impresor Principal',
-      cedula: '0999999993',
-      correo: 'impresion@luxes.com',
-    },
-    {
-      id: 'EMP-TALLER-001',
-      nombre: 'Taller Técnico',
-      cedula: '0999999997',
-      correo: 'taller@luxes.com',
-    },
-    {
-      id: 'EMP-005',
-      nombre: 'Diseñador Creativo',
-      cedula: '0999999995',
-      correo: 'disenador@luxes.com',
+      id: 'EMP-TRAB-001',
+      nombre: 'Trabajador Operativo',
+      cedula: '0999999991',
+      correo: 'trabajador@luxes.com',
     },
   ];
 

@@ -3,7 +3,7 @@ import { prisma } from '../../../../../config/prismaClient.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { safeRemoveDir } from '../../../../../shared/utils/pathSafetyHelper.js';
-import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
+import { sendPushToRole, sendPushToAllActive } from '../../../../../shared/services/pushNotificationService.js';
 import { notificarDevolucionHerramientasInstalacion, sincronizarDevolucionesInstalacionesPendientes } from '../../../../../shared/services/instalacionDevolucionNotificationService.js';
 
 import { ensureThumbFor } from '../../../../../shared/adapters/http/mediaThumbnailController.js';
@@ -379,6 +379,7 @@ function mapProyecto(p: any) {
     etiquetas: p.etiquetas ? p.etiquetas.split(',').map((t: string) => t.trim()).filter(Boolean) : [],
     notas: p.notas,
     medio: p.medio,
+    fasesAlux: p.fasesAlux ? (typeof p.fasesAlux === 'string' ? JSON.parse(p.fasesAlux) : p.fasesAlux) : null,
     fases: (p.fases || []).reduce((acc: any, f: any) => {
       let datos = f.datos ? JSON.parse(f.datos) : {};
       if (
@@ -587,6 +588,7 @@ export class ProyectosController {
           etiquetas: Array.isArray(b.etiquetas) ? b.etiquetas.join(',') : (b.etiquetas || ''),
           notas: b.notas || '',
           medio: b.medio || 'LUXES',
+          fasesAlux: b.fasesAlux ? (typeof b.fasesAlux === 'string' ? b.fasesAlux : JSON.stringify(b.fasesAlux)) : null,
         },
         include: proyectoInclude,
       });
@@ -637,6 +639,112 @@ export class ProyectosController {
       const { id } = req.params;
       const b = req.body || {};
 
+      const proyectoExistente = await prisma.proyecto.findUnique({
+        where: { id: String(id) },
+        select: { id: true, nombre: true, faseActual: true, fasesAlux: true },
+      });
+
+      if (!proyectoExistente) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Proyecto no encontrado' } });
+      }
+
+      // ── Notificaciones Push para Fases ALUX (Creación y Compleción) ───────────
+      if (b.fasesAlux !== undefined) {
+        try {
+          let prevFases: any[] = [];
+          if (proyectoExistente.fasesAlux) {
+            try {
+              prevFases = typeof proyectoExistente.fasesAlux === 'string'
+                ? JSON.parse(proyectoExistente.fasesAlux)
+                : (Array.isArray(proyectoExistente.fasesAlux) ? proyectoExistente.fasesAlux : []);
+            } catch { prevFases = []; }
+          }
+
+          let nextFases: any[] = [];
+          if (b.fasesAlux) {
+            try {
+              nextFases = typeof b.fasesAlux === 'string'
+                ? JSON.parse(b.fasesAlux)
+                : (Array.isArray(b.fasesAlux) ? b.fasesAlux : []);
+            } catch { nextFases = []; }
+          }
+
+          const prevFasesMap = new Map(prevFases.map((f: any) => [String(f.id), f]));
+          const user = (req as any).user;
+          const userName = user?.nombre || user?.username || 'Un colaborador';
+          const userId = user?.id;
+
+          for (const nextF of nextFases) {
+            const nextFId = String(nextF.id);
+            const prevF = prevFasesMap.get(nextFId);
+
+            // 1. Nueva fase creada
+            if (!prevF) {
+              const faseNombre = nextF.nombre || 'Nueva Fase';
+              const payload = {
+                title: 'Nueva Fase Creada',
+                body: `${userName} creó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
+                icon: '/LogoGlobo.png',
+                badge: '/LogoGlobo.png',
+                data: {
+                  url: `/proyectos/${id}`,
+                  action: 'view_project_phase',
+                  proyectoId: String(id),
+                  faseId: nextF.id,
+                },
+              };
+
+              await prisma.notification.create({
+                data: {
+                  title: `Nueva Fase: ${faseNombre}`,
+                  message: `${userName} creó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
+                  rol: 'admin',
+                  createdBy: userName,
+                },
+              }).catch(() => {});
+
+              await sendPushToAllActive(payload, userId);
+              console.log(`[Push Notification] Nueva fase "${faseNombre}" creada por ${userName}`);
+            }
+            // 2. Fase marcada como completada
+            else {
+              const wasCompleted = prevF.estado === 'COMPLETADA' || prevF.completada === true;
+              const isNowCompleted = nextF.estado === 'COMPLETADA' || nextF.completada === true;
+
+              if (!wasCompleted && isNowCompleted) {
+                const faseNombre = nextF.nombre || 'Fase';
+                const payload = {
+                  title: 'Fase Completada ✅',
+                  body: `${userName} completó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
+                  icon: '/LogoGlobo.png',
+                  badge: '/LogoGlobo.png',
+                  data: {
+                    url: `/proyectos/${id}`,
+                    action: 'view_project_phase',
+                    proyectoId: String(id),
+                    faseId: nextF.id,
+                  },
+                };
+
+                await prisma.notification.create({
+                  data: {
+                    title: `Fase Completada: ${faseNombre}`,
+                    message: `${userName} completó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
+                    rol: 'admin',
+                    createdBy: userName,
+                  },
+                }).catch(() => {});
+
+                await sendPushToAllActive(payload, userId);
+                console.log(`[Push Notification] Fase "${faseNombre}" completada por ${userName}`);
+              }
+            }
+          }
+        } catch (pushErr) {
+          console.error('[proyectos/update] Error sending push for fasesAlux:', pushErr);
+        }
+      }
+
       const updateData: any = {};
       if (b.nombre !== undefined) updateData.nombre = b.nombre;
       if (b.clienteId !== undefined) {
@@ -664,7 +772,6 @@ export class ProyectosController {
         const nuevoReqInst = Boolean(b.requiereInstalacion);
         updateData.requiereInstalacion = nuevoReqInst;
 
-        const proyectoExistente = await prisma.proyecto.findUnique({ where: { id: String(id) }, select: { faseActual: true } });
         const faseActual = updateData.faseActual || proyectoExistente?.faseActual;
         if (faseActual === 'ENTREGA' && nuevoReqInst) {
           updateData.faseActual = 'INSTALACION';
@@ -702,6 +809,9 @@ export class ProyectosController {
       }
       if (b.notas !== undefined) updateData.notas = b.notas;
       if (b.medio !== undefined) updateData.medio = b.medio;
+      if (b.fasesAlux !== undefined) {
+        updateData.fasesAlux = b.fasesAlux ? (typeof b.fasesAlux === 'string' ? b.fasesAlux : JSON.stringify(b.fasesAlux)) : null;
+      }
 
       // Sincronizar gastos manuales del proyecto si vienen en el body
       if (b.gastos !== undefined && Array.isArray(b.gastos)) {
@@ -1393,6 +1503,7 @@ export class ProyectosController {
       return res.status(200).json({
         success: true,
         data: {
+          url: archivoUrl,
           evidencia,
           evidencias: evidenciasPrevias,
           proyecto: mapProyecto(proyectoActualizado!),

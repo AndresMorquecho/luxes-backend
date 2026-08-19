@@ -48,8 +48,5 @@ export function createComprasRoutes(ctrl: ComprasController): Router {
   router.post('/:id/abono',               (req, res) => ctrl.createAbono(req, res));
   router.delete('/:id/abonos/:abonoId',   (req, res) => ctrl.eliminarAbono(req, res));
 
-  // ── Recepción de Orden ──────────────────────────────────────────────────────
-  router.post('/:id/recepcion',           (req, res) => ctrl.recepcionarOrden(req, res));
-
   return router;
 }

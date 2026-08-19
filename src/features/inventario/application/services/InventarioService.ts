@@ -170,8 +170,15 @@ export class InventarioService {
     return updated;
   }
 
-  async getMaterialHistorial(id: string): Promise<any> {
-    return this.repo.getMaterialHistorial(id);
+  async getMaterialHistorial(id: string, options?: {
+    page?: number;
+    limit?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
+    tipo?: string;
+    usuario?: string;
+  }): Promise<any> {
+    return this.repo.getMaterialHistorial(id, options);
   }
 
   // ── Importación masiva ───────────────────────────────────────────────────────

@@ -1505,13 +1505,14 @@ export class GastosController {
         }
       });
 
-      // 3. Proformas en el período
+      // 3. Proformas y Conversión Comercial (Período)
       const proformas = await prisma.proforma.findMany({
         where: { fecha: { gte: desdeDate, lte: hastaLimit } },
         include: { items: true }
       });
 
-      let totalFacturado = 0;
+      let totalCotizado = 0;
+      let totalVendidoAprobado = 0;
       let porAprobarCount = 0;
       let rechazadasCount = 0;
       let aprobadasCount = 0;
@@ -1520,15 +1521,25 @@ export class GastosController {
       for (const prof of proformas) {
         const sub = prof.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
         const total = sub * (1 + Number(prof.iva || 0.12));
-        totalFacturado += total;
+        totalCotizado += total;
 
-        if (prof.estado === 'Pendiente') porAprobarCount++;
-        else if (prof.estado === 'Rechazada') rechazadasCount++;
-        else if (prof.estado === 'Aprobada') aprobadasCount++;
-        else if (prof.estado === 'Pagada') pagadasCount++;
+        if (prof.estado === 'Pendiente') {
+          porAprobarCount++;
+        } else if (prof.estado === 'Rechazada') {
+          rechazadasCount++;
+        } else if (prof.estado === 'Aprobada' || prof.estado === 'Pagada') {
+          if (prof.estado === 'Aprobada') aprobadasCount++;
+          if (prof.estado === 'Pagada') pagadasCount++;
+          totalVendidoAprobado += total;
+        }
       }
 
-      // 4. Proyectos y fases
+      const totalConvertidas = aprobadasCount + pagadasCount;
+      const tasaConversion = proformas.length > 0
+        ? Number(((totalConvertidas / proformas.length) * 100).toFixed(1))
+        : 0;
+
+      // 4. Proyectos, Fases ALUX, Tiempos Límite y Puntualidad
       const proyectos = await prisma.proyecto.findMany({
         where: {
           OR: [
@@ -1536,7 +1547,158 @@ export class GastosController {
             { estado: 'ACTIVO' }
           ]
         },
-        select: { id: true, nombre: true, faseActual: true, progreso: true, estado: true, clienteNombre: true, responsable: true, requiereInstalacion: true }
+        select: {
+          id: true,
+          nombre: true,
+          faseActual: true,
+          progreso: true,
+          estado: true,
+          clienteNombre: true,
+          clienteEmpresa: true,
+          responsable: true,
+          montoEstimado: true,
+          fechaCreacion: true,
+          fechaEntregaEstimada: true,
+          fechaCompletado: true,
+          fasesAlux: true,
+        },
+        orderBy: { fechaCreacion: 'desc' },
+      });
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Radar de proyectos activos con su fase y cálculo de tiempo límite
+      let fasesVencidasCount = 0;
+      let fasesPorVencerCount = 0;
+      let fasesEnPlazoCount = 0;
+
+      const proyectosRadar = proyectos
+        .filter(p => p.estado === 'ACTIVO')
+        .map(p => {
+          let faseNombre = p.faseActual;
+          let faseIndex = 1;
+          let totalFases = 5;
+          let fechaLimiteFase: Date | null = p.fechaEntregaEstimada ? new Date(p.fechaEntregaEstimada) : null;
+
+          if (p.fasesAlux) {
+            try {
+              const parsed = JSON.parse(p.fasesAlux);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                totalFases = parsed.length;
+                const activeFaseObj = parsed.find((f: any) => f.id === p.faseActual || f.nombre === p.faseActual || f.estado === 'EN_CURSO') || parsed[0];
+                if (activeFaseObj) {
+                  faseNombre = activeFaseObj.nombre || faseNombre;
+                  const idx = parsed.findIndex((f: any) => f.id === activeFaseObj.id);
+                  if (idx >= 0) faseIndex = idx + 1;
+                  if (activeFaseObj.fechaLimite) {
+                    fechaLimiteFase = new Date(activeFaseObj.fechaLimite);
+                  }
+                }
+              }
+            } catch (e) {
+              // fallback
+            }
+          }
+
+          let diasRestantes: number | null = null;
+          let urgencia: 'VENCIDO' | 'HOY' | 'POR_VENCER' | 'A_TIEMPO' | 'SIN_FECHA' = 'SIN_FECHA';
+
+          if (fechaLimiteFase && !isNaN(fechaLimiteFase.getTime())) {
+            fechaLimiteFase.setHours(0, 0, 0, 0);
+            const diffTime = fechaLimiteFase.getTime() - today.getTime();
+            diasRestantes = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diasRestantes < 0) {
+              urgencia = 'VENCIDO';
+              fasesVencidasCount++;
+            } else if (diasRestantes === 0) {
+              urgencia = 'HOY';
+              fasesPorVencerCount++;
+            } else if (diasRestantes <= 2) {
+              urgencia = 'POR_VENCER';
+              fasesPorVencerCount++;
+            } else {
+              urgencia = 'A_TIEMPO';
+              fasesEnPlazoCount++;
+            }
+          } else {
+            fasesEnPlazoCount++;
+          }
+
+          return {
+            id: p.id,
+            nombre: p.nombre,
+            clienteNombre: p.clienteNombre || p.clienteEmpresa || 'Cliente ALUX',
+            responsable: p.responsable || 'Sin asignar',
+            faseActual: p.faseActual,
+            faseNombre,
+            faseIndex,
+            totalFases,
+            fechaLimite: fechaLimiteFase ? fechaLimiteFase.toISOString().split('T')[0] : null,
+            diasRestantes,
+            urgencia,
+          };
+        })
+        .sort((a, b) => {
+          // Ordenar primero vencidos, luego por vencer, luego por fecha
+          const score = (u: string) => (u === 'VENCIDO' ? 1 : u === 'HOY' ? 2 : u === 'POR_VENCER' ? 3 : u === 'A_TIEMPO' ? 4 : 5);
+          if (score(a.urgencia) !== score(b.urgencia)) return score(a.urgencia) - score(b.urgencia);
+          if (a.diasRestantes !== null && b.diasRestantes !== null) return a.diasRestantes - b.diasRestantes;
+          return 0;
+        });
+
+      // Cálculo de Puntualidad en Entregas (Proyectos completados)
+      const proyectosCompletados = await prisma.proyecto.findMany({
+        where: {
+          OR: [
+            { estado: 'COMPLETADO' },
+            { fechaCompletado: { not: null } }
+          ]
+        },
+        select: {
+          id: true,
+          fechaEntregaEstimada: true,
+          fechaCompletado: true,
+          fechaCreacion: true
+        }
+      });
+
+      let entregasATiempo = 0;
+      let entregasConRetraso = 0;
+
+      for (const proy of proyectosCompletados) {
+        if (!proy.fechaCompletado) {
+          entregasATiempo++;
+          continue;
+        }
+        if (!proy.fechaEntregaEstimada) {
+          entregasATiempo++;
+          continue;
+        }
+        const fc = new Date(proy.fechaCompletado);
+        const fe = new Date(proy.fechaEntregaEstimada);
+        fc.setHours(0, 0, 0, 0);
+        fe.setHours(23, 59, 59, 999);
+
+        if (fc <= fe) {
+          entregasATiempo++;
+        } else {
+          entregasConRetraso++;
+        }
+      }
+
+      const totalCompletados = proyectosCompletados.length;
+      const tasaPuntualidad = totalCompletados > 0
+        ? Number(((entregasATiempo / totalCompletados) * 100).toFixed(1))
+        : 100;
+
+      // Reclamos y Garantías Post-Venta
+      const reclamosPendientesCount = await prisma.reclamoProyecto.count({
+        where: { estado: { in: ['PENDIENTE', 'EN_REVISION', 'EN_PROCESO'] } }
+      });
+      const reclamosFinalizadosCount = await prisma.reclamoProyecto.count({
+        where: { estado: 'FINALIZADO' }
       });
 
       // Calcular dinero pendiente de cobro de proformas (Aprobadas)
@@ -1577,7 +1739,6 @@ export class GastosController {
         }
       }
 
-      // 5. Últimos movimientos financieros y KPIs
       const abonosProforma = await prisma.abonoProforma.findMany({
         where: { fecha: { gte: desdeDate, lte: hastaLimit } },
         include: {
@@ -1910,7 +2071,7 @@ export class GastosController {
             egresos: totalEgresos,
             balance: totalIngresos - totalEgresos,
             proformasTotal: proformas.length,
-            proformasMonto: totalFacturado,
+            proformasMonto: totalCotizado,
             porAprobar: porAprobarCount,
             rechazadas: rechazadasCount,
             aprobadas: aprobadasCount,
@@ -1922,7 +2083,44 @@ export class GastosController {
             changeIngresos,
             changeEgresos,
             changeProformasPendienteCobro,
-            changeCxPPendientes
+            changeCxPPendientes,
+            tasaConversion,
+            proformasCotizadasMonto: totalCotizado,
+            proformasConvertidasMonto: totalVendidoAprobado,
+            totalConvertidas,
+            tasaPuntualidad,
+            entregasATiempo,
+            entregasConRetraso,
+            fasesVencidasCount,
+            fasesPorVencerCount,
+            fasesEnPlazoCount,
+          },
+          conversionComercial: {
+            totalCotizado,
+            totalVendidoAprobado,
+            totalEmitidas: proformas.length,
+            totalConvertidas,
+            tasaConversion,
+            porAprobar: porAprobarCount,
+            rechazadas: rechazadasCount,
+            aprobadas: aprobadasCount,
+            pagadas: pagadasCount,
+          },
+          radarFases: proyectosRadar,
+          fasesAlertas: {
+            vencidas: fasesVencidasCount,
+            porVencer: fasesPorVencerCount,
+            enPlazo: fasesEnPlazoCount,
+          },
+          puntualidad: {
+            totalCompletados,
+            entregasATiempo,
+            entregasConRetraso,
+            tasaPuntualidad,
+          },
+          reclamosPostVenta: {
+            pendientes: reclamosPendientesCount,
+            finalizados: reclamosFinalizadosCount,
           },
           usersActivity,
           currentPrintingJob,
@@ -1946,7 +2144,8 @@ export class GastosController {
           quickSummary: {
             ocsPendientes: ocsPendientesCount,
             proformasAprobadas: proformasAprobadasCount,
-            tareasPendientes: tareasPendientesCount
+            tareasPendientes: tareasPendientesCount,
+            reclamosPendientes: reclamosPendientesCount,
           }
         }
       });
@@ -2252,546 +2451,6 @@ export class GastosController {
     } catch (error) {
       console.error('[transferencias/remove]', error);
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al eliminar transferencia' } });
-    }
-  }
-
-  async testDebug(req: Request, res: Response): Promise<Response> {
-    try {
-      // Trace exacta del cálculo para julio 2026
-      const nominas = await prisma.nominaRegistro.findMany({
-        where: {
-          fechaInicio: { gte: new Date('2026-07-01'), lte: new Date('2026-07-31') },
-          diasLaborados: { gt: 0 }
-        },
-        include: { empleado: { select: { nombre: true, cargo: true } } }
-      });
-
-      const trace = nominas.map(n => {
-        const ingObj: any = n.ingresos ? (typeof n.ingresos === 'string' ? JSON.parse(n.ingresos as string) : n.ingresos) : {};
-        const egrObj: any = n.egresos ? (typeof n.egresos === 'string' ? JSON.parse(n.egresos as string) : n.egresos) : {};
-
-        const ingVal = Object.values(ingObj).reduce((sum: number, v: any) => sum + (typeof v === 'number' ? v : (typeof v === 'string' ? Number(v) || 0 : 0)), 0) as number;
-        const egrVal = Object.values(egrObj).reduce((sum: number, v: any) => sum + (typeof v === 'number' ? v : (typeof v === 'string' ? Number(v) || 0 : 0)), 0) as number;
-        const iessVal = Number(egrObj.iess) || 0;
-        const neto = ingVal - egrVal;
-        const netoPositivo = Math.max(0, neto);
-        const costoLaboral = netoPositivo + iessVal;
-
-        return {
-          empleado: n.empleado?.nombre,
-          diasLaborados: n.diasLaborados,
-          sueldoDiario: (n as any).sueldoDiario,
-          ingObj_raw: ingObj,
-          egrObj_raw: egrObj,
-          ingVal,
-          egrVal,
-          iessVal,
-          neto,
-          netoPositivo,
-          costoLaboral,
-          gastosPorMes_JUL: costoLaboral
-        };
-      });
-
-      const totalGastosPorMesJUL = trace.reduce((s, t) => s + t.costoLaboral, 0);
-
-      return res.status(200).json({
-        success: true,
-        descripcion: 'Traza exacta del cálculo gastosPorMes para Julio 2026',
-        nominas_activas_julio: trace,
-        total_gastosPorMes_JUL: totalGastosPorMesJUL
-      });
-    } catch (error: any) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
-  }
-
-  async getBalancesReport(req: Request, res: Response): Promise<Response> {
-    try {
-      const { desde, hasta } = req.query;
-
-      // 1. Setup date ranges
-      let desdeDate: Date | undefined;
-      let hastaLimit: Date | undefined;
-
-      if (desde) {
-        const desdeStr = String(desde);
-        // Use UTC midnight so @db.Date fields (stored as 2026-07-01T00:00:00Z) are included
-        desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00Z');
-      }
-      if (hasta) {
-        const hastaStr = String(hasta);
-        hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999Z');
-      }
-
-      const hasDateFilter = !!(desdeDate && hastaLimit);
-
-      // --- 1. INGRESOS Y VENTAS POR MEDIO DE CONSECUCIÓN (LUXES, REDES, VENDEDORES) ---
-      const proformas = await prisma.proforma.findMany({
-        where: hasDateFilter ? {
-          fecha: { gte: desdeDate, lte: hastaLimit }
-        } : undefined,
-        include: { abonos: true, items: true }
-      });
-
-      const sourceData: Record<string, { ventas: number; ingresos: number }> = {
-        LUXES: { ventas: 0, ingresos: 0 },
-        REDES: { ventas: 0, ingresos: 0 },
-        VENDEDORES: { ventas: 0, ingresos: 0 }
-      };
-
-      for (const prof of proformas) {
-        const source = (prof.medio || 'LUXES').toUpperCase();
-        if (!sourceData[source]) {
-          sourceData[source] = { ventas: 0, ingresos: 0 };
-        }
-
-        const subtotal = prof.items.reduce((sum, item) => sum + Number(item.cantidad) * Number(item.precioUnitario), 0);
-        const totalVal = subtotal * (1 + Number(prof.iva));
-        const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
-
-        sourceData[source].ingresos += totalAbonado;
-
-        // Se considera Venta si se convirtió en venta (es decir, abonos > 0 o estado Aprobada/Pagada)
-        if (totalAbonado > 0 || prof.estado === 'Aprobada' || prof.estado === 'Pagada') {
-          sourceData[source].ventas += totalVal;
-        }
-      }
-
-      // --- 2. TRABAJOS REALIZADOS, CALIFICACIONES Y ENTREGAS ---
-      const clientProjectCounts = await prisma.proyecto.groupBy({
-        by: ['clienteNombre'],
-        _count: { id: true },
-        where: hasDateFilter ? {
-          fechaCreacion: { gte: desdeDate, lte: hastaLimit }
-        } : undefined
-      });
-
-      const totalClientesConTrabajos = clientProjectCounts.length;
-
-      const phasesWithSurvey = await prisma.proyectoFase.findMany({
-        where: {
-          fase: { in: ['INSTALACION', 'COMPLETADO'] },
-          datos: { contains: 'encuestaSatisfaccion' }
-        },
-        include: {
-          proyecto: {
-            select: { id: true, fechaCreacion: true }
-          }
-        }
-      });
-
-      let SatisfechosCount = 0;
-      let NeutrosCount = 0;
-      let InconformesCount = 0;
-
-      for (const f of phasesWithSurvey) {
-        try {
-          const json = JSON.parse(f.datos);
-          const encuesta = json.encuestaSatisfaccion;
-          if (encuesta && encuesta.completada) {
-            const fechaSurvey = encuesta.fechaRespuesta ? new Date(encuesta.fechaRespuesta) : null;
-            if (hasDateFilter && fechaSurvey) {
-              if (fechaSurvey < desdeDate! || fechaSurvey > hastaLimit!) continue;
-            }
-
-            const rating = Number(encuesta.calificacionGeneral);
-            if (rating >= 4) SatisfechosCount++;
-            else if (rating === 3) NeutrosCount++;
-            else InconformesCount++;
-          }
-        } catch {}
-      }
-
-      const activeProjects = await prisma.proyecto.findMany({
-        where: {
-          NOT: { estado: { in: ['COMPLETADO', 'CANCELADO'] } },
-          ...(hasDateFilter ? { fechaCreacion: { gte: desdeDate, lte: hastaLimit } } : {})
-        }
-      });
-
-      const completedProjects = await prisma.proyecto.findMany({
-        where: {
-          estado: 'COMPLETADO',
-          ...(hasDateFilter ? { fechaCompletado: { gte: desdeDate, lte: hastaLimit } } : {})
-        }
-      });
-
-      let entregasFueraDeTiempo = 0;
-      for (const p of completedProjects) {
-        if (p.fechaEntregaEstimada && p.fechaCompletado) {
-          const entrega = new Date(p.fechaEntregaEstimada);
-          const completado = new Date(p.fechaCompletado);
-          if (completado > entrega) entregasFueraDeTiempo++;
-        }
-      }
-
-      // --- 3. VENTAS POR MES Y SEMANA ---
-      // Incluimos Aprobada + Pagada (proformas cobradas total o parcialmente)
-      const activeProformas = await prisma.proforma.findMany({
-        where: {
-          estado: { in: ['Aprobada', 'Pagada', 'Pagado'] },
-          ...(hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : {})
-        },
-        include: { items: true, abonos: true }
-      });
-
-      const ventasPorMes: Record<string, number> = {};
-      const ventasPorSemana: Record<string, number> = {
-        'Semana 1': 0,
-        'Semana 2': 0,
-        'Semana 3': 0,
-        'Semana 4': 0,
-        'Semana 5': 0
-      };
-
-      for (const prof of activeProformas) {
-        const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
-        if (totalAbonado === 0) continue; // Si el abono es 0, no entra a ventas
-
-        const f = new Date(prof.fecha);
-        const MES_V = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
-        const monthLabel = MES_V[f.getUTCMonth()];
-        const profSubtotal = prof.items.reduce((sum, item) => sum + Number(item.cantidad) * Number(item.precioUnitario), 0);
-        const profTotal = profSubtotal * (1 + Number(prof.iva));
-        ventasPorMes[monthLabel] = (ventasPorMes[monthLabel] || 0) + profTotal;
-
-        const day = f.getUTCDate();
-        if (day <= 7) ventasPorSemana['Semana 1'] += profTotal;
-        else if (day <= 14) ventasPorSemana['Semana 2'] += profTotal;
-        else if (day <= 21) ventasPorSemana['Semana 3'] += profTotal;
-        else if (day <= 28) ventasPorSemana['Semana 4'] += profTotal;
-        else ventasPorSemana['Semana 5'] += profTotal;
-      }
-
-      // --- 4. INGRESOS POR METODO DE PAGO ---
-      const allIngresos = await prisma.ingreso.findMany({
-        where: hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : undefined,
-        include: { metodoPago: true }
-      });
-
-      const abonosProforma = await prisma.abonoProforma.findMany({
-        where: hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : undefined,
-        include: { metodoPago: true }
-      });
-
-      const ingresosPorMetodo: Record<string, number> = {};
-
-      for (const ing of allIngresos) {
-        const mName = ing.metodoPago?.nombre || 'Otros';
-        ingresosPorMetodo[mName] = (ingresosPorMetodo[mName] || 0) + Number(ing.monto);
-      }
-      for (const ab of abonosProforma) {
-        const mName = ab.metodoPago?.nombre || 'Otros';
-        ingresosPorMetodo[mName] = (ingresosPorMetodo[mName] || 0) + Number(ab.monto);
-      }
-
-      // --- 5. CUENTAS POR COBRAR POR MES ---
-      const unpaidProformas = await prisma.proforma.findMany({
-        where: {
-          estado: 'Aprobada'
-        },
-        include: { abonos: true, items: true }
-      });
-
-      const ctasPorCobrarPorMes: Record<string, number> = {};
-      const ctasPorCobrarDetalle: any[] = [];
-
-      for (const prof of unpaidProformas) {
-        const f = new Date(prof.fecha);
-        if (hasDateFilter) {
-          if (f < desdeDate! || f > hastaLimit!) continue;
-        }
-
-        const totalAbonado = prof.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
-        if (totalAbonado === 0) continue; // Si el abono es 0, no entra a cuentas por cobrar
-
-        const profSubtotal = prof.items.reduce((sum, item) => sum + Number(item.cantidad) * Number(item.precioUnitario), 0);
-        const profTotal = profSubtotal * (1 + Number(prof.iva));
-        const pendiente = profTotal - totalAbonado;
-
-        if (pendiente > 0) {
-          const MES_CC = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
-          const monthLabel = MES_CC[f.getUTCMonth()];
-          ctasPorCobrarPorMes[monthLabel] = (ctasPorCobrarPorMes[monthLabel] || 0) + pendiente;
-          ctasPorCobrarDetalle.push({
-            id: prof.id,
-            clienteNombre: prof.clienteNombre,
-            total: profTotal,
-            cobrado: totalAbonado,
-            pendiente: Math.max(0, pendiente),
-            fecha: f.toISOString().split('T')[0]
-          });
-        }
-      }
-
-      // --- 6. GASTOS (DEVENGADOS) Y EGRESOS (PAGOS REALES) POR CATEGORÍA, MES Y SEMANA ---
-      const allGastosGeneral = await prisma.gasto.findMany({
-        where: hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : undefined
-      });
-
-      const ocs = await prisma.ordenCompra.findMany({
-        where: hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : undefined,
-        include: { abonos: true }
-      });
-
-      const nominas = await prisma.nominaRegistro.findMany({
-        where: hasDateFilter ? {
-          fechaFin: { gte: desdeDate, lte: hastaLimit }
-        } : undefined,
-        include: { empleado: true }
-      });
-
-      const gastosPorTipo: Record<string, number> = {
-        'Nómina': 0,          // Costo laboral total (neto empleado + IESS patronal)
-        'Compras (OC)': 0,
-        'Vehículos': 0,
-        'Redes y Programas': 0,
-        'Servicios Básicos': 0,
-        'Oficina': 0,
-        'Logística': 0,
-        'Varios': 0
-      };
-
-      const gastosPorMes: Record<string, number> = {};
-      const gastosPorSemana: Record<string, number> = {
-        'Semana 1': 0,
-        'Semana 2': 0,
-        'Semana 3': 0,
-        'Semana 4': 0,
-        'Semana 5': 0
-      };
-
-      const nominaPorRol: Record<string, number> = {};
-      let totalIess = 0;
-
-      for (const n of nominas) {
-        if (Number(n.diasLaborados) <= 0) continue;
-
-        let ingVal = 0;
-        let egrVal = 0;
-        let iessVal = 0;
-        try {
-          const ingObj: any = n.ingresos ? (typeof n.ingresos === 'string' ? JSON.parse(n.ingresos) : n.ingresos) : {};
-          const egrObj: any = n.egresos ? (typeof n.egresos === 'string' ? JSON.parse(n.egresos) : n.egresos) : {};
-          
-          // Salario base = sueldoDiario del empleado × días laborados (no está en el JSON ingresos)
-          const salarioBase = Number(n.empleado?.sueldoDiario || 0) * Number(n.diasLaborados);
-          const ingExtras = Object.values(ingObj).reduce((sum: number, v: any) => sum + (typeof v === 'number' ? v : (typeof v === 'string' ? Number(v) || 0 : 0)), 0) as number;
-          ingVal = salarioBase + ingExtras;
-          
-          egrVal = Object.values(egrObj).reduce((sum: number, v: any) => sum + (typeof v === 'number' ? v : (typeof v === 'string' ? Number(v) || 0 : 0)), 0) as number;
-          iessVal = Number(egrObj.iess) || 0;
-        } catch {}
-
-        // costoLaboral = neto pagado al empleado (min 0) + IESS patronal retenido
-        const neto = ingVal - egrVal;
-        const netoPositivo = Math.max(0, neto);
-        const costoLaboral = netoPositivo + iessVal;
-        gastosPorTipo['Nómina'] += costoLaboral;
-        // IESS no se agrega como categoría separada (ya está incluido en costoLaboral → Nómina)
-        totalIess += iessVal;
-
-        const role = (n.empleado as any)?.nombre || 'Sin nombre';
-        nominaPorRol[role] = (nominaPorRol[role] || 0) + costoLaboral;
-
-        // Use fechaFin (period end = pay date) so the expense lands in the week it was actually paid
-        const f = new Date(n.fechaFin);
-        // Use UTC month to avoid timezone shift with @db.Date fields stored as midnight UTC
-        const MONTHS_UTC = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
-        const monthLabel = MONTHS_UTC[f.getUTCMonth()];
-        gastosPorMes[monthLabel] = (gastosPorMes[monthLabel] || 0) + costoLaboral;
-
-        const day = f.getUTCDate();
-        if (day <= 7) gastosPorSemana['Semana 1'] += costoLaboral;
-        else if (day <= 14) gastosPorSemana['Semana 2'] += costoLaboral;
-        else if (day <= 21) gastosPorSemana['Semana 3'] += costoLaboral;
-        else if (day <= 28) gastosPorSemana['Semana 4'] += costoLaboral;
-        else gastosPorSemana['Semana 5'] += costoLaboral;
-      }
-
-
-      for (const oc of ocs) {
-        gastosPorTipo['Compras (OC)'] += Number(oc.total);
-
-        const f = new Date(oc.fecha);
-        const MONTHS_UTC = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
-        const monthLabel = MONTHS_UTC[f.getUTCMonth()];
-        gastosPorMes[monthLabel] = (gastosPorMes[monthLabel] || 0) + Number(oc.total);
-
-        const day = f.getUTCDate();
-        if (day <= 7) gastosPorSemana['Semana 1'] += Number(oc.total);
-        else if (day <= 14) gastosPorSemana['Semana 2'] += Number(oc.total);
-        else if (day <= 21) gastosPorSemana['Semana 3'] += Number(oc.total);
-        else if (day <= 28) gastosPorSemana['Semana 4'] += Number(oc.total);
-        else gastosPorSemana['Semana 5'] += Number(oc.total);
-      }
-
-      for (const g of allGastosGeneral) {
-        const cat = (g.categoria || '').toLowerCase();
-        let targetCat = 'Varios';
-        if (cat === 'vehiculos') targetCat = 'Vehículos';
-        else if (cat === 'redes_y_programas') targetCat = 'Redes y Programas';
-        else if (cat === 'servicios') targetCat = 'Servicios Básicos';
-        else if (cat === 'oficina') targetCat = 'Oficina';
-        else if (cat === 'logistica') targetCat = 'Logística';
-
-        gastosPorTipo[targetCat] = (gastosPorTipo[targetCat] || 0) + Number(g.monto);
-
-        const f = new Date(g.fecha);
-        const MONTHS_UTC = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
-        const monthLabel = MONTHS_UTC[f.getUTCMonth()];
-        gastosPorMes[monthLabel] = (gastosPorMes[monthLabel] || 0) + Number(g.monto);
-
-        const day = f.getUTCDate();
-        if (day <= 7) gastosPorSemana['Semana 1'] += Number(g.monto);
-        else if (day <= 14) gastosPorSemana['Semana 2'] += Number(g.monto);
-        else if (day <= 21) gastosPorSemana['Semana 3'] += Number(g.monto);
-        else if (day <= 28) gastosPorSemana['Semana 4'] += Number(g.monto);
-        else gastosPorSemana['Semana 5'] += Number(g.monto);
-      }
-
-      const abonosCompra = await prisma.abonoCompra.findMany({
-        where: hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : undefined
-      });
-
-      const egresosAnticipos = await prisma.egreso.findMany({
-        where: hasDateFilter ? { fecha: { gte: desdeDate, lte: hastaLimit } } : undefined
-      });
-
-      const egresosPorTipo: Record<string, number> = {
-        'Nómina y Anticipos': egresosAnticipos.reduce((sum, e) => sum + Number(e.monto), 0),
-        'Compras (OC)': abonosCompra.reduce((sum, a) => sum + Number(a.monto), 0),
-        'Vehículos': allGastosGeneral.filter(g => g.categoria === 'vehiculos').reduce((sum, g) => sum + Number(g.monto), 0),
-        'Redes y Programas': allGastosGeneral.filter(g => g.categoria === 'redes_y_programas').reduce((sum, g) => sum + Number(g.monto), 0),
-        'Otros Egresos': allGastosGeneral.filter(g => !['vehiculos', 'redes_y_programas'].includes(g.categoria || '')).reduce((sum, g) => sum + Number(g.monto), 0)
-      };
-
-      let sumAbonosNomina = 0;
-      for (const n of nominas) {
-        try {
-          const abArr = n.abonos ? (typeof n.abonos === 'string' ? JSON.parse(n.abonos) : n.abonos) : [];
-          if (Array.isArray(abArr)) {
-            for (const ab of abArr) {
-              const abFecha = ab.fecha ? new Date(ab.fecha) : null;
-              if (hasDateFilter && abFecha) {
-                if (abFecha < desdeDate! || abFecha > hastaLimit!) continue;
-              }
-              sumAbonosNomina += Number(ab.monto) || 0;
-            }
-          }
-        } catch {}
-      }
-      egresosPorTipo['Nómina y Anticipos'] += sumAbonosNomina;
-
-      // --- 7. COMPARATIVOS MENSUALES (HISTÓRICO) ---
-      const ingresosPorMes: Record<string, number> = {};
-      const egresosPorMes: Record<string, number> = {};
-
-      const MES_UTC = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
-
-      for (const ing of allIngresos) {
-        const month = MES_UTC[new Date(ing.fecha).getUTCMonth()];
-        ingresosPorMes[month] = (ingresosPorMes[month] || 0) + Number(ing.monto);
-      }
-      for (const ab of abonosProforma) {
-        const month = MES_UTC[new Date(ab.fecha).getUTCMonth()];
-        ingresosPorMes[month] = (ingresosPorMes[month] || 0) + Number(ab.monto);
-      }
-
-      for (const ab of abonosCompra) {
-        const month = MES_UTC[new Date(ab.fecha).getUTCMonth()];
-        egresosPorMes[month] = (egresosPorMes[month] || 0) + Number(ab.monto);
-      }
-      for (const e of egresosAnticipos) {
-        const month = MES_UTC[new Date(e.fecha).getUTCMonth()];
-        egresosPorMes[month] = (egresosPorMes[month] || 0) + Number(e.monto);
-      }
-      for (const g of allGastosGeneral) {
-        const month = MES_UTC[new Date(g.fecha).getUTCMonth()];
-        egresosPorMes[month] = (egresosPorMes[month] || 0) + Number(g.monto);
-      }
-      for (const n of nominas) {
-        if (Number(n.diasLaborados) <= 0) continue;
-        try {
-          const abArr = n.abonos ? (typeof n.abonos === 'string' ? JSON.parse(n.abonos) : n.abonos) : [];
-          if (Array.isArray(abArr)) {
-            for (const ab of abArr) {
-              const month = MES_UTC[new Date(ab.fecha || n.fechaInicio).getUTCMonth()];
-              egresosPorMes[month] = (egresosPorMes[month] || 0) + (Number(ab.monto) || 0);
-            }
-          }
-        } catch {}
-      }
-
-      // --- 8. CUENTAS POR PAGAR (COMPRAS) POR MES ---
-      const ctasPorPagarPorMes: Record<string, { total: number; pagado: number; pendiente: number }> = {};
-      for (const oc of ocs) {
-        const month = MES_UTC[new Date(oc.fecha).getUTCMonth()];
-        if (!ctasPorPagarPorMes[month]) {
-          ctasPorPagarPorMes[month] = { total: 0, pagado: 0, pendiente: 0 };
-        }
-
-        const pagadoVal = oc.abonos.reduce((sum, ab) => sum + Number(ab.monto), 0);
-        ctasPorPagarPorMes[month].total += Number(oc.total);
-        ctasPorPagarPorMes[month].pagado += pagadoVal;
-        ctasPorPagarPorMes[month].pendiente += Math.max(0, Number(oc.total) - pagadoVal);
-      }
-
-      const monthsList = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-      const defaultMonthlyObject = (val = 0) => monthsList.reduce((acc, m) => ({ ...acc, [m]: val }), {});
-
-      return res.status(200).json({
-        success: true,
-        data: {
-          sourceAttr: sourceData,
-          surveyStats: {
-            totalClientes: totalClientesConTrabajos,
-            satisfechos: SatisfechosCount,
-            neutros: NeutrosCount,
-            inconformes: InconformesCount,
-            pendientesEntrega: activeProjects.length,
-            tarde: entregasFueraDeTiempo
-          },
-          ventas: {
-            porSemana: ventasPorSemana,
-            porMes: { ...defaultMonthlyObject(0), ...ventasPorMes }
-          },
-          ingresosMetodo: ingresosPorMetodo,
-          cuentasPorCobrar: { ...defaultMonthlyObject(0), ...ctasPorCobrarPorMes },
-          cuentasPorCobrarDetalle: ctasPorCobrarDetalle,
-          gastosDevengados: {
-            porTipo: gastosPorTipo,
-            porSemana: gastosPorSemana,
-            porMes: { ...defaultMonthlyObject(0), ...gastosPorMes }
-          },
-          egresos: {
-            porTipo: egresosPorTipo,
-            porMes: { ...defaultMonthlyObject(0), ...egresosPorMes }
-          },
-          comparativos: {
-            ingresosEgresos: {
-              ingresos: { ...defaultMonthlyObject(0), ...ingresosPorMes },
-              egresos: { ...defaultMonthlyObject(0), ...egresosPorMes }
-            },
-            ventasGastos: {
-              ventas: { ...defaultMonthlyObject(0), ...ventasPorMes },
-              gastos: { ...defaultMonthlyObject(0), ...gastosPorMes }
-            }
-          },
-          nomina: {
-            porRol: nominaPorRol,
-            iessTotal: totalIess
-          },
-          cuentasPorPagar: monthsList.reduce((acc: any, m) => {
-            acc[m] = ctasPorPagarPorMes[m] || { total: 0, pagado: 0, pendiente: 0 };
-            return acc;
-          }, {})
-        }
-      });
-    } catch (error) {
-      console.error('[finanzas/reportes/balances]', error);
-      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Error al generar reporte de balances' } });
     }
   }
 }

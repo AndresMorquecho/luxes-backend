@@ -18,14 +18,23 @@ const mapProforma = (record) => ({
     direccion: record.direccion ?? '',
     fecha: formatDate(record.fecha),
     vencimiento: formatDate(record.vencimiento),
+    diasValidez: record.diasValidez ?? 3,
     items: record.items
         .sort((a, b) => a.orden - b.orden)
         .map((item) => ({
+        id: item.id,
+        cod: item.cod ?? undefined,
         descripcion: item.descripcion,
         cantidad: Number(item.cantidad),
+        ancho: item.ancho ?? undefined,
+        alto: item.alto ?? undefined,
+        metraje: item.metraje ?? undefined,
+        metrajeTotal: item.metrajeTotal ?? undefined,
         precioUnitario: Number(item.precioUnitario),
+        valor: item.valor ?? undefined,
     })),
     iva: Number(record.iva),
+    descuento: record.descuento ?? 0,
     notas: record.notas,
     medio: record.medio || 'LUXES',
     estado: record.estado,
@@ -60,9 +69,11 @@ export class PrismaProformasPersistence {
             direccion: input.direccion ?? '',
             fecha,
             vencimiento: toDate(input.vencimiento),
+            diasValidez: input.diasValidez ?? 3,
             iva: input.iva ?? 0.12,
+            descuento: input.descuento ?? 0,
             notas: input.notas ?? '',
-            medio: input.medio ?? 'LUXES',
+            medio: input.medio ?? 'ALUX',
             estado: input.estado ?? 'Pendiente',
         };
         if (input.id) {
@@ -74,9 +85,15 @@ export class PrismaProformasPersistence {
                         ...baseData,
                         items: {
                             create: items.map((item, orden) => ({
+                                cod: item.cod ?? null,
                                 descripcion: item.descripcion,
                                 cantidad: item.cantidad,
+                                ancho: item.ancho ?? null,
+                                alto: item.alto ?? null,
+                                metraje: item.metraje ?? null,
+                                metrajeTotal: item.metrajeTotal ?? null,
                                 precioUnitario: item.precioUnitario,
+                                valor: item.valor ?? null,
                                 orden,
                             })),
                         },
@@ -94,9 +111,15 @@ export class PrismaProformasPersistence {
                 ...baseData,
                 items: {
                     create: items.map((item, orden) => ({
+                        cod: item.cod ?? null,
                         descripcion: item.descripcion,
                         cantidad: item.cantidad,
+                        ancho: item.ancho ?? null,
+                        alto: item.alto ?? null,
+                        metraje: item.metraje ?? null,
+                        metrajeTotal: item.metrajeTotal ?? null,
                         precioUnitario: item.precioUnitario,
+                        valor: item.valor ?? null,
                         orden,
                     })),
                 },

@@ -573,6 +573,7 @@ model Proforma {
   atiende       String         @default("")
   condiciones   String         @default("")
   iva           Decimal        @default(0.12) @db.Decimal(6, 4)
+  descuento     Float?         @default(0)
   notas         String         @default("")
   medio         String         @default("LUXES")
   estado        String         @default("Pendiente")
@@ -609,9 +610,15 @@ model ProformaItem {
   id             String   @id @default(uuid())
   proformaId     String   @map("proforma_id")
   proforma       Proforma @relation(fields: [proformaId], references: [id], onDelete: Cascade)
+  cod            String?
   descripcion    String
   cantidad       Decimal  @db.Decimal(12, 2)
+  ancho          Float?
+  alto           Float?
+  metraje        Float?
+  metrajeTotal   Float?   @map("metraje_total")
   precioUnitario Decimal  @map("precio_unitario") @db.Decimal(12, 2)
+  valor          Float?
   orden          Int      @default(0)
 
   @@index([proformaId])
@@ -760,6 +767,7 @@ model Proyecto {
   etiquetas              String            @default("") // JSON array de strings o separadas por coma
   notas                  String            @default("")
   medio                  String            @default("LUXES")
+  fasesAlux              String?           @map("fases_alux") // JSON string con las fases dinámicas de Alux
   
   // Relaciones
   fases                  ProyectoFase[]
