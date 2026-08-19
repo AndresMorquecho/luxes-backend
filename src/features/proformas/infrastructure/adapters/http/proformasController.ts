@@ -119,12 +119,21 @@ function mapProforma(p: any) {
     .slice()
     .sort((a: any, b: any) => a.orden - b.orden)
     .map((i: any) => ({
+      cod: i.cod ?? undefined,
       descripcion: i.descripcion,
       cantidad: Number(i.cantidad),
+      ancho: i.ancho ?? undefined,
+      alto: i.alto ?? undefined,
+      metraje: i.metraje ?? undefined,
+      metrajeTotal: i.metrajeTotal ?? undefined,
       precioUnitario: Number(i.precioUnitario),
+      valor: i.valor ?? undefined,
     }));
 
-  const subtotal = itemsMapped.reduce((s: number, i: any) => s + (i.cantidad * i.precioUnitario), 0);
+  const subtotal = itemsMapped.reduce((s: number, i: any) => {
+    const valor = i.valor != null ? Number(i.valor) : 0;
+    return s + (valor > 0 ? valor : i.cantidad * i.precioUnitario);
+  }, 0);
   const ivaNum = Number(p.iva ?? 0.12);
   const total = subtotal * (1 + ivaNum);
 
@@ -179,10 +188,22 @@ function mapProforma(p: any) {
 
 /** Construye los datos de ítems para Prisma a partir del body */
 function buildItems(items: any[]): any[] {
+  const toOptionalNum = (v: unknown): number | null => {
+    if (v === undefined || v === null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
   return (Array.isArray(items) ? items : []).map((it, idx) => ({
+    cod: it.cod ?? null,
     descripcion: it.descripcion || '',
     cantidad: Number(it.cantidad) || 0,
+    ancho: toOptionalNum(it.ancho),
+    alto: toOptionalNum(it.alto),
+    metraje: toOptionalNum(it.metraje),
+    metrajeTotal: toOptionalNum(it.metrajeTotal),
     precioUnitario: Number(it.precioUnitario) || 0,
+    valor: toOptionalNum(it.valor),
     orden: idx,
   }));
 }
