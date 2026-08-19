@@ -628,6 +628,8 @@ export class ProyectosController {
                     const user = req.user;
                     const userName = user?.nombre || user?.username || 'Un colaborador';
                     const userId = user?.id;
+                    const creatorRol = String(user?.rol || '').toLowerCase();
+                    const creatorIsAdmin = creatorRol === 'admin' || creatorRol === 'administrador';
                     for (const nextF of nextFases) {
                         const nextFId = String(nextF.id);
                         const prevF = prevFasesMap.get(nextFId);
@@ -646,16 +648,17 @@ export class ProyectosController {
                                     faseId: nextF.id,
                                 },
                             };
+                            const notifyRol = creatorIsAdmin ? 'trabajador' : 'admin';
                             await prisma.notification.create({
                                 data: {
                                     title: `Nueva Fase: ${faseNombre}`,
                                     message: `${userName} creó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
-                                    rol: 'admin',
+                                    rol: notifyRol,
                                     createdBy: userName,
                                 },
                             }).catch(() => { });
-                            await sendPushToAllActive(payload, userId);
-                            console.log(`[Push Notification] Nueva fase "${faseNombre}" creada por ${userName}`);
+                            await sendPushToRole(notifyRol, payload);
+                            console.log(`[Push Notification] Nueva fase "${faseNombre}" creada por ${userName} — notificado rol ${notifyRol}`);
                         }
                         // 2. Fase marcada como completada
                         else {
