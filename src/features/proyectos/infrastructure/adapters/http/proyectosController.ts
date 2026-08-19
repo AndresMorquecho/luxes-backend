@@ -601,7 +601,7 @@ export class ProyectosController {
         await prisma.notification.create({
           data: {
             title: 'Nuevo Proyecto Creado',
-            message: `Se ha creado el proyecto "${proyecto.nombre}" (${proyecto.id}) para ${clienteLabel}. Responsable: ${proyecto.responsable || 'Sin asignar'}.`,
+            message: `[PROYECTO_ID:${proyecto.id}] Se ha creado el proyecto "${proyecto.nombre}" (${proyecto.id}) para ${clienteLabel}. Responsable: ${proyecto.responsable || 'Sin asignar'}.`,
             rol: 'trabajador',
             createdBy,
           },
@@ -733,7 +733,7 @@ export class ProyectosController {
               await prisma.notification.create({
                 data: {
                   title: `Nueva Fase: ${faseNombre}`,
-                  message: `${userName} creó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
+                  message: `[PROYECTO_ID:${id}] ${userName} creó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
                   rol: notifyRol,
                   createdBy: userName,
                 },
@@ -765,7 +765,7 @@ export class ProyectosController {
                 await prisma.notification.create({
                   data: {
                     title: `Fase Completada: ${faseNombre}`,
-                    message: `${userName} completó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
+                    message: `[PROYECTO_ID:${id}] ${userName} completó la fase "${faseNombre}" en el proyecto "${proyectoExistente.nombre}".`,
                     rol: 'admin',
                     createdBy: userName,
                   },
