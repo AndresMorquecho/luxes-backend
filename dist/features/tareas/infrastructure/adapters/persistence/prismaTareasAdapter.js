@@ -1,10 +1,4 @@
-import webpush from 'web-push';
-import { env } from '../../../../../config/env.js';
-import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
-// Configure web-push with VAPID keys
-if (env.vapidPublicKey && env.vapidPrivateKey) {
-    webpush.setVapidDetails(env.vapidEmail, env.vapidPublicKey, env.vapidPrivateKey);
-}
+import { sendPushToRole, sendPushToUsers } from '../../../../../shared/services/pushNotificationService.js';
 const tareaInclude = {
     creadoPor: { select: { id: true, nombre: true, email: true } },
     asignaciones: {
@@ -42,6 +36,17 @@ export class PrismaTareasAdapter {
                 { descripcion: { contains: options.search, mode: 'insensitive' } },
             ];
         }
+        if (options?.fechaInicio || options?.fechaFin) {
+            where.fechaCreacion = {};
+            if (options.fechaInicio) {
+                where.fechaCreacion.gte = new Date(options.fechaInicio);
+            }
+            if (options.fechaFin) {
+                const end = new Date(options.fechaFin);
+                end.setHours(23, 59, 59, 999);
+                where.fechaCreacion.lte = end;
+            }
+        }
         const [items, total] = await Promise.all([
             this.prisma.tarea.findMany({
                 where,
@@ -74,6 +79,23 @@ export class PrismaTareasAdapter {
         }
         if (options?.prioridad)
             where.prioridad = options.prioridad;
+        if (options?.search) {
+            where.OR = [
+                { titulo: { contains: options.search, mode: 'insensitive' } },
+                { descripcion: { contains: options.search, mode: 'insensitive' } },
+            ];
+        }
+        if (options?.fechaInicio || options?.fechaFin) {
+            where.fechaCreacion = {};
+            if (options.fechaInicio) {
+                where.fechaCreacion.gte = new Date(options.fechaInicio);
+            }
+            if (options.fechaFin) {
+                const end = new Date(options.fechaFin);
+                end.setHours(23, 59, 59, 999);
+                where.fechaCreacion.lte = end;
+            }
+        }
         const [items, total] = await Promise.all([
             this.prisma.tarea.findMany({
                 where,
@@ -118,7 +140,7 @@ export class PrismaTareasAdapter {
         try {
             const creador = row.creadoPor;
             const prioridadLabel = data.prioridad === 'alta' ? 'Alta' : data.prioridad === 'baja' ? 'Baja' : 'Media';
-            // Create in-app notification per assigned user
+            // 1. In-app notification per assigned user
             for (const asig of row.asignaciones) {
                 await this.prisma.notification.create({
                     data: {
@@ -129,29 +151,16 @@ export class PrismaTareasAdapter {
                     },
                 });
             }
-            // Send PWA push notifications
+            // 2. Send PWA push notifications to assigned users
             const assignedUserIds = data.asignadoA;
-            const usersWithSubs = await this.prisma.user.findMany({
-                where: { id: { in: assignedUserIds } },
-                include: { pushSubscriptions: true },
-            });
-            const pushPayload = JSON.stringify({
-                title: 'Nueva Tarea Asignada',
-                body: `${creador.nombre}: "${row.titulo}" — Prioridad ${prioridadLabel}`,
-                url: '/tareas',
-            });
-            for (const user of usersWithSubs) {
-                for (const sub of user.pushSubscriptions) {
-                    try {
-                        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, pushPayload);
-                    }
-                    catch (pushErr) {
-                        console.error(`[Web Push Error] Failed to send task notification to ${sub.endpoint}:`, pushErr.message);
-                        if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-                            await this.prisma.pushSubscription.delete({ where: { endpoint: sub.endpoint } });
-                        }
-                    }
-                }
+            if (assignedUserIds && assignedUserIds.length > 0) {
+                await sendPushToUsers(assignedUserIds, {
+                    title: 'Nueva Tarea Asignada',
+                    body: `${creador.nombre}: "${row.titulo}" — Prioridad ${prioridadLabel}`,
+                    data: { url: '/tareas' },
+                }).catch((pushErr) => {
+                    console.error('[Tareas Push Error] Failed to send push to assigned users:', pushErr?.message);
+                });
             }
         }
         catch (err) {

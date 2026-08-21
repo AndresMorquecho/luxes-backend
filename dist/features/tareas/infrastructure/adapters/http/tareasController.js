@@ -18,7 +18,9 @@ export class TareasController {
             const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
             const prioridad = typeof req.query.prioridad === 'string' ? req.query.prioridad : undefined;
             const search = typeof req.query.search === 'string' ? req.query.search : undefined;
-            const data = await this.service.getTareas({ page, limit, estado, prioridad, search });
+            const fechaInicio = typeof req.query.fechaInicio === 'string' ? req.query.fechaInicio : undefined;
+            const fechaFin = typeof req.query.fechaFin === 'string' ? req.query.fechaFin : undefined;
+            const data = await this.service.getTareas({ page, limit, estado, prioridad, search, fechaInicio, fechaFin });
             return this.ok(res, data);
         }
         catch (e) {
@@ -35,7 +37,10 @@ export class TareasController {
             const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
             const estado = typeof req.query.estado === 'string' ? req.query.estado : undefined;
             const prioridad = typeof req.query.prioridad === 'string' ? req.query.prioridad : undefined;
-            const data = await this.service.getMisTareas(userId, { page, limit, estado, prioridad });
+            const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+            const fechaInicio = typeof req.query.fechaInicio === 'string' ? req.query.fechaInicio : undefined;
+            const fechaFin = typeof req.query.fechaFin === 'string' ? req.query.fechaFin : undefined;
+            const data = await this.service.getMisTareas(userId, { page, limit, estado, prioridad, search, fechaInicio, fechaFin });
             return this.ok(res, data);
         }
         catch (e) {
