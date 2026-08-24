@@ -118,9 +118,9 @@ function mapProforma(p) {
         cantidad: Number(i.cantidad),
         precioUnitario: Number(i.precioUnitario),
     }));
-    const subtotal = itemsMapped.reduce((s, i) => s + (i.cantidad * i.precioUnitario), 0);
+    const subtotal = Math.round(itemsMapped.reduce((s, i) => s + (i.cantidad * i.precioUnitario), 0) * 100) / 100;
     const ivaNum = Number(p.iva ?? 0.12);
-    const total = subtotal * (1 + ivaNum);
+    const total = Math.round(subtotal * (1 + ivaNum) * 100) / 100;
     const abonosMapped = (p.abonos || [])
         .slice()
         .sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
@@ -133,9 +133,9 @@ function mapProforma(p) {
         metodoPago: ab.metodoPago ? { id: ab.metodoPago.id, nombre: ab.metodoPago.nombre } : null,
         registradoPor: ab.registradoPor ? { id: ab.registradoPor.id, nombre: ab.registradoPor.nombre } : null,
     }));
-    const totalAbonado = abonosMapped.reduce((s, a) => s + a.monto, 0);
-    const saldoPendiente = Math.max(0, total - totalAbonado);
-    const excedente = Math.max(0, totalAbonado - total);
+    const totalAbonado = Math.round(abonosMapped.reduce((s, a) => s + a.monto, 0) * 100) / 100;
+    const saldoPendiente = Math.max(0, Math.round((total - totalAbonado) * 100) / 100);
+    const excedente = Math.max(0, Math.round((totalAbonado - total) * 100) / 100);
     return {
         id: p.id,
         clienteId: p.clienteId,
@@ -569,8 +569,8 @@ export class ProformasController {
                 ivaToApply = new Decimal(aplicarIva ? 0.15 : 0);
             }
             // Calcular total de la proforma
-            const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-            const total = subtotal * (1 + Number(ivaToApply));
+            const subtotal = Math.round(proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0) * 100) / 100;
+            const total = Math.round(subtotal * (1 + Number(ivaToApply)) * 100) / 100;
             // Validar monto
             const abonoMonto = Number(monto || 0);
             if (isNaN(abonoMonto) || abonoMonto < 0) {
@@ -693,11 +693,11 @@ export class ProformasController {
                 return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Solo se pueden registrar abonos en proformas aprobadas o pagadas' } });
             }
             // Calcular total de la proforma
-            const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-            const total = subtotal * (1 + Number(proforma.iva));
+            const subtotal = Math.round(proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0) * 100) / 100;
+            const total = Math.round(subtotal * (1 + Number(proforma.iva)) * 100) / 100;
             // Calcular cuánto se ha pagado hasta ahora
-            const yaCobrado = proforma.abonos.reduce((s, ab) => s + Number(ab.monto), 0);
-            const pendiente = total - yaCobrado;
+            const yaCobrado = Math.round(proforma.abonos.reduce((s, ab) => s + Number(ab.monto), 0) * 100) / 100;
+            const pendiente = Math.max(0, Math.round((total - yaCobrado) * 100) / 100);
             const abonoMonto = Number(monto);
             if (abonoMonto <= 0) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
@@ -766,13 +766,13 @@ export class ProformasController {
             if (lastAbono.id !== String(abonoId)) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Solo se puede editar el último abono registrado' } });
             }
-            const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-            const total = subtotal * (1 + Number(proforma.iva));
-            const sumOtrosAbonos = abonosSorted.slice(0, -1).reduce((s, ab) => s + Number(ab.monto), 0);
+            const subtotal = Math.round(proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0) * 100) / 100;
+            const total = Math.round(subtotal * (1 + Number(proforma.iva)) * 100) / 100;
+            const sumOtrosAbonos = Math.round(abonosSorted.slice(0, -1).reduce((s, ab) => s + Number(ab.monto), 0) * 100) / 100;
             if (nuevoMonto <= 0) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
             }
-            const maxPermitted = total - sumOtrosAbonos;
+            const maxPermitted = Math.round((total - sumOtrosAbonos) * 100) / 100;
             if (maxPermitted > 0 && nuevoMonto > (maxPermitted + 0.01)) {
                 return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${nuevoMonto} supera el saldo pendiente de $${maxPermitted.toFixed(2)}` } });
             }
