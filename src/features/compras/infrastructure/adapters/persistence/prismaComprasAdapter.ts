@@ -258,20 +258,29 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     return restored;
   }
 
-  async getNextOrdenNumero(): Promise<string> {
+  async getNextOrdenNumero(txPrisma?: any): Promise<string> {
+    const db = txPrisma || this.prisma;
     const year = new Date().getFullYear();
     const suffix = `_${year}`;
-    const last = await this.prisma.ordenCompra.findFirst({
+    const allMatching = await db.ordenCompra.findMany({
       where: {
         numero: { endsWith: suffix },
       },
-      orderBy: { numero: 'desc' },
       select: { numero: true },
     });
-    if (!last) return `ORC_001_${year}`;
-    const parts = last.numero.split('_');
-    const num = parseInt(parts[1], 10);
-    return `ORC_${String(num + 1).padStart(3, '0')}_${year}`;
+
+    let maxNum = 0;
+    for (const item of allMatching) {
+      const match = item.numero.match(/^ORC_(\d+)_\d{4}$/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (!isNaN(n) && n > maxNum) {
+          maxNum = n;
+        }
+      }
+    }
+
+    return `ORC_${String(maxNum + 1).padStart(3, '0')}_${year}`;
   }
 
   async createOrden(data: {
@@ -1140,11 +1149,22 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       }
     }
 
-    // 2. Generar número de orden manual
-    const countManual = await this.prisma.ordenCompra.count({
+    // 2. Generar número de orden manual buscando el correlativo máximo
+    const manualRecords = await this.prisma.ordenCompra.findMany({
       where: { numero: { startsWith: 'ORC_MAN_' } },
+      select: { numero: true },
     });
-    const numero = `ORC_MAN_${String(countManual + 1).padStart(3, '0')}`;
+    let maxManual = 0;
+    for (const r of manualRecords) {
+      const match = r.numero.match(/^ORC_MAN_(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (!isNaN(n) && n > maxManual) {
+          maxManual = n;
+        }
+      }
+    }
+    const numero = `ORC_MAN_${String(maxManual + 1).padStart(3, '0')}`;
 
     const fechaEmisionDate = fechaEmision ? new Date(fechaEmision) : new Date();
     const fechaVencimientoDate = fechaVencimiento ? new Date(fechaVencimiento) : null;
@@ -1534,15 +1554,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       await tx.ordenCompra.delete({ where: { id } });
 
       // Generar nuevo número correlativo
-      const year = new Date().getFullYear();
-      const suffix = `_${year}`;
-      const last = await tx.ordenCompra.findFirst({
-        where: { numero: { endsWith: suffix } },
-        orderBy: { numero: 'desc' },
-        select: { numero: true },
-      });
-      const lastNum = last ? parseInt(last.numero.split('_')[1], 10) : 0;
-      const nuevoNumero = `ORC_${String(lastNum + 1).padStart(3, '0')}_${year}`;
+      const nuevoNumero = await this.getNextOrdenNumero(tx);
 
       // Preparar abono inicial si se provee
       const abonoMonto = data.abonoMonto && data.abonoMonto > 0 ? data.abonoMonto : 0;
