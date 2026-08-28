@@ -294,8 +294,6 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     fechaVencimiento?: Date | null;
     proyectoId?: string | null;
   }): Promise<OrdenCompraData> {
-    const numero = await this.getNextOrdenNumero();
-
     // Mapear detalles - PRECIOS OPCIONALES
     const detallesData = (data.detalles || []).map(d => ({
       descripcion: d.descripcion,
@@ -309,9 +307,8 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     const impuesto = data.impuesto || 0;
     const total = subtotal + impuesto;
 
-    // Construir data object - PROVEEDOR OPCIONAL
+    // Construir base data object - PROVEEDOR OPCIONAL
     const createData: any = {
-      numero,
       usuario: { connect: { id: data.usuarioId } },
       fecha: data.fecha ? new Date(data.fecha) : new Date(),
       subtotal,
@@ -354,10 +351,26 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       };
     }
 
-    const row = await this.prisma.ordenCompra.create({
-      data: createData,
-      include: this.ordenInclude,
-    });
+    let row: any = null;
+    let intentos = 0;
+    while (!row && intentos < 5) {
+      intentos++;
+      const numero = await this.getNextOrdenNumero();
+      try {
+        row = await this.prisma.ordenCompra.create({
+          data: {
+            ...createData,
+            numero,
+          },
+          include: this.ordenInclude,
+        });
+      } catch (err: any) {
+        if (err?.code === 'P2002' && intentos < 5) {
+          continue;
+        }
+        throw err;
+      }
+    }
 
     // Generate notification for administrators
     try {
@@ -1150,21 +1163,23 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     }
 
     // 2. Generar número de orden manual buscando el correlativo máximo
-    const manualRecords = await this.prisma.ordenCompra.findMany({
-      where: { numero: { startsWith: 'ORC_MAN_' } },
-      select: { numero: true },
-    });
-    let maxManual = 0;
-    for (const r of manualRecords) {
-      const match = r.numero.match(/^ORC_MAN_(\d+)/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (!isNaN(n) && n > maxManual) {
-          maxManual = n;
+    const getNextManualNumber = async (): Promise<string> => {
+      const manualRecords = await this.prisma.ordenCompra.findMany({
+        where: { numero: { startsWith: 'ORC_MAN_' } },
+        select: { numero: true },
+      });
+      let maxManual = 0;
+      for (const r of manualRecords) {
+        const match = r.numero.match(/^ORC_MAN_(\d+)/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (!isNaN(n) && n > maxManual) {
+            maxManual = n;
+          }
         }
       }
-    }
-    const numero = `ORC_MAN_${String(maxManual + 1).padStart(3, '0')}`;
+      return `ORC_MAN_${String(maxManual + 1).padStart(3, '0')}`;
+    };
 
     const fechaEmisionDate = fechaEmision ? new Date(fechaEmision) : new Date();
     const fechaVencimientoDate = fechaVencimiento ? new Date(fechaVencimiento) : null;
@@ -1174,46 +1189,59 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     const initialEstado = initialSaldo <= 0 ? 'pagado' : abonoMonto > 0 ? 'parcial' : 'pendiente';
     const estadoPagoOrden = initialEstado === 'pendiente' ? 'sin_pagar' : initialEstado;
 
-    // 3. Crear OrdenCompra + DetalleCompra + CuentaPorPagar
-    const orden = await this.prisma.ordenCompra.create({
-      data: {
-        numero,
-        usuarioId,
-        proveedorId: finalProveedorId,
-        fecha: fechaEmisionDate,
-        subtotal: montoTotal,
-        impuesto: 0,
-        total: montoTotal,
-        concepto: concepto || 'Cuenta por pagar manual',
-        notas: notas || null,
-        estado: 'aprobada',
-        estadoPago: estadoPagoOrden,
-        proyectoId: proyectoId || null,
-        detalles: {
-          create: [
-            {
-              descripcion: concepto || 'Cuenta por pagar manual',
-              cantidad: 1,
-              precioUnitario: montoTotal,
-              subtotal: montoTotal,
+    // 3. Crear OrdenCompra + DetalleCompra + CuentaPorPagar con reintento automático anti-colisión
+    let orden: any = null;
+    let intentos = 0;
+    while (!orden && intentos < 5) {
+      intentos++;
+      const numero = await getNextManualNumber();
+      try {
+        orden = await this.prisma.ordenCompra.create({
+          data: {
+            numero,
+            usuarioId,
+            proveedorId: finalProveedorId,
+            fecha: fechaEmisionDate,
+            subtotal: montoTotal,
+            impuesto: 0,
+            total: montoTotal,
+            concepto: concepto || 'Cuenta por pagar manual',
+            notas: notas || null,
+            estado: 'aprobada',
+            estadoPago: estadoPagoOrden,
+            proyectoId: proyectoId || null,
+            detalles: {
+              create: [
+                {
+                  descripcion: concepto || 'Cuenta por pagar manual',
+                  cantidad: 1,
+                  precioUnitario: montoTotal,
+                  subtotal: montoTotal,
+                },
+              ],
             },
-          ],
-        },
-        cuentaPorPagar: {
-          create: {
-            montoTotal,
-            montoPagado: abonoMonto,
-            saldo: initialSaldo,
-            fechaVencimiento: fechaVencimientoDate,
-            estado: initialEstado,
+            cuentaPorPagar: {
+              create: {
+                montoTotal,
+                montoPagado: abonoMonto,
+                saldo: initialSaldo,
+                fechaVencimiento: fechaVencimientoDate,
+                estado: initialEstado,
+              },
+            },
           },
-        },
-      },
-      include: {
-        cuentaPorPagar: true,
-        proveedor: true,
-      },
-    });
+          include: {
+            cuentaPorPagar: true,
+            proveedor: true,
+          },
+        });
+      } catch (err: any) {
+        if (err?.code === 'P2002' && intentos < 5) {
+          continue;
+        }
+        throw err;
+      }
+    }
 
     // 4. Registrar Abono / Cheque si se especificó abonoInicial
     if (abonoMonto > 0 && abonoInicial?.metodoPagoId) {
