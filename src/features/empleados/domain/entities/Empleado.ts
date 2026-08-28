@@ -19,6 +19,7 @@ export interface EmpleadoProps {
   direccion: string;
   foto?: string | null;
   rol?: string;
+  horaEntrada?: string | null;
 }
 
 export class Empleado {
@@ -42,6 +43,7 @@ export class Empleado {
   readonly direccion: string;
   readonly foto: string | null;
   readonly rol?: string;
+  readonly horaEntrada?: string | null;
 
   constructor(props: EmpleadoProps) {
     this.id = props.id;
@@ -64,6 +66,7 @@ export class Empleado {
     this.direccion = props.direccion;
     this.foto = props.foto ?? null;
     this.rol = props.rol;
+    this.horaEntrada = props.horaEntrada ?? '08:00';
   }
 
   toJSON(): EmpleadoProps {
@@ -88,6 +91,7 @@ export class Empleado {
       direccion: this.direccion,
       foto: this.foto ?? '',
       rol: this.rol,
+      horaEntrada: this.horaEntrada ?? '08:00',
     };
   }
 }

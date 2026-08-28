@@ -26,6 +26,7 @@ const parseBody = (body) => ({
     foto: body.foto ? String(body.foto) : null,
     rol: body.rol ? String(body.rol) : undefined,
     roleId: body.roleId ? String(body.roleId) : undefined,
+    horaEntrada: body.horaEntrada ? String(body.horaEntrada) : '08:00',
 });
 const paramId = (req) => String(req.params.id);
 const formatFotoUrl = (empId, foto) => {

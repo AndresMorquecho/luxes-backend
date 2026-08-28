@@ -22,6 +22,7 @@ const mapRecord = (record) => new Empleado({
     direccion: record.direccion,
     foto: record.foto,
     rol: record.user?.rol,
+    horaEntrada: record.horaEntrada ?? '08:00',
 });
 const toDbData = (data) => {
     const record = {
@@ -43,6 +44,7 @@ const toDbData = (data) => {
         iessValor: data.iessValor !== undefined ? data.iessValor : null,
         direccion: data.direccion ?? '',
         foto: data.foto || null,
+        horaEntrada: data.horaEntrada ?? '08:00',
     };
     if (data.passwordHash) {
         record.passwordHash = data.passwordHash;

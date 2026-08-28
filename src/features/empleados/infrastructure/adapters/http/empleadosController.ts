@@ -45,6 +45,7 @@ const parseBody = (body: Record<string, unknown>): EmpleadoInput => ({
   foto: body.foto ? String(body.foto) : null,
   rol: body.rol ? String(body.rol) : undefined,
   roleId: body.roleId ? String(body.roleId) : undefined,
+  horaEntrada: body.horaEntrada ? String(body.horaEntrada) : '08:00',
 });
 
 const paramId = (req: Request): string => String(req.params.id);

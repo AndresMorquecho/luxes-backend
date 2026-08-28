@@ -89,7 +89,7 @@ export class AsistenciaService {
                 try {
                     empsAuto = await prisma.empleado.findMany({
                         where: { autoAsistencia: true },
-                        select: { id: true, nombre: true, tipoContrato: true },
+                        select: { id: true, nombre: true, tipoContrato: true, horaEntrada: true },
                     });
                 }
                 catch {
@@ -116,7 +116,6 @@ export class AsistenciaService {
                         return null;
                     return h * 60 + m;
                 };
-                const entradaMin = parseMin(diaConfig.entrada) ?? (dayOfWeek === 6 ? 9 * 60 : 8 * 60);
                 const inicioAlmMin = parseMin(diaConfig.inicioAlmuerzo);
                 const finAlmMin = parseMin(diaConfig.finAlmuerzo);
                 const salidaMin = parseMin(diaConfig.salida) ?? (dayOfWeek === 6 ? 14 * 60 : 17 * 60 + 30);
@@ -133,14 +132,15 @@ export class AsistenciaService {
                     const hasPermiso = todayMarks.some((m) => m.tipo === 'PERMISO');
                     if (hasPermiso)
                         continue;
-                    // 1. ENTRADA
-                    if (currentMinutes >= entradaMin && !hasEntrada) {
+                    // 1. ENTRADA (respetando horaEntrada personalizada de cada empleado)
+                    const horaEntradaEmp = (dayOfWeek === 6 ? diaConfig.entrada : (emp.horaEntrada || diaConfig.entrada)) || (dayOfWeek === 6 ? '09:00' : '08:00');
+                    const empEntradaMin = parseMin(horaEntradaEmp) ?? (dayOfWeek === 6 ? 9 * 60 : 8 * 60);
+                    if (currentMinutes >= empEntradaMin && !hasEntrada) {
                         const exists = await prisma.asistencia.findFirst({
                             where: { empleadoId: emp.id, tipo: 'ENTRADA', fechaHora: { gte: startOfDay, lte: endOfDay } },
                         });
                         if (!exists) {
-                            const horaEntrada = diaConfig.entrada || (dayOfWeek === 6 ? '09:00' : '08:00');
-                            const dtEntrada = new Date(`${hoyStr}T${horaEntrada}:00.000-05:00`);
+                            const dtEntrada = new Date(`${hoyStr}T${horaEntradaEmp}:00.000-05:00`);
                             await this.asistenciaRepository.create({
                                 empleadoId: emp.id,
                                 tipo: 'ENTRADA',
@@ -275,7 +275,7 @@ export class AsistenciaService {
     async registrarAsistencia(input) {
         let empleado = await prisma.empleado.findUnique({
             where: { id: input.empleadoId },
-            select: { id: true, nombre: true, tipoContrato: true },
+            select: { id: true, nombre: true, tipoContrato: true, horaEntrada: true },
         });
         if (!empleado) {
             const user = await prisma.user.findFirst({
@@ -293,13 +293,14 @@ export class AsistenciaService {
                     id: user.empleado.id,
                     nombre: user.empleado.nombre,
                     tipoContrato: user.empleado.tipoContrato,
+                    horaEntrada: user.empleado.horaEntrada,
                 };
                 input.empleadoId = user.empleado.id;
             }
             else if (user?.rol?.toLowerCase() === 'administrador' || user?.username === 'admin') {
                 const firstEmp = await prisma.empleado.findFirst({
                     orderBy: { id: 'asc' },
-                    select: { id: true, nombre: true, tipoContrato: true },
+                    select: { id: true, nombre: true, tipoContrato: true, horaEntrada: true },
                 });
                 if (firstEmp) {
                     empleado = firstEmp;
@@ -585,8 +586,9 @@ export class AsistenciaService {
             const horariosConfigEnt = (await (await import('../../infrastructure/adapters/persistence/horarioLaboralStore.js')).loadHorariosLaborales());
             const toleranciaEnt = Number(horariosConfigEnt.toleranciaMinutos ?? 8);
             const { calcularMultaAtraso: calcMultaEnt } = await import('../../../../shared/utils/horarioLaboralHelpers.js');
-            // Calculate minutes late from the configured entrada time
-            const entradaHora = diaConfig?.entrada ?? '08:00';
+            // Calculate minutes late from the configured entrada time (o personalizada del empleado en días laborables)
+            const dayOfWeek = ahoraEC.getUTCDay();
+            const entradaHora = (dayOfWeek === 6 ? diaConfig?.entrada : (empleado.horaEntrada || diaConfig?.entrada)) ?? '08:00';
             const [eh, em] = entradaHora.split(':').map(Number);
             const minutosActual = ahoraEC.getUTCHours() * 60 + ahoraEC.getUTCMinutes();
             const minutosEntrada = eh * 60 + em;
@@ -725,7 +727,7 @@ export class AsistenciaService {
         const { asistenciaId, empleadoId, tipo, fechaHora, eliminarMultaAsociada } = input;
         const empleado = await prisma.empleado.findUnique({
             where: { id: empleadoId },
-            select: { id: true, nombre: true },
+            select: { id: true, nombre: true, horaEntrada: true },
         });
         if (!empleado) {
             throw new Error(`Empleado con ID '${empleadoId}' no encontrado.`);
@@ -802,15 +804,17 @@ export class AsistenciaService {
             else if (!eliminarMultaAsociada && targetFineType) {
                 // Evaluar si el nuevo horario genera atraso usando la misma fórmula de tramos del QR
                 const { diaConfig } = await getHorarioDelDia(dateStr);
-                const { calcularMultaAtraso } = await import('../../../../shared/utils/horarioLaboralHelpers.js');
+                const { calcularMultaAtraso, isSabado } = await import('../../../../shared/utils/horarioLaboralHelpers.js');
                 let multaDolares = 0;
                 let atrasoMinutos = 0;
                 let motivoStr = '';
-                if (tipo === 'ENTRADA' && diaConfig?.entrada) {
-                    const [eh, em] = diaConfig.entrada.split(':').map(Number);
+                const isSab = isSabado(dateStr);
+                const entradaHora = (isSab ? diaConfig?.entrada : (empleado.horaEntrada || diaConfig?.entrada)) ?? '08:00';
+                if (tipo === 'ENTRADA' && entradaHora) {
+                    const [eh, em] = entradaHora.split(':').map(Number);
                     const [mh, mm] = horaMarcacionStr.split(':').map(Number);
                     atrasoMinutos = (mh * 60 + mm) - (eh * 60 + em);
-                    const tolerancia = Number(diaConfig?.toleranciaEntrada ?? 8);
+                    const tolerancia = Number(diaConfig?.toleranciaMinutos ?? diaConfig?.toleranciaEntrada ?? 8);
                     multaDolares = calcularMultaAtraso(atrasoMinutos, tolerancia);
                     if (multaDolares > 0) {
                         motivoStr = `Atraso entrada QR ${horaMarcacionStr} (+${atrasoMinutos} min)`;
@@ -877,5 +881,77 @@ export class AsistenciaService {
             console.error('[ADMIN-EDIT] Error al procesar multa en nómina:', err);
         }
         return { ...resultAsistencia, nombreEmpleado: empleado.nombre };
+    }
+    async eliminarMarcacion(asistenciaId) {
+        const asistencia = await prisma.asistencia.findUnique({
+            where: { id: asistenciaId },
+        });
+        if (!asistencia) {
+            throw new Error(`Marcación con ID '${asistenciaId}' no encontrada.`);
+        }
+        const { empleadoId, tipo, fechaHora } = asistencia;
+        const targetDate = new Date(fechaHora);
+        const ecTimeStr = new Date(targetDate.getTime() - 5 * 3600 * 1000).toISOString();
+        const dateStr = ecTimeStr.slice(0, 10);
+        // 1. Eliminar la asistencia
+        await prisma.asistencia.delete({
+            where: { id: asistenciaId },
+        });
+        // 2. Si tenía horas extras asociadas
+        try {
+            await prisma.horaExtra.deleteMany({
+                where: { asistenciaFinId: asistenciaId },
+            });
+        }
+        catch (e) {
+            console.error('[ELIMINAR-MARCACION] Error al limpiar hora extra vinculada:', e);
+        }
+        // 3. Saneamiento de multa de atraso en nómina si era ENTRADA o FIN_ALMUERZO
+        try {
+            const targetFineType = tipo === 'ENTRADA' ? 'ATRASO_QR' : tipo === 'FIN_ALMUERZO' ? 'ATRASO_QR_ALMUERZO' : null;
+            if (targetFineType) {
+                const dayStart = new Date(`${dateStr}T00:00:00.000-05:00`);
+                const dayEnd = new Date(`${dateStr}T23:59:59.999-05:00`);
+                const remainingMark = await prisma.asistencia.findFirst({
+                    where: {
+                        empleadoId,
+                        tipo,
+                        fechaHora: { gte: dayStart, lte: dayEnd },
+                    },
+                });
+                if (!remainingMark) {
+                    const { fechaInicio, fechaFin } = getQuincenaPeriod(targetDate);
+                    const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);
+                    const periodEnd = new Date(`${fechaFin}T23:59:59.999Z`);
+                    const existingNomina = await prisma.nominaRegistro.findFirst({
+                        where: { empleadoId, fechaInicio: periodStart, fechaFin: periodEnd },
+                    });
+                    if (existingNomina) {
+                        const egresosObj = typeof existingNomina.egresos === 'string'
+                            ? JSON.parse(existingNomina.egresos)
+                            : (existingNomina.egresos || {});
+                        let permisosDetalle = Array.isArray(egresosObj.permisosDetalle) ? [...egresosObj.permisosDetalle] : [];
+                        const originalLength = permisosDetalle.length;
+                        permisosDetalle = permisosDetalle.filter((p) => !(p.fecha === dateStr && p.tipo === targetFineType));
+                        if (permisosDetalle.length !== originalLength) {
+                            const newPermisoHoras = permisosDetalle
+                                .filter((r) => !r.eliminado)
+                                .reduce((sum, item) => sum + Number(item.multaDolares ?? item.horas ?? 0), 0);
+                            await prisma.nominaRegistro.update({
+                                where: { id: existingNomina.id },
+                                data: {
+                                    permisoHoras: newPermisoHoras,
+                                    egresos: { ...egresosObj, permisosDetalle },
+                                },
+                            });
+                            console.log(`[ELIMINAR-MARCACION] Multa ${targetFineType} eliminada de nómina para empleado ${empleadoId} el día ${dateStr}`);
+                        }
+                    }
+                }
+            }
+        }
+        catch (err) {
+            console.error('[ELIMINAR-MARCACION] Error saneando nómina:', err);
+        }
     }
 }

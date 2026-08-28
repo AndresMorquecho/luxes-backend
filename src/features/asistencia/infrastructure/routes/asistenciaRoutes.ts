@@ -35,6 +35,9 @@ export function createAsistenciaRoutes(controller: AsistenciaController): Router
   router.post('/manual-edit', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) =>
     controller.adminEditarONuevaMarcacion(req, res)
   );
+  router.delete('/:id', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) =>
+    controller.eliminarMarcacion(req, res)
+  );
 
   return router;
 }

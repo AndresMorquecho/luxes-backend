@@ -24,6 +24,7 @@ export type EmpleadoInput = {
   foto?: string | null;
   rol?: string;
   roleId?: string;
+  horaEntrada?: string | null;
 };
 
 export abstract class EmpleadoRepositoryPort {

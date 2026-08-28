@@ -275,4 +275,32 @@ export class AsistenciaController {
       });
     }
   }
+
+  async eliminarMarcacion(req: Request, res: Response): Promise<Response> {
+    try {
+      const id = String(req.params.id || req.body?.id || req.query?.id || '').trim();
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'El ID de la marcación es requerido' },
+        });
+      }
+
+      await this.asistenciaService.eliminarMarcacion(id);
+
+      return res.status(200).json({
+        success: true,
+        data: null,
+      });
+    } catch (error) {
+      console.error('[asistencia/eliminarMarcacion]', error);
+      const message = error instanceof Error ? error.message : 'Error al eliminar la marcación';
+      return res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message },
+      });
+    }
+  }
 }
+

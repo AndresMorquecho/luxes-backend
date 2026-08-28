@@ -15,5 +15,6 @@ export function createAsistenciaRoutes(controller) {
     router.get('/empleado/:empleadoId/auto-asistencia', authMiddleware, (req, res) => controller.getAutoAsistenciaStatus(req, res));
     router.patch('/empleado/:empleadoId/auto-asistencia', authMiddleware, (req, res) => controller.toggleAutoAsistenciaStatus(req, res));
     router.post('/manual-edit', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => controller.adminEditarONuevaMarcacion(req, res));
+    router.delete('/:id', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => controller.eliminarMarcacion(req, res));
     return router;
 }
