@@ -19,6 +19,7 @@ import { ProyectosController } from './features/proyectos/infrastructure/adapter
 import { createImpresionesModule } from './features/impresiones/infrastructure/composition/impresionesContainer.js';
 import { createGastosModule } from './features/gastos/infrastructure/composition/gastosContainer.js';
 import { createLandingRoutes } from './features/landing/infrastructure/routes/landingRoutes.js';
+import { createCalendarioModule } from './features/calendario/infrastructure/composition/calendarioContainer.js';
 
 
 
@@ -142,6 +143,50 @@ async function bootstrap() {
     console.log('[Bootstrap] Columnas auto_asistencia y fecha_nacimiento en empleados verificadas.');
   } catch (error) {
     console.error('[Bootstrap] Error al verificar columnas en empleados:', error);
+  }
+
+  // Crear tablas de rutinas y turnos si no existen
+  try {
+    const { prisma } = await import('./config/prismaClient.js');
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS rutinas (
+        id VARCHAR(255) PRIMARY KEY,
+        titulo VARCHAR(255) NOT NULL,
+        descripcion TEXT,
+        frecuencia VARCHAR(50) DEFAULT 'SEMANAL' NOT NULL,
+        dias_semana TEXT DEFAULT '[]' NOT NULL,
+        dia_del_mes INTEGER,
+        hora_notificacion VARCHAR(20) DEFAULT '08:30' NOT NULL,
+        color VARCHAR(50) DEFAULT '#8b5cf6' NOT NULL,
+        activo BOOLEAN DEFAULT TRUE NOT NULL,
+        creado_por_id VARCHAR(255) REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS rutina_asignaciones (
+        id VARCHAR(255) PRIMARY KEY,
+        rutina_id VARCHAR(255) NOT NULL REFERENCES rutinas(id) ON DELETE CASCADE,
+        empleado_id VARCHAR(255) NOT NULL REFERENCES empleados(id) ON DELETE CASCADE,
+        UNIQUE(rutina_id, empleado_id)
+      );
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS rutina_historial (
+        id VARCHAR(255) PRIMARY KEY,
+        rutina_id VARCHAR(255) NOT NULL REFERENCES rutinas(id) ON DELETE CASCADE,
+        fecha DATE NOT NULL,
+        completada BOOLEAN DEFAULT FALSE NOT NULL,
+        completada_por_id VARCHAR(255) REFERENCES empleados(id) ON DELETE SET NULL,
+        notas TEXT,
+        completada_at TIMESTAMP,
+        UNIQUE(rutina_id, fecha)
+      );
+    `);
+    console.log('[Bootstrap] Tablas de rutinas y turnos verificadas/creadas.');
+  } catch (error) {
+    console.error('[Bootstrap] Error al verificar tablas de rutinas:', error);
   }
 
   // Corregir desfase de zona horaria (UTC vs America/Guayaquil) en registros de horas extras existentes (aprobadas y pendientes)
@@ -444,6 +489,10 @@ async function bootstrap() {
   app.use('/api/gastos', gastosRouter);
   app.use('/api/vehiculos', vehiculosRouter);
 
+  const { calendarioRouter, rutinasRouter } = createCalendarioModule();
+  app.use('/api/calendario', calendarioRouter);
+  app.use('/api/rutinas', rutinasRouter);
+
   app.use('/api/landing', createLandingRoutes());
 
   app.use((_req, res) => {
@@ -465,6 +514,16 @@ async function bootstrap() {
       });
     } catch (err) {
       console.error('[Bootstrap] Error al iniciar cheques scheduler:', err);
+    }
+
+    // Iniciar temporizador para alertas de calendario y rutinas
+    try {
+      import('./shared/services/calendarioSchedulerService.js').then(({ startCalendarioScheduler }) => {
+        startCalendarioScheduler();
+        console.log('[Bootstrap] Servicio de Calendario y Rutinas Scheduler iniciado.');
+      });
+    } catch (err) {
+      console.error('[Bootstrap] Error al iniciar calendario scheduler:', err);
     }
   });
 

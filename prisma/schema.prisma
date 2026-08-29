@@ -36,6 +36,7 @@ model User {
   transferenciasRegistradas Transferencia[] @relation("TransferenciasRegistradas")
   gastosFijosRegistrados    GastoFijo[]     @relation("GastoFijoRegistradoPor")
   chequesCompraRegistrados  ChequeCompra[]  @relation("ChequeCompraRegistradoPor")
+  rutinasCreadas            Rutina[]
   empleadoId          String?       @unique @map("empleado_id")
   empleado            Empleado?     @relation(fields: [empleadoId], references: [id], onDelete: SetNull)
 
@@ -408,6 +409,8 @@ model Empleado {
   instalaciones ProyectoInstalacionPersonal[]
   user         User?
   materialesACargo Material[] @relation("MaterialACargo")
+  rutinasAsignadas   RutinaAsignacion[]
+  rutinasCompletadas RutinaHistorial[]
 
   @@map("empleados")
 }
@@ -1026,6 +1029,56 @@ model ReclamoProyecto {
   notasResolucion    String?   @map("notas_resolucion")
 
   @@map("reclamos_proyectos")
+}
+
+// ── Módulo de Rutinas / Turnos Recurrentes ──────────────────────────────────
+model Rutina {
+  id               String             @id @default(uuid())
+  titulo           String
+  descripcion      String?
+  frecuencia       String             @default("SEMANAL") // "DIARIA", "SEMANAL", "MENSUAL"
+  diasSemana       String             @default("[]") @map("dias_semana") // JSON array ej. [1, 3, 5] (1=Lunes..7=Domingo)
+  diaDelMes        Int?               @map("dia_del_mes")
+  horaNotificacion String             @default("08:30") @map("hora_notificacion") // "08:30"
+  color            String             @default("#8b5cf6")
+  activo           Boolean            @default(true)
+  creadoPorId      String?            @map("creado_por_id")
+  creadoPor        User?              @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  asignaciones     RutinaAsignacion[]
+  historial        RutinaHistorial[]
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  @@map("rutinas")
+}
+
+model RutinaAsignacion {
+  id         String   @id @default(uuid())
+  rutinaId   String   @map("rutina_id")
+  rutina     Rutina   @relation(fields: [rutinaId], references: [id], onDelete: Cascade)
+  empleadoId String   @map("empleado_id")
+  empleado   Empleado @relation(fields: [empleadoId], references: [id], onDelete: Cascade)
+
+  @@unique([rutinaId, empleadoId])
+  @@index([empleadoId])
+  @@map("rutina_asignaciones")
+}
+
+model RutinaHistorial {
+  id              String    @id @default(uuid())
+  rutinaId        String    @map("rutina_id")
+  rutina          Rutina    @relation(fields: [rutinaId], references: [id], onDelete: Cascade)
+  fecha           DateTime  @db.Date
+  completada      Boolean   @default(false)
+  completadaPorId String?   @map("completada_por_id")
+  completadaPor   Empleado? @relation(fields: [completadaPorId], references: [id], onDelete: SetNull)
+  notas           String?
+  completadaAt    DateTime? @map("completada_at")
+
+  @@unique([rutinaId, fecha])
+  @@index([rutinaId])
+  @@index([completadaPorId])
+  @@map("rutina_historial")
 }
 
 
