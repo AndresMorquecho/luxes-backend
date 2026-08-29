@@ -134,8 +134,9 @@ function mapProforma(p: any) {
     const valor = i.valor != null ? Number(i.valor) : 0;
     return s + (valor > 0 ? valor : i.cantidad * i.precioUnitario);
   }, 0);
+  const descuento = Number(p.descuento ?? 0);
   const ivaNum = Number(p.iva ?? 0.12);
-  const total = subtotal * (1 + ivaNum);
+  const total = Math.max(0, (subtotal - descuento) * (1 + ivaNum));
 
   const abonosMapped = (p.abonos || [])
     .slice()
@@ -167,6 +168,7 @@ function mapProforma(p: any) {
     atiende: p.atiende,
     condiciones: p.condiciones,
     iva: ivaNum,
+    descuento,
     subtotal,
     total,
     totalAbonado,
@@ -359,6 +361,7 @@ export class ProformasController {
           atiende: atiendeFinal,
           condiciones: b.condiciones ?? '',
           iva: Number(b.iva ?? 0.12),
+          descuento: Number(b.descuento ?? 0),
           notas: b.notas ?? '',
           medio: b.medio ?? 'LUXES',
           estado: b.estado ?? 'Pendiente',
@@ -449,6 +452,7 @@ export class ProformasController {
           atiende: b.atiende ?? '',
           condiciones: b.condiciones ?? '',
           iva: Number(b.iva ?? 0.12),
+          descuento: Number(b.descuento ?? 0),
           notas: b.notas ?? '',
           medio: b.medio ?? 'LUXES',
           estado: targetEstado,

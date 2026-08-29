@@ -86,6 +86,22 @@ async function bootstrap() {
     console.error('[Bootstrap] Error al verificar columna comprobante_url:', error);
   }
 
+  // Verificar/Crear columnas Alux en proformas, proforma_items y proyectos
+  try {
+    const { prisma } = await import('./config/prismaClient.js');
+    await prisma.$executeRawUnsafe(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS descuento DOUBLE PRECISION DEFAULT 0;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE proforma_items ADD COLUMN IF NOT EXISTS cod TEXT;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE proforma_items ADD COLUMN IF NOT EXISTS ancho DOUBLE PRECISION;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE proforma_items ADD COLUMN IF NOT EXISTS alto DOUBLE PRECISION;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE proforma_items ADD COLUMN IF NOT EXISTS metraje DOUBLE PRECISION;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE proforma_items ADD COLUMN IF NOT EXISTS metraje_total DOUBLE PRECISION;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE proforma_items ADD COLUMN IF NOT EXISTS valor DOUBLE PRECISION;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS fases_alux TEXT;`);
+    console.log('[Bootstrap] Columnas Alux en proformas, proforma_items y proyectos verificadas.');
+  } catch (error) {
+    console.error('[Bootstrap] Error al verificar columnas Alux:', error);
+  }
+
   // Verificar/Crear columna medio en proformas y migrar histórico si aplica
   try {
     const { prisma } = await import('./config/prismaClient.js');
