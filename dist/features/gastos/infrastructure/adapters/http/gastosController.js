@@ -121,6 +121,7 @@ export class GastosController {
                 }
                 return {
                     id: g.id,
+                    gastoId: g.id,
                     concepto: conceptoFinal,
                     categoria: g.categoria,
                     fecha: g.fecha,
@@ -139,6 +140,9 @@ export class GastosController {
                 const ref = ab.referencia || '';
                 return {
                     id: ab.id,
+                    abonoId: ab.id,
+                    ordenCompraId: ab.ordenCompraId,
+                    ordenNumero: ab.ordenCompra?.numero || '',
                     concepto: `Abono OC: ${ab.ordenCompra?.numero || ''} ${ref ? '- ' + ref : ''}`.trim(),
                     categoria: 'compras',
                     fecha: ab.fecha,
@@ -156,11 +160,14 @@ export class GastosController {
             const pagosNomina = [];
             const anticiposEmpleados = anticipos.map((ant) => ({
                 id: ant.id,
+                anticipoId: ant.id,
+                empleadoId: ant.empleadoId,
+                empleadoNombre: ant.empleado?.nombre || '',
                 concepto: `Abono a Empleado ${ant.empleado?.nombre || 'Sin nombre'} [Anticipo]`,
                 categoria: 'recursos_humanos',
                 fecha: ant.fecha,
                 monto: Number(ant.monto),
-                proveedor: 'Personal',
+                proveedor: ant.empleado?.nombre || 'Personal',
                 notas: ant.motivo || 'Anticipo registrado en RRHH',
                 metodoPagoId: null,
                 metodoPago: null,
@@ -891,13 +898,17 @@ export class GastosController {
                 for (const ab of abonosProforma) {
                     if (!isInRange(ab.fecha))
                         continue;
+                    const profId = ab.proforma?.id || ab.proformaId || '';
                     movimientos.push({
                         id: ab.id,
+                        abonoId: ab.id,
+                        proformaId: profId,
+                        proformaNumero: profId,
                         tipo: 'ingreso',
                         origen: 'proforma',
                         fecha: ab.fecha,
                         monto: Number(ab.monto),
-                        descripcion: `Cobro Proforma ${ab.proforma?.id || ab.proformaId || ''}`,
+                        descripcion: `Cobro Proforma ${profId}`,
                         referencia: ab.referencia || '',
                         metodoPago: ab.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: ab.metodoPagoId,
@@ -930,17 +941,21 @@ export class GastosController {
                     }
                     movimientos.push({
                         id: ing.id,
+                        ingresoId: ing.id,
                         tipo: 'ingreso',
                         origen: 'ingreso_manual',
                         fecha: combinedFecha,
                         monto: Number(ing.monto),
                         descripcion: ing.concepto,
+                        concepto: ing.concepto,
+                        categoria: ing.categoria || 'Otros Ingresos',
+                        cliente: ing.cliente || '',
+                        notas: ing.notas || '',
                         referencia: ing.notas || '',
                         metodoPago: ing.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: ing.metodoPagoId,
                         entidad: ing.cliente || ing.categoria || 'Ingreso manual',
                         usuario: ing.registradoPor?.nombre || '—',
-                        categoria: ing.categoria || 'Otros Ingresos',
                     });
                 }
             }
@@ -977,6 +992,7 @@ export class GastosController {
                     if (isOrigin && (!tipo || tipo === 'todos' || tipo === 'egreso')) {
                         movimientos.push({
                             id: `${t.id}-egreso`,
+                            transferenciaId: t.id,
                             tipo: 'egreso',
                             origen: 'transferencia',
                             fecha: combinedFecha,
@@ -993,6 +1009,7 @@ export class GastosController {
                     if (isDest && (!tipo || tipo === 'todos' || tipo === 'ingreso')) {
                         movimientos.push({
                             id: `${t.id}-ingreso`,
+                            transferenciaId: t.id,
                             tipo: 'ingreso',
                             origen: 'transferencia',
                             fecha: combinedFecha,
@@ -1011,6 +1028,7 @@ export class GastosController {
                     if (!tipo || tipo === 'todos' || tipo === 'egreso') {
                         movimientos.push({
                             id: `${t.id}-egreso`,
+                            transferenciaId: t.id,
                             tipo: 'egreso',
                             origen: 'transferencia',
                             fecha: combinedFecha,
@@ -1027,6 +1045,7 @@ export class GastosController {
                     if (!tipo || tipo === 'todos' || tipo === 'ingreso') {
                         movimientos.push({
                             id: `${t.id}-ingreso`,
+                            transferenciaId: t.id,
                             tipo: 'ingreso',
                             origen: 'transferencia',
                             fecha: combinedFecha,
@@ -1069,11 +1088,15 @@ export class GastosController {
                     const isNom = cat === 'nomina' || cat === 'nominas' || cat === 'recursos_humanos';
                     movimientos.push({
                         id: g.id,
+                        gastoId: g.id,
                         tipo: 'egreso',
                         origen: isNom ? 'pago_nomina' : 'gasto',
                         fecha: combinedFecha,
                         monto: Number(g.monto),
                         descripcion: g.concepto,
+                        concepto: g.concepto,
+                        proveedor: g.proveedor || '',
+                        notas: g.notas || '',
                         referencia: g.notas || '',
                         metodoPago: g.metodoPago?.nombre || 'No especificado',
                         metodoPagoId: g.metodoPagoId,
@@ -1097,7 +1120,7 @@ export class GastosController {
                             include: {
                                 proveedor: { select: { nombre: true } },
                                 cuentaPorPagar: {
-                                    select: { montoTotal: true, montoPagado: true, saldo: true },
+                                    select: { id: true, montoTotal: true, montoPagado: true, saldo: true },
                                 },
                             },
                         },
@@ -1115,6 +1138,10 @@ export class GastosController {
                         : `Pago OC ${ab.ordenCompra?.numero || ''}`;
                     movimientos.push({
                         id: ab.id,
+                        abonoId: ab.id,
+                        ordenCompraId: ab.ordenCompraId,
+                        ordenNumero: ab.ordenCompra?.numero || '',
+                        cxpId: cxp ? cxp.id : null,
                         tipo: 'egreso',
                         origen: 'orden_compra',
                         fecha: ab.fecha,
@@ -1144,6 +1171,10 @@ export class GastosController {
                         continue;
                     movimientos.push({
                         id: ant.id,
+                        anticipoId: ant.id,
+                        empleadoId: ant.empleadoId,
+                        empleadoNombre: ant.empleado?.nombre || '',
+                        motivo: ant.motivo || '',
                         tipo: 'egreso',
                         origen: 'anticipo_empleado',
                         fecha: ant.fecha,
@@ -1152,7 +1183,7 @@ export class GastosController {
                         referencia: ant.motivo || '',
                         metodoPago: 'No especificado',
                         metodoPagoId: null,
-                        entidad: 'Personal',
+                        entidad: ant.empleado?.nombre || 'Personal',
                         usuario: '—',
                         categoria: 'Nómina y Anticipos',
                     });
@@ -1181,6 +1212,9 @@ export class GastosController {
                         const total = Number(cxp.montoTotal);
                         movimientos.push({
                             id: `cxp-saldo-${cxp.id}`,
+                            cxpId: cxp.id,
+                            ordenCompraId: oc.id,
+                            ordenNumero: oc.numero,
                             tipo: 'egreso',
                             origen: 'cuenta_por_pagar',
                             fecha: oc.fecha,

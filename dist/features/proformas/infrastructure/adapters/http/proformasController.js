@@ -140,6 +140,7 @@ function mapProforma(p) {
         id: p.id,
         clienteId: p.clienteId,
         cliente: p.clienteNombre,
+        cedulaRuc: p.cliente?.cedulaRuc || p.cedulaRuc || p.clienteCedula || '',
         telefono: p.telefono,
         email: p.email,
         direccion: p.direccion || p.cliente?.direccion || '',
@@ -288,6 +289,12 @@ export class ProformasController {
                 });
                 atiendeFinal = dbUser?.nombre || dbUser?.username || '';
             }
+            if (clienteId && b.cedulaRuc) {
+                await prisma.cliente.update({
+                    where: { id: clienteId },
+                    data: { cedulaRuc: String(b.cedulaRuc).trim() }
+                }).catch(() => { });
+            }
             const created = await prisma.proforma.create({
                 data: {
                     id,
@@ -369,6 +376,12 @@ export class ProformasController {
                 else {
                     targetEstado = 'Aprobada';
                 }
+            }
+            if (clienteId && b.cedulaRuc) {
+                await prisma.cliente.update({
+                    where: { id: clienteId },
+                    data: { cedulaRuc: String(b.cedulaRuc).trim() }
+                }).catch(() => { });
             }
             // Reemplazamos los ítems por completo en una sola transacción anidada
             const updated = await prisma.proforma.update({
@@ -518,6 +531,15 @@ export class ProformasController {
             });
             if (!proforma) {
                 return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Proforma no encontrada' } });
+            }
+            // Si no tiene cliente vinculado por FK pero coincide por nombre, buscar datos del cliente registrado
+            if (!proforma.cliente && proforma.clienteNombre) {
+                const matchingCliente = await prisma.cliente.findFirst({
+                    where: { nombre: { equals: proforma.clienteNombre, mode: 'insensitive' } },
+                });
+                if (matchingCliente) {
+                    proforma.cliente = matchingCliente;
+                }
             }
             return res.status(200).json({ success: true, data: mapProforma(proforma) });
         }
