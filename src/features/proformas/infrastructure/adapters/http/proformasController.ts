@@ -650,9 +650,16 @@ export class ProformasController {
         ivaToApply = new Decimal(aplicarIva ? 0.15 : 0);
       }
 
-      // Calcular total de la proforma
-      const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-      const total = subtotal * (1 + Number(ivaToApply));
+      // Calcular total de la proforma (igual que el frontend: usa item.valor si existe, resta descuento)
+      const subtotal = proforma.items.reduce((s, item) => {
+        // Si el item tiene un valor precalculado, usarlo (igual que calculateRowValor en el frontend)
+        const itemValor = (item.valor !== undefined && item.valor !== null && Number(item.valor) > 0)
+          ? Number(item.valor)
+          : Number(item.cantidad) * Number(item.precioUnitario);
+        return s + itemValor;
+      }, 0);
+      const descuentoVal = Number(proforma.descuento) || 0;
+      const total = Math.max(0, subtotal - descuentoVal + subtotal * Number(ivaToApply));
 
       // Validar monto
       const abonoMonto = Number(monto || 0);
