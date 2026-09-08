@@ -6,9 +6,12 @@ import { requireRoles } from '../middleware/roleMiddleware.js';
  */
 export function createAuthRoutes(authController) {
     const router = Router();
-    // Rutas públicas de Login/Registro básico
+    // El alta de usuarios se realiza solo desde POST /users, protegido para administradores.
     router.post('/login', (req, res) => authController.login(req, res));
-    router.post('/register', (req, res) => authController.register(req, res));
+    router.all('/register', (_req, res) => res.status(403).json({
+        success: false,
+        error: { code: 'REGISTRATION_DISABLED', message: 'El registro público está deshabilitado.' },
+    }));
     // Rutas protegidas (Usuario Autenticado)
     router.get('/me', authMiddleware, (req, res) => authController.me(req, res));
     router.put('/users/me/sidebar-config', authMiddleware, (req, res) => authController.updateSidebarConfig(req, res));
