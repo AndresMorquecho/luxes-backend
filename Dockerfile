@@ -11,5 +11,6 @@ RUN npm run build
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "node -e \"console.log('--- Env Keys Diagnostic ---', Object.keys(process.env))\" && (npx tsx prisma/fix-failed-migrations.ts || true) && (npx prisma migrate deploy || true) && npm run start"]
+# Las migraciones se ejecutan de forma explícita, después de revisar y respaldar la BD.
+CMD ["node", "dist/index.js"]
 
