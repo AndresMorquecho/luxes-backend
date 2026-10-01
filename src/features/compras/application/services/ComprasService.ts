@@ -1,3 +1,4 @@
+import type { RecepcionInput, AnulacionInput } from '../../domain/types/CompraLifecycle.js';
 import type {
   ComprasRepositoryPort,
   OrdenCompraData,
@@ -9,7 +10,6 @@ import type {
   DetalleCompraInput,
   DetalleCompraData,
 } from '../../domain/ports/ComprasRepositoryPort.js';
-import { parseDateOnly, formatDateOnly } from '../../../../shared/utils/dateOnly.js';
 
 export class ComprasService {
   constructor(private readonly repo: ComprasRepositoryPort) {}
@@ -133,6 +133,8 @@ export class ComprasService {
   }): Promise<OrdenCompraData> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) throw new Error('Orden de compra no encontrada.');
+    if (orden.estado === 'anulada') throw new Error('Una orden anulada conserva su historial y no puede editarse.');
+    if (data.estado === 'anulada') throw new Error('Usa el flujo de anulación con vista previa.');
     if (orden.estado === 'recibida' || orden.estado === 'parcialmente_recibida') {
       throw new Error('No se puede modificar una orden que ya fue recibida o está en recepción parcial.');
     }
@@ -174,32 +176,6 @@ export class ComprasService {
     }
 
     return this.repo.updateOrden(id, data);
-  }
-
-  async deleteOrden(id: string): Promise<void> {
-    const orden = await this.repo.findOrdenById(id);
-    if (!orden) throw new Error('Orden de compra no encontrada.');
-
-    const detalles = orden.detalles || [];
-    const haRecibido =
-      orden.estado === 'recibida' ||
-      orden.estado === 'parcialmente_recibida' ||
-      detalles.some((d) => (d.cantidadRecibida ?? 0) > 0);
-
-    if (haRecibido) {
-      throw new Error(
-        'No se puede eliminar una orden de compra que ya fue recepcionada (parcial o totalmente) en almacén.'
-      );
-    }
-
-    const abonos = orden.abonos || [];
-    if (abonos.length > 0) {
-      throw new Error(
-        'No se puede eliminar una orden de compra que ya tiene abonos o pagos procesados. Primero debe anular los abonos.'
-      );
-    }
-
-    return this.repo.deleteOrden(id);
   }
 
   async editarOrden(
@@ -269,40 +245,15 @@ export class ComprasService {
       throw new Error(`El abono excede el saldo pendiente. Saldo disponible: $${cxp.saldo.toFixed(2)}`);
     }
 
-    // Create the abono
-    const abono = await this.repo.createAbono(data);
-
-    // Update CxP
-    const newMontoPagado = cxp.montoPagado + data.monto;
-    const newSaldo = cxp.montoTotal - newMontoPagado;
-    const newEstado = newSaldo <= 0 ? 'pagado' : 'parcial';
-
-    await this.repo.updateCuentaPorPagar(cxp.id, {
-      montoPagado: newMontoPagado,
-      saldo: Math.max(0, newSaldo),
-      estado: newEstado,
-    });
-
-    // Update orden payment status
-    await this.repo.updateOrden(data.ordenCompraId, {
-      estado: undefined,
-    });
-
-    // Update the order's payment status directly
-    const ordenUpdate: any = {};
-    ordenUpdate.estadoPago = newEstado === 'pagado' ? 'pagado' : 'parcial';
-
-    // We need a small helper to update just the estadoPago field
-    // For now, use updateOrden which handles it
-    await this.repo.updateOrden(data.ordenCompraId, ordenUpdate);
-
-    return abono;
+    // The repository validates and records payment + balance in one transaction.
+    return this.repo.createAbono(data);
   }
 
   async eliminarAbono(ordenCompraId: string, abonoId: string): Promise<void> {
     const orden = await this.repo.findOrdenById(ordenCompraId);
     if (!orden) throw new Error('Orden de compra no encontrada.');
 
+    if (orden.estado === 'anulada') throw new Error('Los pagos de una orden anulada forman parte del historial y no pueden eliminarse.');
     const abonos = await this.repo.findAbonosByOrden(ordenCompraId);
     if (!abonos || abonos.length === 0) {
       throw new Error('No existen abonos registrados para esta orden de compra.');
@@ -374,98 +325,11 @@ export class ComprasService {
     return this.repo.getComprasStats();
   }
 
-  async recepcionarOrden(
-    id: string,
-    usuarioId: string,
-    payload: {
-      fechaRecepcion?: string;
-      notasRecepcion?: string;
-      detalles: {
-        detalleId?: string;
-        materialId?: string | null;
-        cantidad: number;
-        descargableInventario?: boolean;
-        observacion?: string;
-        fechaRecepcion?: string;
-      }[];
-    }
-  ): Promise<OrdenCompraData> {
-    const orden = await this.repo.findOrdenById(id);
-    if (!orden) {
-      throw new Error('Orden de compra no encontrada.');
-    }
-    if (orden.estado !== 'aprobada' && orden.estado !== 'parcialmente_recibida') {
-      throw new Error('Solo se pueden recepcionar órdenes aprobadas o con recepción parcial.');
-    }
-
-    const ordenDetalles = orden.detalles || [];
-
-    for (const item of payload.detalles) {
-      if (item.cantidad <= 0) continue;
-
-      const detalle = ordenDetalles.find((d) => d.id === item.detalleId);
-      if (!detalle) {
-        throw new Error('Ítem de la orden no encontrado.');
-      }
-      if ((detalle.cantidadRecibida ?? 0) > 0) {
-        throw new Error(`El ítem "${detalle.descripcion}" ya fue recepcionado.`);
-      }
-
-      const fechaItem = item.fechaRecepcion
-        ? parseDateOnly(item.fechaRecepcion) || new Date()
-        : payload.fechaRecepcion
-          ? parseDateOnly(payload.fechaRecepcion) || new Date()
-          : new Date();
-
-      const descargable = item.descargableInventario === true;
-
-      if (item.detalleId) {
-        await this.repo.updateDetalleRecepcion(item.detalleId, {
-          cantidadRecibida: item.cantidad,
-          descargableInventario: descargable,
-          fechaRecepcion: fechaItem,
-        });
-      }
-
-      if (descargable && item.materialId) {
-        // Crear un nuevo Material individual (rollo) en lugar de sumar al stock base.
-        // El material original queda intacto como referencia / plantilla.
-        const precioCosto = detalle.precioUnitario ?? 0;
-        await this.repo.createMaterialDesdeRollo({
-          materialBaseId: item.materialId,
-          metros: item.cantidad,
-          ordenNumero: orden.numero,
-          userId: usuarioId,
-          precioCosto,
-        });
-      }
-    }
-
-    const updated = await this.repo.findOrdenById(id);
-    const detalles = updated?.detalles || [];
-    const todosRecibidos = detalles.length > 0 && detalles.every((d) => (d.cantidadRecibida ?? 0) > 0);
-    const algunoRecibido = detalles.some((d) => (d.cantidadRecibida ?? 0) > 0);
-
-    const fechasIso = detalles
-      .map((d) => formatDateOnly(d.fechaRecepcion))
-      .filter((f): f is string => !!f)
-      .sort()
-      .reverse();
-    const ultimaFecha = fechasIso.length ? (parseDateOnly(fechasIso[0]) || new Date()) : new Date();
-
-    const nuevoEstado = todosRecibidos
-      ? 'recibida'
-      : algunoRecibido
-        ? 'parcialmente_recibida'
-        : orden.estado;
-
-    return this.repo.updateOrden(id, {
-      estado: nuevoEstado,
-      fechaRecepcion: algunoRecibido ? ultimaFecha : undefined,
-      notasRecepcion: payload.notasRecepcion ?? updated?.notasRecepcion ?? undefined,
-      recibidoPorId: usuarioId,
-    });
+  recepcionarOrden(id: string, userId: string, payload: RecepcionInput): Promise<OrdenCompraData> {
+    return this.repo.recepcionarOrdenAtomica(id, userId, payload);
   }
+  previewAnulacion(id: string) { return this.repo.previewAnulacion(id); }
+  anularOrden(id: string, userId: string, input: AnulacionInput) { return this.repo.anularOrden(id, userId, input); }
 
   // ── Cheques Posfechados ─────────────────────────────────────────────────────
 

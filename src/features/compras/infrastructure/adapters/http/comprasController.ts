@@ -224,11 +224,20 @@ export class ComprasController {
     } catch (e) { return this.fail(res, e, 400); }
   }
 
+  private canAnular(req: Request) {
+    const user = (req as any).user;
+    return ['admin', 'administrador'].includes((user?.rol || '').toLowerCase()) || user?.permissions?.includes('aprobacion_ordenes_compra');
+  }
+  async previewAnulacion(req: Request, res: Response) {
+    if (!this.canAnular(req)) return this.fail(res, new Error('No tienes permiso para anular compras.'), 403);
+    try { return this.ok(res, await this.service.previewAnulacion(String(req.params.id))); }
+    catch (e) { return this.fail(res, e, 400); }
+  }
   async deleteOrden(req: Request, res: Response) {
+    if (!this.canAnular(req)) return this.fail(res, new Error('No tienes permiso para anular compras.'), 403);
     try {
-      await this.service.deleteOrden(String(req.params.id));
-      return this.ok(res, { deleted: true });
-    } catch (e) { return this.fail(res, e); }
+      return this.ok(res, await this.service.anularOrden(String(req.params.id), (req as any).user.id, req.body));
+    } catch (e) { return this.fail(res, e, 400); }
   }
 
   async editarOrden(req: Request, res: Response) {
@@ -240,7 +249,7 @@ export class ComprasController {
       if (!hasPermiso) {
         return res.status(403).json({
           success: false,
-          error: { message: 'Solo los administradores pueden editar órdenes con anulación y reemplazo.' },
+          error: { message: 'No tienes permiso para editar órdenes de compra.' },
         });
       }
 

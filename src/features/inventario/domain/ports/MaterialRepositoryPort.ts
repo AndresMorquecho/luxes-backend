@@ -75,6 +75,7 @@ export interface MaterialRepositoryPort {
 
   // Movimientos
   listMovimientos(materialId?: string): Promise<MovimientoData[]>;
+  registrarMovimientoAtomico(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData>;
   createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData>;
 
   // Préstamos

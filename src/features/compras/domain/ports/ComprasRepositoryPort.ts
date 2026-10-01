@@ -1,3 +1,4 @@
+import type { RecepcionInput, AnulacionInput, AnulacionPreview } from '../types/CompraLifecycle.js';
 // ── Domain types ────────────────────────────────────────────────────────────
 
 export interface ProveedorData {
@@ -141,6 +142,9 @@ export interface OrdenCompraData {
 }
 
 export interface ComprasRepositoryPort {
+  recepcionarOrdenAtomica(id: string, userId: string, input: RecepcionInput): Promise<OrdenCompraData>;
+  previewAnulacion(id: string): Promise<AnulacionPreview>;
+  anularOrden(id: string, userId: string, input: AnulacionInput): Promise<any>;
   // ── Proveedores ──
   findAllProveedores(): Promise<ProveedorData[]>;
   createProveedor(data: {
@@ -223,8 +227,6 @@ export interface ComprasRepositoryPort {
     descargableInventario: boolean;
     fechaRecepcion?: Date;
   }): Promise<void>;
-
-  deleteOrden(id: string): Promise<void>;
 
   getNextOrdenNumero(): Promise<string>;
 

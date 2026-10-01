@@ -208,7 +208,14 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   }
 
   async delete(id: string): Promise<void> {
-    await this.prisma.material.delete({ where: { id } });
+    await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM materiales WHERE id = ${id} FOR UPDATE`;
+      const children = await tx.material.count({ where: { materialBaseId: id } });
+      const history = await tx.movimientoInventario.count({ where: { materialId: id } });
+      const purchases = await tx.detalleCompra.count({ where: { materialId: id } });
+      if (children || history || purchases) throw new Error('Este material tiene rollos, compras o movimientos. Conserva su historial; no puede eliminarse.');
+      await tx.material.delete({ where: { id } });
+    });
   }
 
   async getStats(): Promise<{
@@ -416,25 +423,28 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     return row as unknown as PrestamoData;
   }
 
-  async adjustStock(materialId: string, delta: number): Promise<void> {
-    const updated = await this.prisma.material.update({
-      where: { id: materialId },
-      data: { stockActual: { increment: delta } },
-      select: { stockActual: true, materialBaseId: true, subtipo: true },
-    });
+  async registrarMovimientoAtomico(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData> {
+    if (!['entrada', 'salida'].includes(data.tipo) || !Number.isFinite(data.cantidad) || data.cantidad <= 0) throw new Error('Tipo o cantidad de movimiento inválido.');
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM materiales WHERE id = ${data.materialId} FOR UPDATE`;
+      const mat = await tx.material.findUniqueOrThrow({ where: { id: data.materialId } });
+      if (mat.descargaStock) {
+        const stock = Math.round((mat.stockActual + (data.tipo === 'entrada' ? data.cantidad : -data.cantidad)) * 1e6) / 1e6;
+        if (stock < 0) throw new Error('Stock insuficiente. Actualiza el inventario.');
+        await tx.material.update({ where: { id: mat.id }, data: { stockActual: stock, ...(mat.materialBaseId && mat.subtipo === 'consumible_descargable' ? { ocultado: stock <= 0 } : {}) } });
+      }
+      return tx.movimientoInventario.create({ data });
+    }) as Promise<MovimientoData>;
+  }
 
-    // Auto-ocultar rollo agotado: solo aplica a rollos derivados (tienen materialBaseId)
-    // y solo cuando el stock llega a 0 o menos
-    if (
-      updated.stockActual <= 0 &&
-      updated.materialBaseId &&
-      updated.subtipo === 'consumible_descargable'
-    ) {
-      await this.prisma.material.update({
-        where: { id: materialId },
-        data: { ocultado: true },
-      });
-    }
+  async adjustStock(materialId: string, delta: number): Promise<void> {
+    await this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM materiales WHERE id = ${materialId} FOR UPDATE`;
+      const mat = await tx.material.findUniqueOrThrow({ where: { id: materialId } });
+      const stock = Math.round((mat.stockActual + delta) * 1e6) / 1e6;
+      if (!Number.isFinite(stock) || stock < 0) throw new Error('Stock insuficiente.');
+      await tx.material.update({ where: { id: materialId }, data: { stockActual: stock, ...(mat.materialBaseId && mat.subtipo === 'consumible_descargable' ? { ocultado: stock <= 0 } : {}) } });
+    });
   }
 
   async getMaterialHistorial(idOrCodigo: string): Promise<any> {

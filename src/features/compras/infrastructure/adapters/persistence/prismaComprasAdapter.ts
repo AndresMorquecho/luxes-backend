@@ -1,3 +1,6 @@
+import { addPurchasePayment, processPurchaseCheque, syncPurchaseBalance } from '../../../../../shared/services/compraPayments.js';
+import { lockOrder } from './compraLifecycle.js';
+import { receiveOrder, createRoll, cancellationPreview, cancelOrder, type RecepcionInput, type AnulacionInput } from './compraLifecycle.js';
 import { PrismaClient } from '@prisma/client';
 import type {
   ComprasRepositoryPort,
@@ -25,6 +28,12 @@ if (env.vapidPublicKey && env.vapidPrivateKey) {
 
 export class PrismaComprasAdapter implements ComprasRepositoryPort {
   constructor(private readonly prisma: PrismaClient) {}
+
+  recepcionarOrdenAtomica(id: string, userId: string, input: RecepcionInput) {
+    return receiveOrder(this.prisma, id, userId, input) as Promise<OrdenCompraData>;
+  }
+  previewAnulacion(id: string) { return this.prisma.$transaction(tx => cancellationPreview(tx, id), { isolationLevel: 'RepeatableRead' }); }
+  anularOrden(id: string, userId: string, input: AnulacionInput) { return cancelOrder(this.prisma, id, userId, input); }
 
   // ── Proveedores ────────────────────────────────────────────────────────────
 
@@ -89,7 +98,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       proyectoId,
     } = options || {};
 
-    const where: any = {};
+    const where: any = { estado: { not: 'anulada' } };
     if (proyectoId) {
       where.proyectoId = proyectoId;
     }
@@ -411,7 +420,19 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     return row as unknown as OrdenCompraData;
   }
 
-  async updateOrden(id: string, data: {
+  async updateOrden(id: string, data: Parameters<ComprasRepositoryPort['updateOrden']>[1]): Promise<OrdenCompraData> {
+    const result = await this.prisma.$transaction(async tx => {
+      await lockOrder(tx, id);
+      const previous = await tx.ordenCompra.findUniqueOrThrow({ where: { id }, select: { estado: true } });
+      if (previous.estado === 'anulada') throw new Error('Una orden anulada no puede editarse.');
+      const order = await new PrismaComprasAdapter(tx as unknown as PrismaClient).updateOrdenData(id, data);
+      return { order, previous };
+    }, { timeout: 15000 });
+    await this.notifyOrderApproval(result.order, data, result.previous.estado);
+    return result.order;
+  }
+
+  private async updateOrdenData(id: string, data: {
     proveedorId?: string | null;
     fecha?: Date;
     impuesto?: number;
@@ -655,6 +676,12 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     }
     */
 
+    return ordenActualizada as unknown as OrdenCompraData;
+  }
+
+  private async notifyOrderApproval(ordenActualizada: OrdenCompraData, data: Parameters<ComprasRepositoryPort['updateOrden']>[1], previousState: string) {
+    const row = ordenActualizada;
+    const ordenAnterior = { estado: previousState };
     // Notificar al creador solo en la transición a aprobada (con o sin proyecto)
     const pasoAAprobada = data.estado === 'aprobada' && ordenAnterior?.estado !== 'aprobada';
     if (pasoAAprobada) {
@@ -754,7 +781,6 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       }
     }
 
-    return ordenActualizada as unknown as OrdenCompraData;
   }
 
   async updateDetalleRecepcion(id: string, data: {
@@ -769,16 +795,6 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
         descargableInventario: data.descargableInventario,
         ...(data.fechaRecepcion ? { fechaRecepcion: data.fechaRecepcion } : {}),
       },
-    });
-  }
-
-  async deleteOrden(id: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await (tx as any).chequeCompra.deleteMany({ where: { ordenCompraId: id } });
-      await tx.abonoCompra.deleteMany({ where: { ordenCompraId: id } });
-      await tx.cuentaPorPagar.deleteMany({ where: { ordenCompraId: id } });
-      await tx.detalleCompra.deleteMany({ where: { ordenCompraId: id } });
-      await tx.ordenCompra.delete({ where: { id } });
     });
   }
 
@@ -803,85 +819,20 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     referencia?: string;
     registradoPorUserId?: string | null;
   }): Promise<AbonoCompraData> {
-    const row = await this.prisma.abonoCompra.create({
-      data: {
-        ordenCompraId: data.ordenCompraId,
-        metodoPagoId: data.metodoPagoId,
-        monto: data.monto,
-        referencia: data.referencia,
-        registradoPorUserId: data.registradoPorUserId ?? undefined,
-      },
-      include: {
-        metodoPago: true,
-        registradoPor: { select: { id: true, nombre: true } },
-      },
-    });
-
-    // Recalcular el estado y monto pagado acumulado de la CuentaPorPagar y la Orden de Compra
-    const abonosSum = await this.prisma.abonoCompra.aggregate({
-      where: { ordenCompraId: data.ordenCompraId },
-      _sum: { monto: true },
-    });
-
-    const cxp = await this.prisma.cuentaPorPagar.findUnique({
-      where: { ordenCompraId: data.ordenCompraId },
-    });
-
-    if (cxp) {
-      const totalPagado = abonosSum._sum.monto || 0;
-      const newSaldo = Math.max(0, cxp.montoTotal - totalPagado);
-      const newEstado = newSaldo <= 0 ? 'pagado' : totalPagado > 0 ? 'parcial' : 'pendiente';
-      const newEstadoPago = newEstado === 'pagado' ? 'pagado' : totalPagado > 0 ? 'parcial' : 'sin_pagar';
-
-      await this.prisma.cuentaPorPagar.update({
-        where: { id: cxp.id },
-        data: {
-          montoPagado: totalPagado,
-          saldo: newSaldo,
-          estado: newEstado,
-        },
-      });
-
-      await this.prisma.ordenCompra.update({
-        where: { id: data.ordenCompraId },
-        data: { estadoPago: newEstadoPago },
-      });
-    }
-
-    return row as unknown as AbonoCompraData;
+    return this.prisma.$transaction(async tx => {
+      await lockOrder(tx, data.ordenCompraId);
+      return addPurchasePayment(tx, data);
+    }) as Promise<AbonoCompraData>;
   }
 
   async deleteAbono(abonoId: string, ordenCompraId: string, monto: number): Promise<void> {
-    await this.prisma.abonoCompra.delete({
-      where: { id: abonoId },
+    await this.prisma.$transaction(async tx => {
+      await lockOrder(tx, ordenCompraId);
+      const order = await tx.ordenCompra.findUniqueOrThrow({ where: { id: ordenCompraId } });
+      if (order.estado === 'anulada') throw new Error('Los pagos de una orden anulada conservan su historial.');
+      await tx.abonoCompra.delete({ where: { id: abonoId, ordenCompraId } });
+      await syncPurchaseBalance(tx, ordenCompraId);
     });
-
-    const cxp = await this.prisma.cuentaPorPagar.findUnique({
-      where: { ordenCompraId },
-    });
-
-    if (cxp) {
-      const newMontoPagado = Math.max(0, cxp.montoPagado - monto);
-      const newSaldo = Math.max(0, cxp.montoTotal - newMontoPagado);
-      const newEstado = newSaldo <= 0 ? 'pagado' : newMontoPagado > 0 ? 'parcial' : 'pendiente';
-      const newEstadoPago = newEstado === 'pagado' ? 'pagado' : newMontoPagado > 0 ? 'parcial' : 'sin_pagar';
-
-      await this.prisma.cuentaPorPagar.update({
-        where: { id: cxp.id },
-        data: {
-          montoPagado: newMontoPagado,
-          saldo: newSaldo,
-          estado: newEstado,
-        },
-      });
-
-      await this.prisma.ordenCompra.update({
-        where: { id: ordenCompraId },
-        data: {
-          estadoPago: newEstadoPago,
-        },
-      });
-    }
   }
 
   // ── Cheques Posfechados ───────────────────────────────────────────────────
@@ -895,7 +846,11 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     referencia?: string;
     registradoPorUserId?: string;
   }): Promise<any> {
-    const row = await (this.prisma as any).chequeCompra.create({
+    const row = await this.prisma.$transaction(async tx => {
+      await lockOrder(tx, input.ordenCompraId);
+      const order = await tx.ordenCompra.findUniqueOrThrow({ where: { id: input.ordenCompraId } });
+      if (order.estado === 'anulada') throw new Error('No se pueden emitir cheques para una orden anulada.');
+    const row = await tx.chequeCompra.create({
       data: {
         ordenCompraId: input.ordenCompraId,
         metodoPagoId: input.metodoPagoId,
@@ -913,6 +868,9 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
         metodoPago: true,
         registradoPor: { select: { id: true, nombre: true } },
       },
+    });
+
+      return row;
     });
 
     // Activar el worker inmediatamente por si la fecha asignada ya venció/hoy
@@ -939,57 +897,20 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
   }
 
   async procesarChequeCompra(id: string): Promise<any> {
-    const cheque = await (this.prisma as any).chequeCompra.findUnique({
-      where: { id },
-    });
-    if (!cheque) throw new Error('Cheque posfechado no encontrado.');
-    if (cheque.procesado) return cheque;
-
-    // 1. Crear el abono efectivo que realiza el egreso de banco
-    await this.createAbono({
-      ordenCompraId: cheque.ordenCompraId,
-      metodoPagoId: cheque.metodoPagoId,
-      monto: cheque.monto,
-      referencia: cheque.referencia || `Cobro Cheque N° ${cheque.numeroCheque}`,
-      registradoPorUserId: cheque.registradoPorUserId || undefined,
-    });
-
-    // 2. Marcar cheque como procesado
-    const updated = await (this.prisma as any).chequeCompra.update({
-      where: { id },
-      data: {
-        estado: 'PROCESADO',
-        procesado: true,
-        notificado: true,
-      },
-      include: {
-        ordenCompra: { include: { proveedor: true } },
-        metodoPago: true,
-        registradoPor: { select: { id: true, nombre: true } },
-      },
-    });
-    return updated;
+    return processPurchaseCheque(this.prisma, id);
   }
 
   async updateChequeCompra(id: string, data: { numeroCheque?: string; fechaCobro?: Date; monto?: number; metodoPagoId?: string }): Promise<any> {
-    const cheque = await (this.prisma as any).chequeCompra.findUnique({ where: { id } });
-    if (!cheque) throw new Error('Cheque posfechado no encontrado.');
-    if (cheque.procesado) throw new Error('No se puede editar un cheque que ya fue cobrado/procesado.');
-
-    const updateData: any = {};
-    if (data.numeroCheque) updateData.numeroCheque = data.numeroCheque;
-    if (data.fechaCobro) updateData.fechaCobro = data.fechaCobro;
-    if (data.monto && data.monto > 0) updateData.monto = data.monto;
-    if (data.metodoPagoId) updateData.metodoPagoId = data.metodoPagoId;
-
-    const updated = await (this.prisma as any).chequeCompra.update({
-      where: { id },
-      data: updateData,
-      include: {
-        ordenCompra: { include: { proveedor: true } },
-        metodoPago: true,
+    const ref = await this.prisma.chequeCompra.findUniqueOrThrow({ where: { id } });
+    const updated = await this.prisma.$transaction(async tx => {
+      await lockOrder(tx, ref.ordenCompraId);
+      const cheque = await tx.chequeCompra.findUniqueOrThrow({ where: { id }, include: { ordenCompra: true } });
+      if (cheque.procesado || cheque.estado !== 'PENDIENTE' || cheque.ordenCompra.estado === 'anulada') throw new Error('Solo se pueden editar cheques pendientes de órdenes vigentes.');
+      if (data.monto !== undefined && (!Number.isFinite(data.monto) || data.monto <= 0)) throw new Error('El monto debe ser mayor a cero.');
+      return tx.chequeCompra.update({ where: { id }, data, include: {
+        ordenCompra: { include: { proveedor: true } }, metodoPago: true,
         registradoPor: { select: { id: true, nombre: true } },
-      },
+      } });
     });
 
     procesarChequesVencidos().catch(err => console.error('[Cheque Worker Error]', err));
@@ -998,11 +919,13 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
   }
 
   async deleteChequeCompra(id: string): Promise<void> {
-    const cheque = await (this.prisma as any).chequeCompra.findUnique({ where: { id } });
-    if (!cheque) throw new Error('Cheque posfechado no encontrado.');
-    if (cheque.procesado) throw new Error('No se puede eliminar directamente un cheque que ya fue cobrado. Elimine el abono registrado correspondiente.');
-
-    await (this.prisma as any).chequeCompra.delete({ where: { id } });
+    const ref = await this.prisma.chequeCompra.findUniqueOrThrow({ where: { id } });
+    await this.prisma.$transaction(async tx => {
+      await lockOrder(tx, ref.ordenCompraId);
+      const cheque = await tx.chequeCompra.findUniqueOrThrow({ where: { id }, include: { ordenCompra: true } });
+      if (cheque.procesado || cheque.estado !== 'PENDIENTE' || cheque.ordenCompra.estado === 'anulada') throw new Error('Los cheques procesados o anulados conservan su historial.');
+      await tx.chequeCompra.delete({ where: { id } });
+    });
   }
 
   // ── Cuentas por Pagar ──────────────────────────────────────────────────────
@@ -1015,61 +938,9 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     // Evaluar inmediatamente si hay cheques vencidos pendientes antes de retornar la lista
     await procesarChequesVencidos().catch(err => console.error('[Cheque Auto-Check Error]', err));
 
-    // Autocorrección de consistencia: reconciliar deudas con abonos completados
-    try {
-      const pagadasPendientes = await this.prisma.cuentaPorPagar.findMany({
-        where: {
-          OR: [
-            { saldo: { lte: 0 }, estado: { not: 'pagado' } },
-            { montoPagado: { gte: 0.01 }, estado: { not: 'pagado' } },
-          ],
-        },
-      });
-
-      for (const c of pagadasPendientes) {
-        const abonosSum = await this.prisma.abonoCompra.aggregate({
-          where: { ordenCompraId: c.ordenCompraId },
-          _sum: { monto: true },
-        });
-
-        const totalPagado = abonosSum._sum.monto || 0;
-        const realSaldo = Math.max(0, c.montoTotal - totalPagado);
-
-        if (realSaldo <= 0.009 || totalPagado >= c.montoTotal - 0.009) {
-          await this.prisma.cuentaPorPagar.update({
-            where: { id: c.id },
-            data: {
-              montoPagado: c.montoTotal,
-              saldo: 0,
-              estado: 'pagado',
-            },
-          });
-          await this.prisma.ordenCompra.update({
-            where: { id: c.ordenCompraId },
-            data: { estadoPago: 'pagado' },
-          });
-        } else if (totalPagado > 0) {
-          await this.prisma.cuentaPorPagar.update({
-            where: { id: c.id },
-            data: {
-              montoPagado: totalPagado,
-              saldo: realSaldo,
-              estado: 'parcial',
-            },
-          });
-          await this.prisma.ordenCompra.update({
-            where: { id: c.ordenCompraId },
-            data: { estadoPago: 'parcial' },
-          });
-        }
-      }
-    } catch (reconcileErr) {
-      console.error('[Reconcile CxP Error]', reconcileErr);
-    }
-
     const { page = 1, limit = 10, estado } = options || {};
 
-    const where: any = {};
+    const where: any = { estado: { not: 'anulada' } };
     if (estado) where.estado = estado;
 
     const skip = (page - 1) * limit;
@@ -1390,9 +1261,9 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     totalDeuda: number;
   }> {
     const [totalOrdenes, pendientes, gastadoResult, deudaResult] = await Promise.all([
-      this.prisma.ordenCompra.count(),
-      this.prisma.ordenCompra.count({ where: { estado: 'pendiente' } }),
-      this.prisma.ordenCompra.aggregate({ _sum: { total: true } }),
+      this.prisma.ordenCompra.count({ where: { estado: { not: 'anulada' } } }),
+      this.prisma.ordenCompra.count({ where: { estado: 'pendiente_aprobacion' } }),
+      this.prisma.ordenCompra.aggregate({ _sum: { total: true }, where: { estado: { not: 'anulada' } } }),
       this.prisma.cuentaPorPagar.aggregate({
         _sum: { saldo: true },
         where: { estado: { not: 'pagado' } },
@@ -1409,18 +1280,7 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
 
   // ── Edición con Reconciliación Financiera ──────────────────────────────────
 
-  /**
-   * Anula la orden anterior (elimina todos sus registros financieros, devolviendo
-   * el dinero a las cuentas de origen) y crea una nueva orden con los datos actualizados.
-   * Opcionalmente registra un pago inicial en la nueva orden.
-   *
-   * Este enfoque es "void & replace":
-   * - Los abonos anteriores se eliminan → los saldos de metodos_pago quedan correctos
-   *   (los saldos son calculados con SUM en tiempo real, no se guardan).
-   * - La CxP anterior se elimina en cascada.
-   * - Se crea una nueva orden con nuevo número correlativo.
-   * - Si se provee metodoPagoId + abonoMonto, se registra abono en la nueva orden.
-   */
+  /** Edita en el mismo registro: conserva número, recepciones, cheques y pagos. */
   async editarOrdenConReconciliacion(
     id: string,
     data: {
@@ -1444,191 +1304,42 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
       abonoReferencia?: string;
     }
   ): Promise<OrdenCompraData> {
-    // 1. Cargar la orden vieja fuera de la transacción (para obtener datos que necesitamos)
-    const ordenVieja = await this.prisma.ordenCompra.findUnique({
-      where: { id },
-      include: {
-        detalles: true,
-        cuentaPorPagar: true,
-        abonos: true,
-      },
-    });
-    if (!ordenVieja) throw new Error('Orden de compra no encontrada.');
-
-    const estadosEditables = ['pendiente_aprobacion', 'aprobada', 'parcialmente_recibida'];
-    if (!estadosEditables.includes(ordenVieja.estado)) {
-      throw new Error(
-        `No se puede editar una orden en estado "${ordenVieja.estado}". Solo se pueden editar órdenes pendientes, aprobadas o con recepción parcial.`
-      );
-    }
-
-    // Validar que no se eliminen ítems ya recepcionados en inventario
-    const detallesExistentes = ordenVieja.detalles;
-    for (const nuevoDetalle of data.detalles) {
-      if (!nuevoDetalle.id) continue;
-      const existente = detallesExistentes.find((d) => d.id === nuevoDetalle.id);
-      if (!existente) continue;
-      const fueRecepcionado = (existente.cantidadRecibida ?? 0) > 0;
-      const esInventario = !!existente.materialId;
-      if (fueRecepcionado && esInventario && nuevoDetalle.cantidad !== existente.cantidad) {
-        throw new Error(
-          `El ítem "${existente.descripcion}" ya fue recepcionado en inventario. No se puede cambiar la cantidad (${existente.cantidad}). Solo se puede editar el precio.`
-        );
-      }
-    }
-    for (const existente of detallesExistentes) {
-      const fueRecepcionado = (existente.cantidadRecibida ?? 0) > 0;
-      const esInventario = !!existente.materialId;
-      if (fueRecepcionado && esInventario) {
-        const sigueEnLista = data.detalles.some((d) => d.id === existente.id);
-        if (!sigueEnLista) {
-          throw new Error(
-            `El ítem "${existente.descripcion}" ya fue recepcionado y no puede eliminarse de la orden.`
-          );
+    await this.prisma.$transaction(async tx => {
+      await lockOrder(tx, id);
+      const order = await tx.ordenCompra.findUniqueOrThrow({ where: { id }, include: { detalles: true, abonos: true, cheques: true, cuentaPorPagar: true } });
+      if (!['pendiente_aprobacion', 'aprobada', 'parcialmente_recibida'].includes(order.estado)) throw new Error('Esta orden no admite edición.');
+      const paid = order.abonos.reduce((sum, p) => sum + p.monto, 0);
+      const total = data.detalles.reduce((sum, d) => sum + d.cantidad * d.precioUnitario, 0) + data.impuesto;
+      const extra = data.abonoMonto || 0;
+      if (!Number.isFinite(total) || total < 0 || extra < 0 || !Number.isFinite(extra) || total + 0.001 < paid + extra) throw new Error('El nuevo total no puede ser menor a los pagos. Usa la anulación para registrar un reembolso.');
+      const pendingCheques = order.cheques.filter(c => c.estado === 'PENDIENTE' && !c.procesado).reduce((sum,c)=>sum+c.monto,0);
+      if (pendingCheques > total - paid - extra + 0.001) throw new Error('Cancela o ajusta los cheques pendientes antes de reducir la deuda.');
+      const keep = new Set(data.detalles.filter(d=>d.id).map(d=>d.id!));
+      if (keep.size !== data.detalles.filter(d=>d.id).length) throw new Error('Hay ítems duplicados.');
+      for (const d of order.detalles) {
+        if ((d.cantidadRecibida || 0) > 0) {
+          const next = data.detalles.find(n=>n.id===d.id);
+          if (!next || next.cantidad !== d.cantidad || (next.materialId || null) !== d.materialId) throw new Error('Un ítem recibido conserva su material, cantidad y vínculo.');
         }
       }
-    }
-
-    // 2. Calcular totales de la nueva orden
-    const nuevosDetallesData = data.detalles.map((d) => {
-      const existente = d.id ? detallesExistentes.find((e) => e.id === d.id) : null;
-      return {
-        descripcion: d.descripcion,
-        cantidad: d.cantidad,
-        precioUnitario: d.precioUnitario,
-        subtotal: d.cantidad * d.precioUnitario,
-        materialId: d.materialId || null,
-        cantidadRecibida: existente?.cantidadRecibida ?? null,
-        descargableInventario: existente?.descargableInventario ?? null,
-        fechaRecepcion: existente?.fechaRecepcion ?? null,
-      };
-    });
-
-    const nuevoSubtotal = nuevosDetallesData.reduce((sum, d) => sum + d.subtotal, 0);
-    const nuevoImpuesto = data.impuesto ?? 0;
-    const nuevoTotal = nuevoSubtotal + nuevoImpuesto;
-
-    // 3. Determinar estado de recepción de la nueva orden
-    // Si algún ítem fue recepcionado, la nueva orden hereda ese estado
-    const algunoRecibido = detallesExistentes.some((d) => (d.cantidadRecibida ?? 0) > 0);
-    const todosRecibidos = detallesExistentes.length > 0 &&
-      detallesExistentes.every((d) => (d.cantidadRecibida ?? 0) > 0);
-    const estadoNuevo = todosRecibidos ? 'recibida'
-      : algunoRecibido ? 'parcialmente_recibida'
-      : ordenVieja.estado === 'aprobada' ? 'aprobada'
-      : 'pendiente_aprobacion';
-
-    // 4. Transacción: eliminar la orden vieja y crear la nueva
-    const nuevaOrden = await this.prisma.$transaction(async (tx) => {
-      // Eliminar abonos (esto restaura los saldos en los métodos de pago automáticamente,
-      // porque los saldos se calculan con SUM en tiempo real)
-      await tx.abonoCompra.deleteMany({ where: { ordenCompraId: id } });
-
-      // Eliminar CxP
-      await tx.cuentaPorPagar.deleteMany({ where: { ordenCompraId: id } });
-
-      // Eliminar detalles
-      await tx.detalleCompra.deleteMany({ where: { ordenCompraId: id } });
-
-      // Eliminar la orden vieja
-      await tx.ordenCompra.delete({ where: { id } });
-
-      // Generar nuevo número correlativo
-      const year = new Date().getFullYear();
-      const suffix = `_${year}`;
-      const last = await tx.ordenCompra.findFirst({
-        where: { numero: { endsWith: suffix } },
-        orderBy: { numero: 'desc' },
-        select: { numero: true },
-      });
-      const lastNum = last ? parseInt(last.numero.split('_')[1], 10) : 0;
-      const nuevoNumero = `ORC_${String(lastNum + 1).padStart(3, '0')}_${year}`;
-
-      // Preparar abono inicial si se provee
-      const abonoMonto = data.abonoMonto && data.abonoMonto > 0 ? data.abonoMonto : 0;
-      const montoPagadoInicial = abonoMonto;
-      const saldoInicial = Math.max(0, nuevoTotal - montoPagadoInicial);
-      let estadoPago: string;
-      if (nuevoTotal <= 0) {
-        estadoPago = 'sin_pagar';
-      } else if (saldoInicial <= 0) {
-        estadoPago = 'pagado';
-      } else if (montoPagadoInicial > 0) {
-        estadoPago = 'parcial';
-      } else {
-        estadoPago = 'sin_pagar';
+      await tx.detalleCompra.deleteMany({ where: { ordenCompraId: id, id: { notIn: [...keep] } } });
+      for (const d of data.detalles) {
+        if (!Number.isFinite(d.cantidad) || d.cantidad <= 0 || !Number.isFinite(d.precioUnitario) || d.precioUnitario < 0) throw new Error('Cantidad o precio inválido.');
+        const fields = { descripcion: d.descripcion, cantidad: d.cantidad, precioUnitario: d.precioUnitario, subtotal: d.cantidad * d.precioUnitario, materialId: d.materialId || null };
+        if (d.id) {
+          if (!order.detalles.some(old=>old.id===d.id)) throw new Error('El ítem no pertenece a la orden.');
+          await tx.detalleCompra.update({ where: { id: d.id }, data: fields });
+        } else await tx.detalleCompra.create({ data: { ...fields, ordenCompraId: id } });
       }
-
-      // Crear la nueva orden
-      const createData: any = {
-        numero: nuevoNumero,
-        usuarioId: ordenVieja.usuarioId,
-        fecha: data.fecha ? new Date(data.fecha) : new Date(ordenVieja.fecha),
-        subtotal: nuevoSubtotal,
-        impuesto: nuevoImpuesto,
-        total: nuevoTotal,
-        concepto: data.concepto ?? ordenVieja.concepto ?? '',
-        notas: data.notas ?? ordenVieja.notas ?? '',
-        estado: estadoNuevo,
-        estadoPago,
-        aprobadoPorId: ordenVieja.aprobadoPorId ?? null,
-        fechaAprobacion: ordenVieja.fechaAprobacion ?? null,
-        recibidoPorId: ordenVieja.recibidoPorId ?? null,
-        fechaRecepcion: ordenVieja.fechaRecepcion ?? null,
-        notasRecepcion: ordenVieja.notasRecepcion ?? null,
-        proveedorId: ordenVieja.proveedorId ?? null,
-        proyectoId: data.proyectoId !== undefined ? (data.proyectoId || null) : (ordenVieja.proyectoId || null),
-        detalles: {
-          create: nuevosDetallesData.map((d) => ({
-            descripcion: d.descripcion,
-            cantidad: d.cantidad,
-            precioUnitario: d.precioUnitario,
-            subtotal: d.subtotal,
-            materialId: d.materialId,
-            cantidadRecibida: d.cantidadRecibida,
-            descargableInventario: d.descargableInventario,
-            fechaRecepcion: d.fechaRecepcion,
-          })),
-        },
-      };
-
-      // Crear CxP si hay total
-      if (nuevoTotal > 0) {
-        createData.cuentaPorPagar = {
-          create: {
-            montoTotal: nuevoTotal,
-            montoPagado: montoPagadoInicial,
-            saldo: saldoInicial,
-            estado: estadoPago === 'sin_pagar' ? 'pendiente'
-              : estadoPago === 'pagado' ? 'pagado' : 'parcial',
-          },
-        };
-      }
-
-      // Crear abono inicial si hay pago
-      if (abonoMonto > 0 && data.metodoPagoId) {
-        createData.abonos = {
-          create: {
-            metodoPagoId: data.metodoPagoId,
-            monto: abonoMonto,
-            referencia: data.abonoReferencia || null,
-            registradoPorUserId: data.editadoPorId,
-          },
-        };
-      }
-
-      const nueva = await tx.ordenCompra.create({
-        data: createData,
-        select: { id: true },
-      });
-
-      return nueva.id;
-    });
-
-    // 5. Retornar la nueva orden con include completo
-    const resultado = await this.findOrdenById(nuevaOrden);
-    if (!resultado) throw new Error('No se pudo recuperar la nueva orden.');
-    return resultado;
+      await tx.ordenCompra.update({ where: { id }, data: { subtotal: total - data.impuesto, impuesto: data.impuesto, total, ...(data.fecha ? { fecha: new Date(data.fecha) } : {}), concepto: data.concepto, notas: data.notas, proyectoId: data.proyectoId } });
+      await tx.cuentaPorPagar.upsert({ where: { ordenCompraId: id }, create: { ordenCompraId: id, montoTotal: total, montoPagado: paid, saldo: total - paid }, update: { montoTotal: total, saldo: total - paid } });
+      await syncPurchaseBalance(tx, id);
+      if (extra > 0) await addPurchasePayment(tx, { ordenCompraId: id, metodoPagoId: data.metodoPagoId!, monto: extra, referencia: data.abonoReferencia, registradoPorUserId: data.editadoPorId });
+      await tx.auditLog.create({ data: { userId: data.editadoPorId, accion: 'Editar orden conservando historial', modulo: 'Compras', severidad: 'info', detalle: JSON.stringify({ ordenId: id, numero: order.numero, totalAnterior: order.total, totalNuevo: total, pagosConservados: order.abonos.map(a=>a.id) }) } });
+    }, { timeout: 15000 });
+    const result = await this.findOrdenById(id);
+    if (!result) throw new Error('Orden no encontrada.');
+    return result;
   }
 
   // ── Inventario Helpers ──
@@ -1667,84 +1378,8 @@ export class PrismaComprasAdapter implements ComprasRepositoryPort {
     userId?: string | null;
     precioCosto?: number;
   }): Promise<{ id: string; nombre: string }> {
-    // 1. Obtener el material dado (podría ser un derivado o el original)
-    const materialDado = await this.prisma.material.findUnique({
-      where: { id: data.materialBaseId },
-      include: { unidadMedida: true },
-    });
-    if (!materialDado) throw new Error(`Material ${data.materialBaseId} no encontrado.`);
-
-    // 2. Si el material dado es un derivado (tiene materialBaseId), subir al raíz real
-    //    Esto protege el consecutivo si el usuario puso un [R002] en la OC por error.
-    let rootId = data.materialBaseId;
-    let base = materialDado;
-    if (materialDado.materialBaseId) {
-      const raiz = await this.prisma.material.findUnique({
-        where: { id: materialDado.materialBaseId },
-        include: { unidadMedida: true },
-      });
-      if (raiz) {
-        rootId = raiz.id;
-        base = raiz;
-      }
-    }
-
-    // 3. Extraer el nombre base limpio (sin prefijo [Rnn])
-    const nombreBase = base.nombre.replace(/^\[R\d+\]\s*/, '');
-
-    // 4. Contar rollos derivados existentes con nombre base coincidente.
-    //    Usamos búsqueda por nombre (contains) + filtro JS para ser robusto si el
-    //    Prisma client no reconoce materialBaseId en el WHERE (cliente no regenerado).
-    const candidatos = await this.prisma.material.findMany({
-      where: { nombre: { contains: nombreBase } },
-      select: { id: true, nombre: true, materialBaseId: true },
-    });
-
-    // Contar solo los que son rollos derivados del mismo base (prefijo [Rnn] + nombre exacto)
-    const rollosExistentes = candidatos.filter(m => {
-      const esDerivado = /^\[R\d+\]\s*/.test(m.nombre);
-      const mismoNombreBase = m.nombre.replace(/^\[R\d+\]\s*/, '') === nombreBase;
-      const mismoBase = (m as any).materialBaseId === rootId || (m as any).materialBaseId === data.materialBaseId;
-      return esDerivado && mismoNombreBase && (mismoBase || !(m as any).materialBaseId);
-    }).length;
-
-    // 5. El consecutivo siguiente = total de rollos ya existentes + 1
-    const consecutivo = String(rollosExistentes + 1).padStart(3, '0');
-    const nombreNuevo = `[R${consecutivo}] ${nombreBase}`;
-
-    // 6. Crear el nuevo Material (rollo individual) vinculado al raíz
-    const nuevoRollo = await this.prisma.material.create({
-      data: {
-        nombre: nombreNuevo,
-        tipo: base.tipo,
-        unidadMedidaId: base.unidadMedidaId,
-        stockActual: data.metros,
-        stockMinimo: 0,
-        precioCosto: data.precioCosto ?? base.precioCosto ?? 0,
-        codigo: `R${consecutivo}`,
-        categoria: base.categoria,
-        subtipo: base.subtipo,
-        descargaStock: true,
-        ancho: base.ancho,
-        ocultado: false,
-        materialBaseId: rootId,
-      },
-    });
-
-    // 7. Registrar movimiento de entrada
-    await this.prisma.movimientoInventario.create({
-      data: {
-        materialId: nuevoRollo.id,
-        tipo: 'entrada',
-        cantidad: data.metros,
-        motivo: `Recepción OC ${data.ordenNumero} — Rollo ${consecutivo} ingresado al inventario`,
-        userId: data.userId || null,
-      },
-    });
-
-    return { id: nuevoRollo.id, nombre: nombreNuevo };
+    return this.prisma.$transaction(tx => createRoll(tx, data));
   }
-
 
 
   async ocultarMaterialAgotado(materialId: string): Promise<void> {

@@ -2122,6 +2122,7 @@ export class GastosController {
   async updateIngreso(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
+      if (String(id).startsWith('reembolso-compra:')) return res.status(409).json({ success: false, error: { message: 'Este ingreso pertenece a una anulación auditada. Registra un movimiento compensatorio para corregirlo y conserva su historial.' } });
       const b = req.body || {};
 
       if (!b.concepto || !b.fecha || b.monto === undefined || !b.metodoPagoId) {
@@ -2172,6 +2173,7 @@ export class GastosController {
   async removeIngreso(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
+      if (String(id).startsWith('reembolso-compra:')) return res.status(409).json({ success: false, error: { message: 'Este ingreso pertenece a una anulación auditada. Registra un movimiento compensatorio para corregirlo y conserva su historial.' } });
       const existente = await prisma.ingreso.findUnique({ where: { id: String(id) } });
       if (!existente) {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Ingreso no encontrado' } });

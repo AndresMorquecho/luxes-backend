@@ -85,25 +85,7 @@ export class InventarioService {
   }
 
   async registrarMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData> {
-    const mat = await this.repo.findById(data.materialId);
-    if (!mat) throw new Error('Material no encontrado.');
-
-    const unitLabel = typeof mat.unidadMedida === 'string' ? mat.unidadMedida : (mat.unidadMedida?.abreviacion || mat.unidadMedida?.nombre || 'unid');
-
-    // Solo ajustar stock si el material es descargable del inventario
-    if (mat.descargaStock) {
-      const delta = data.tipo === 'entrada' ? data.cantidad : -data.cantidad;
-      if (data.tipo === 'salida' && mat.stockActual + delta < 0) {
-        throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${unitLabel}.`);
-      }
-      const mov = await this.repo.createMovimiento(data);
-      await this.repo.adjustStock(data.materialId, delta);
-      return mov;
-    } else {
-      // Material de solo registro: guardar el movimiento como log pero NO ajustar stock
-      const mov = await this.repo.createMovimiento(data);
-      return mov;
-    }
+    return this.repo.registrarMovimientoAtomico(data);
   }
 
   // ── Préstamos ────────────────────────────────────────────────────────────────

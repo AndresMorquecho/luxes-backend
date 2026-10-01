@@ -38,6 +38,8 @@ export function createComprasRoutes(ctrl: ComprasController): Router {
   router.post('/',                         (req, res) => ctrl.createOrden(req, res));
   router.get('/:id/detalles',              (req, res) => ctrl.getOrdenDetalles(req, res));
   router.post('/:id/restaurar-detalles',  (req, res) => ctrl.restoreOrdenDetalles(req, res));
+  router.get('/:id/anulacion', (req, res) => ctrl.previewAnulacion(req, res));
+  router.post('/:id/anulacion', (req, res) => ctrl.deleteOrden(req, res));
   router.get('/:id',                       (req, res) => ctrl.getOrdenById(req, res));
   router.put('/:id/editar',                (req, res) => ctrl.editarOrden(req, res));
   router.put('/:id',                       (req, res) => ctrl.updateOrden(req, res));

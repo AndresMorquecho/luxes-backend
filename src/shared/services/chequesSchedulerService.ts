@@ -1,3 +1,4 @@
+import { processPurchaseCheque } from './compraPayments.js';
 import { prisma } from '../../config/prismaClient.js';
 import { sendPushToRole } from './pushNotificationService.js';
 
@@ -29,67 +30,8 @@ export async function procesarChequesVencidos(): Promise<void> {
 
     for (const cheque of chequesVencidos) {
       try {
-        // 1. Crear el abono de egreso contable en la BD
-        const abonoExistente = await prisma.abonoCompra.findFirst({
-          where: {
-            ordenCompraId: cheque.ordenCompraId,
-            monto: cheque.monto,
-            referencia: { contains: cheque.numeroCheque },
-          },
-        });
-
-        if (!abonoExistente) {
-          await prisma.abonoCompra.create({
-            data: {
-              ordenCompraId: cheque.ordenCompraId,
-              metodoPagoId: cheque.metodoPagoId,
-              monto: cheque.monto,
-              referencia: cheque.referencia || `Cobro Cheque N° ${cheque.numeroCheque}`,
-              registradoPorUserId: cheque.registradoPorUserId || null,
-            },
-          });
-        }
-
-        // 2. Marcar cheque como PROCESADO
-        await (prisma as any).chequeCompra.update({
-          where: { id: cheque.id },
-          data: {
-            estado: 'PROCESADO',
-            procesado: true,
-            notificado: true,
-          },
-        });
-
-        // 3. Recalcular EXACTAMENTE el saldo y montoPagado de la CuentaPorPagar sumando TODOS los abonos reales
-        const abonosSum = await prisma.abonoCompra.aggregate({
-          where: { ordenCompraId: cheque.ordenCompraId },
-          _sum: { monto: true },
-        });
-
-        const cxp = await prisma.cuentaPorPagar.findUnique({
-          where: { ordenCompraId: cheque.ordenCompraId },
-        });
-
-        if (cxp) {
-          const totalPagado = abonosSum._sum.monto || 0;
-          const newSaldo = Math.max(0, cxp.montoTotal - totalPagado);
-          const newEstado = newSaldo <= 0 ? 'pagado' : totalPagado > 0 ? 'parcial' : 'pendiente';
-          const newEstadoPago = newEstado === 'pagado' ? 'pagado' : totalPagado > 0 ? 'parcial' : 'sin_pagar';
-
-          await prisma.cuentaPorPagar.update({
-            where: { id: cxp.id },
-            data: {
-              montoPagado: totalPagado,
-              saldo: newSaldo,
-              estado: newEstado,
-            },
-          });
-
-          await prisma.ordenCompra.update({
-            where: { id: cheque.ordenCompraId },
-            data: { estadoPago: newEstadoPago },
-          });
-        }
+        const processed = await processPurchaseCheque(prisma, cheque.id);
+        if (processed.estado !== 'PROCESADO') continue;
 
         // 4. Notificar In-App y Push al Administrador
         const title = `Cobro de Cheque Programado: N° ${cheque.numeroCheque}`;
