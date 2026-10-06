@@ -1,3 +1,4 @@
+import { calculateProformaAmounts, roundProformaMoney } from '../../../../../shared/utils/proformaAmounts.js';
 import type { Request, Response } from 'express';
 import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
@@ -130,13 +131,7 @@ function mapProforma(p: any) {
       valor: i.valor ?? undefined,
     }));
 
-  const subtotal = itemsMapped.reduce((s: number, i: any) => {
-    const valor = i.valor != null ? Number(i.valor) : 0;
-    return s + (valor > 0 ? valor : i.cantidad * i.precioUnitario);
-  }, 0);
-  const descuento = Number(p.descuento ?? 0);
-  const ivaNum = Number(p.iva ?? 0.12);
-  const total = Math.max(0, (subtotal - descuento) * (1 + ivaNum));
+  const { subtotal, descuento, iva: ivaNum, total } = calculateProformaAmounts(p);
 
   const abonosMapped = (p.abonos || [])
     .slice()
@@ -151,9 +146,9 @@ function mapProforma(p: any) {
       registradoPor: ab.registradoPor ? { id: ab.registradoPor.id, nombre: ab.registradoPor.nombre } : null,
     }));
 
-  const totalAbonado = abonosMapped.reduce((s: number, a: any) => s + a.monto, 0);
-  const saldoPendiente = Math.max(0, total - totalAbonado);
-  const excedente = Math.max(0, totalAbonado - total);
+  const totalAbonado = roundProformaMoney(abonosMapped.reduce((s: number, a: any) => s + a.monto, 0));
+  const saldoPendiente = roundProformaMoney(Math.max(0, total - totalAbonado));
+  const excedente = roundProformaMoney(Math.max(0, totalAbonado - total));
 
   return {
     id: p.id,
@@ -375,8 +370,7 @@ export class ProformasController {
       // Generar notificaciones para los administradores si la proforma se crea en estado Pendiente
       if (created.estado === 'Pendiente') {
         try {
-          const subtotal = created.items.reduce((s: number, item: any) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-          const totalVal = subtotal * (1 + Number(created.iva));
+          const { total: totalVal } = calculateProformaAmounts(created);
           const createdByNom = (req as any).user?.nombre || created.atiende || 'Sistema';
 
           await notifyRoles(['admin', 'administrador'], {
@@ -421,16 +415,16 @@ export class ProformasController {
       }
 
       const itemsToBuild = buildItems(b.items);
-      const subtotalCalc = itemsToBuild.reduce((s, i) => s + (i.cantidad * i.precioUnitario), 0);
       const ivaValCalc = Number(b.iva ?? existingProforma.iva ?? 0.12);
-      const nuevoTotalCalc = subtotalCalc * (1 + ivaValCalc);
+      const descuentoCalc = Number(b.descuento ?? existingProforma.descuento ?? 0);
+      const { total: nuevoTotalCalc } = calculateProformaAmounts({ items: itemsToBuild, iva: ivaValCalc, descuento: descuentoCalc });
       const totalAbonado = (existingProforma.abonos || []).reduce((sum, a) => sum + Number(a.monto), 0);
 
       let targetEstado = b.estado ?? existingProforma.estado;
       if (existingProforma.estado === 'Rechazada') {
         targetEstado = 'Pendiente';
       } else if (existingProforma.estado === 'Aprobada' || existingProforma.estado === 'Pagada') {
-        if (totalAbonado >= (nuevoTotalCalc - 0.01)) {
+        if (roundProformaMoney(totalAbonado) >= nuevoTotalCalc) {
           targetEstado = 'Pagada';
         } else {
           targetEstado = 'Aprobada';
@@ -451,8 +445,8 @@ export class ProformasController {
           diasValidez: Number(b.diasValidez ?? 3),
           atiende: b.atiende ?? '',
           condiciones: b.condiciones ?? '',
-          iva: Number(b.iva ?? 0.12),
-          descuento: Number(b.descuento ?? 0),
+          iva: ivaValCalc,
+          descuento: descuentoCalc,
           notas: b.notas ?? '',
           medio: b.medio ?? 'LUXES',
           estado: targetEstado,
@@ -482,8 +476,7 @@ export class ProformasController {
             datosParsed.cotizacionesSeleccionadas = datosParsed.cotizacionesSeleccionadas.map((c: any) => {
               if (c.id === String(id)) {
                 modified = true;
-                const subtotal = updated.items.reduce((acc, item) => acc + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-                const total = subtotal * (1 + Number(updated.iva));
+                const { total } = calculateProformaAmounts(updated);
                 return {
                   ...c,
                   cliente: mappedUpdated.cliente,
@@ -511,8 +504,7 @@ export class ProformasController {
       // Si la proforma estaba Rechazada y ahora pasa a Pendiente
       if (existingProforma?.estado === 'Rechazada' && updated.estado === 'Pendiente') {
         try {
-          const subtotal = updated.items.reduce((s: number, item: any) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-          const totalVal = subtotal * (1 + Number(updated.iva));
+          const { total: totalVal } = calculateProformaAmounts(updated);
           const createdByNom = (req as any).user?.nombre || updated.atiende || 'Sistema';
 
           await notifyRoles(['admin', 'administrador'], {
@@ -650,23 +642,14 @@ export class ProformasController {
         ivaToApply = new Decimal(aplicarIva ? 0.15 : 0);
       }
 
-      // Calcular total de la proforma (igual que el frontend: usa item.valor si existe, resta descuento)
-      const subtotal = proforma.items.reduce((s, item) => {
-        // Si el item tiene un valor precalculado, usarlo (igual que calculateRowValor en el frontend)
-        const itemValor = (item.valor !== undefined && item.valor !== null && Number(item.valor) > 0)
-          ? Number(item.valor)
-          : Number(item.cantidad) * Number(item.precioUnitario);
-        return s + itemValor;
-      }, 0);
-      const descuentoVal = Number(proforma.descuento) || 0;
-      const total = Math.max(0, subtotal - descuentoVal + subtotal * Number(ivaToApply));
+      const { total } = calculateProformaAmounts({ ...proforma, iva: ivaToApply });
 
       // Validar monto
-      const abonoMonto = Number(monto || 0);
-      if (isNaN(abonoMonto) || abonoMonto < 0) {
+      const abonoMonto = roundProformaMoney(Number(monto || 0));
+      if (!Number.isFinite(abonoMonto) || abonoMonto < 0) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono no puede ser negativo' } });
       }
-      if (total > 0 && abonoMonto > (total + 0.01)) {
+      if (abonoMonto > total) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El abono no puede superar el total de la proforma' } });
       }
 
@@ -675,7 +658,7 @@ export class ProformasController {
         : null;
 
       // Transacción para guardar abono y actualizar estado de la proforma
-      const nuevoEstado = abonoMonto >= (total - 0.01) ? 'Pagada' : 'Aprobada';
+      const nuevoEstado = abonoMonto >= total ? 'Pagada' : 'Aprobada';
 
       const result = await prisma.$transaction(async (tx) => {
         const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
@@ -802,23 +785,22 @@ export class ProformasController {
       }
 
       // Calcular total de la proforma
-      const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-      const total = subtotal * (1 + Number(proforma.iva));
+      const { total } = calculateProformaAmounts(proforma);
 
       // Calcular cuánto se ha pagado hasta ahora
       const yaCobrado = proforma.abonos.reduce((s, ab) => s + Number(ab.monto), 0);
-      const pendiente = total - yaCobrado;
+      const pendiente = roundProformaMoney(Math.max(0, total - yaCobrado));
 
-      const abonoMonto = Number(monto);
-      if (abonoMonto <= 0) {
+      const abonoMonto = roundProformaMoney(Number(monto));
+      if (!Number.isFinite(abonoMonto) || abonoMonto <= 0) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
       }
 
-      if (pendiente > 0 && abonoMonto > (pendiente + 0.01)) {
+      if (abonoMonto > pendiente) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${abonoMonto} supera el saldo pendiente de $${pendiente.toFixed(2)}` } });
       }
 
-      const nuevoEstado = (yaCobrado + abonoMonto) >= (total - 0.01) ? 'Pagada' : 'Aprobada';
+      const nuevoEstado = roundProformaMoney(yaCobrado + abonoMonto) >= total ? 'Pagada' : 'Aprobada';
 
       const result = await prisma.$transaction(async (tx) => {
         const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
@@ -857,7 +839,7 @@ export class ProformasController {
     try {
       const { id, abonoId } = req.params;
       const { monto, metodoPagoId, referencia, comprobanteUrl } = req.body || {};
-      const nuevoMonto = Number(monto);
+      const nuevoMonto = roundProformaMoney(Number(monto));
 
       const userRole = ((req as any).user?.rol || '').toUpperCase();
       const isAdmin = userRole === 'ADMIN' || userRole === 'ADMINISTRADOR';
@@ -889,21 +871,20 @@ export class ProformasController {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Solo se puede editar el último abono registrado' } });
       }
 
-      const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-      const total = subtotal * (1 + Number(proforma.iva));
+      const { total } = calculateProformaAmounts(proforma);
 
       const sumOtrosAbonos = abonosSorted.slice(0, -1).reduce((s, ab) => s + Number(ab.monto), 0);
 
-      if (nuevoMonto <= 0) {
+      if (!Number.isFinite(nuevoMonto) || nuevoMonto <= 0) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'El monto del abono debe ser mayor a cero' } });
       }
 
-      const maxPermitted = total - sumOtrosAbonos;
-      if (maxPermitted > 0 && nuevoMonto > (maxPermitted + 0.01)) {
+      const maxPermitted = roundProformaMoney(Math.max(0, total - sumOtrosAbonos));
+      if (nuevoMonto > maxPermitted) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: `El abono de $${nuevoMonto} supera el saldo pendiente de $${maxPermitted.toFixed(2)}` } });
       }
 
-      const nuevoEstado = (sumOtrosAbonos + nuevoMonto) >= (total - 0.01) ? 'Pagada' : 'Aprobada';
+      const nuevoEstado = roundProformaMoney(sumOtrosAbonos + nuevoMonto) >= total ? 'Pagada' : 'Aprobada';
 
       const result = await prisma.$transaction(async (tx) => {
         const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
@@ -967,12 +948,11 @@ export class ProformasController {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Solo se puede eliminar el último abono registrado' } });
       }
 
-      const subtotal = proforma.items.reduce((s, item) => s + (Number(item.cantidad) * Number(item.precioUnitario)), 0);
-      const total = subtotal * (1 + Number(proforma.iva));
+      const { total } = calculateProformaAmounts(proforma);
 
       const sumOtrosAbonos = abonosSorted.slice(0, -1).reduce((s, ab) => s + Number(ab.monto), 0);
 
-      const nuevoEstado = sumOtrosAbonos >= (total - 0.01) ? 'Pagada' : 'Aprobada';
+      const nuevoEstado = roundProformaMoney(sumOtrosAbonos) >= total ? 'Pagada' : 'Aprobada';
 
       if (lastAbono.comprobanteUrl) {
         await safeUnlinkFile(path.resolve('uploads'), lastAbono.comprobanteUrl);
@@ -1022,11 +1002,7 @@ export class ProformasController {
         include: { items: true, metodoPago: true, abonos: { include: { metodoPago: true, registradoPor: true } } },
       });
 
-      const subtotal = (updated.items || []).reduce(
-        (s, item) => s + Number(item.cantidad) * Number(item.precioUnitario),
-        0,
-      );
-      const total = subtotal * (1 + Number(updated.iva));
+      const { total } = calculateProformaAmounts(updated);
 
       return res.status(200).json({
         success: true,

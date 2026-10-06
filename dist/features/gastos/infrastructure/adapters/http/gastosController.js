@@ -1,3 +1,4 @@
+import { calculateProformaAmounts } from '../../../../../shared/utils/proformaAmounts.js';
 import { prisma } from '../../../../../config/prismaClient.js';
 import { Prisma } from '@prisma/client';
 async function nextGastoId() {
@@ -1360,8 +1361,7 @@ export class GastosController {
             let aprobadasCount = 0;
             let pagadasCount = 0;
             for (const prof of proformas) {
-                const sub = prof.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
-                const total = sub * (1 + Number(prof.iva || 0.12));
+                const { total } = calculateProformaAmounts(prof);
                 totalCotizado += total;
                 if (prof.estado === 'Pendiente') {
                     porAprobarCount++;
@@ -1544,8 +1544,7 @@ export class GastosController {
             });
             let totalProformasPendienteCobro = 0;
             for (const prof of approvedProformas) {
-                const sub = prof.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
-                const total = sub * (1 + Number(prof.iva || 0.12));
+                const { total } = calculateProformaAmounts(prof);
                 const totalAbonos = prof.abonos.reduce((s, ab) => s + Number(ab.monto), 0);
                 const saldo = total - totalAbonos;
                 if (saldo > 0.01) {
@@ -1757,8 +1756,7 @@ export class GastosController {
             });
             let totalProformasPendienteCobroPrev = 0;
             for (const prof of prevProformas) {
-                const sub = prof.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
-                const total = sub * (1 + Number(prof.iva || 0.12));
+                const { total } = calculateProformaAmounts(prof);
                 const totalAbonos = prof.abonos.reduce((s, ab) => s + Number(ab.monto), 0);
                 const saldo = total - totalAbonos;
                 if (saldo > 0.01) {
@@ -1922,8 +1920,7 @@ export class GastosController {
                     printQueue,
                     proyectosActivos: proyectos,
                     proformas: proformas.map(p => {
-                        const sub = p.items.reduce((s, item) => s + Number(item.cantidad || 0) * Number(item.precioUnitario || 0), 0);
-                        const total = sub * (1 + Number(p.iva || 0.12));
+                        const { total } = calculateProformaAmounts(p);
                         return {
                             id: p.id,
                             fecha: p.fecha.toISOString().split('T')[0],
