@@ -1,4 +1,5 @@
 import { Asistencia } from '../../domain/entities/Asistencia.js';
+import { calcularAtrasoAlmuerzo, DURACION_ALMUERZO_MIN } from '../../domain/almuerzoPolicy.js';
 import { SECUENCIA_MARCACIONES, resolveProximaMarcacion, resolveTipoRegistro, getOpcionesMarcacion, calcularHorasExtrasDesdeConfig, redondearAMediaHora, puedeRegistrarMarcacion, } from '../../domain/marcacionLogic.js';
 import { prisma } from '../../../../config/prismaClient.js';
 import { notifyHorasExtrasPendiente } from '../../../../shared/services/horasExtrasNotificationService.js';
@@ -325,7 +326,7 @@ export class AsistenciaService {
         }
         const proxima = resolveTipoRegistro(todayMarks, {
             omitirAlmuerzo: input.omitirAlmuerzo,
-            horaActual: ahoraEC, // usa la hora EC (posiblemente simulada) para resolver el paso correcto
+            horaActual: ahora, // instante real; la lógica convierte a hora Ecuador
             tipo: input.tipo,
             tipoContrato,
             diaConfig,
@@ -348,21 +349,18 @@ export class AsistenciaService {
         // ── FIN_ALMUERZO (atraso) ────────────────────────────────────────────────
         if (proxima.tipo === 'FIN_ALMUERZO') {
             const inicioAlmMark = todayMarks.find((m) => m.tipo === 'INICIO_ALMUERZO');
-            if (inicioAlmMark && diaConfig?.inicioAlmuerzo && diaConfig?.finAlmuerzo) {
+            if (inicioAlmMark) {
                 const salidaAlmTime = new Date(inicioAlmMark.fechaHora);
                 const actualDurationMinutes = (ahora.getTime() - salidaAlmTime.getTime()) / 60000;
-                const [ish, ism] = diaConfig.inicioAlmuerzo.split(':').map(Number);
-                const [fsh, fsm] = diaConfig.finAlmuerzo.split(':').map(Number);
-                const configuredDurationMinutes = (fsh * 60 + fsm) - (ish * 60 + ism);
-                // Minutes the employee overstayed in lunch
-                const lateMinutesAlm = Math.round(actualDurationMinutes - configuredDurationMinutes);
+                // El rango de salida no amplía la duración autorizada de una hora.
+                const lateMinutesAlm = calcularAtrasoAlmuerzo(salidaAlmTime, ahora);
                 // Load tolerance from config
                 const horariosConfigAlm = (await (await import('../../infrastructure/adapters/persistence/horarioLaboralStore.js')).loadHorariosLaborales());
                 const toleranciaAlm = Number(horariosConfigAlm.toleranciaMinutos ?? 8);
                 // Apply bracket system — same as entry fines
                 const { calcularMultaAtraso: calcMultaAlm } = await import('../../../../shared/utils/horarioLaboralHelpers.js');
                 const multaDolaresAlm = calcMultaAlm(lateMinutesAlm, toleranciaAlm);
-                console.log(`[QR-ALM] ${input.empleadoId} | duracion=${actualDurationMinutes.toFixed(1)}min (config=${configuredDurationMinutes}) | tarde=${lateMinutesAlm}min | tol=${toleranciaAlm} | multa=$${multaDolaresAlm}`);
+                console.log(`[QR-ALM] ${input.empleadoId} | duracion=${actualDurationMinutes.toFixed(1)}min (max=${DURACION_ALMUERZO_MIN}) | tarde=${lateMinutesAlm}min | tol=${toleranciaAlm} | multa=$${multaDolaresAlm}`);
                 if (multaDolaresAlm > 0) {
                     const { fechaInicio, fechaFin } = getQuincenaPeriod(ahora);
                     const periodStart = new Date(`${fechaInicio}T00:00:00.000Z`);

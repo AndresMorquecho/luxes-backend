@@ -1,3 +1,5 @@
+import { puedeIniciarAlmuerzo } from './almuerzoPolicy.js';
+
 export const SECUENCIA_MARCACIONES = [
   { tipo: 'ENTRADA', label: 'Entrada' },
   { tipo: 'INICIO_ALMUERZO', label: 'Inicio Almuerzo' },
@@ -45,9 +47,10 @@ function findSelectable(tipo: string) {
 export function resolveProximaMarcacion(
   marks: MarcacionLike[], 
   tipoContrato: string = 'Tiempo Completo',
-  diaConfig?: any
+  diaConfig?: any,
+  horaActual: Date = new Date(),
 ): ProximaMarcacionResult {
-  const opciones = getOpcionesMarcacion(marks, tipoContrato, diaConfig);
+  const opciones = getOpcionesMarcacion(marks, tipoContrato, diaConfig, horaActual);
   if (opciones.length === 0) {
     return { proxima: null, permiteOmitirAlmuerzo: false, completado: true, marcacionesRegistradas: marks.length };
   }
@@ -70,7 +73,8 @@ export function resolveProximaMarcacion(
 export function getOpcionesMarcacion(
   marks: MarcacionLike[], 
   tipoContrato: string = 'Tiempo Completo',
-  diaConfig?: any
+  diaConfig?: any,
+  horaActual: Date = new Date(),
 ) {
   const tipos = new Set(marks.map((m) => m.tipo));
   if (tipos.has('PERMISO')) return [] as typeof TIPOS_SELECCIONABLES[number][];
@@ -92,7 +96,7 @@ export function getOpcionesMarcacion(
   }
 
   // Get current Ecuador time in minutes
-  const nowEcuador = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const nowEcuador = new Date(horaActual.getTime() - 5 * 60 * 60 * 1000);
   const currentMin = nowEcuador.getUTCHours() * 60 + nowEcuador.getUTCMinutes();
 
   const parseTimeToMinutes = (timeStr: string | null | undefined): number | null => {
@@ -102,7 +106,6 @@ export function getOpcionesMarcacion(
     return parts[0] * 60 + parts[1];
   };
 
-  const inicioAlmuerzoMin = parseTimeToMinutes(diaConfig?.inicioAlmuerzo) ?? (13 * 60); // 13:00
   const salidaMin = parseTimeToMinutes(diaConfig?.salida) ?? (17 * 60 + 30); // 17:30
 
   const enAlmuerzo = tipos.has('INICIO_ALMUERZO') && !tipos.has('FIN_ALMUERZO');
@@ -113,9 +116,8 @@ export function getOpcionesMarcacion(
 
   if (!tipos.has('SALIDA')) {
     if (!tipos.has('INICIO_ALMUERZO')) {
-      // Salida almuerzo starts at inicioAlmuerzoMin, max 14:30
-      const canLunch = currentMin >= inicioAlmuerzoMin && currentMin <= (14 * 60 + 30);
-      if (canLunch) {
+      // Salida de 12:00 a 14:00 (hora Ecuador), con una hora desde la marcación real.
+      if (puedeIniciarAlmuerzo(horaActual)) {
         opciones.push(TIPOS_SELECCIONABLES[1]); // Salida almuerzo
       }
 
@@ -165,9 +167,10 @@ export function validateTipoMarcacion(
   marks: MarcacionLike[], 
   tipo: string, 
   tipoContrato: string = 'Tiempo Completo',
-  diaConfig?: any
+  diaConfig?: any,
+  horaActual: Date = new Date(),
 ): { tipo: string; label: string } {
-  const allowed = getOpcionesMarcacion(marks, tipoContrato, diaConfig);
+  const allowed = getOpcionesMarcacion(marks, tipoContrato, diaConfig, horaActual);
   const match = allowed.find((o) => o.tipo === tipo);
   if (!match) {
     throw new Error('Ese tipo de marcación no está permitido en este momento.');
@@ -180,17 +183,18 @@ export function resolveTipoRegistro(
   options: { omitirAlmuerzo?: boolean; horaActual?: Date; tipo?: string; tipoContrato?: string; diaConfig?: any } = {},
 ): { tipo: string; label: string } {
   const tipoContrato = options.tipoContrato || 'Tiempo Completo';
+  const hora = options.horaActual ?? new Date();
   if (options.tipo) {
-    return validateTipoMarcacion(marks, options.tipo, tipoContrato, options.diaConfig);
+    return validateTipoMarcacion(marks, options.tipo, tipoContrato, options.diaConfig, hora);
   }
 
-  const info = resolveProximaMarcacion(marks, tipoContrato, options.diaConfig);
+  const info = resolveProximaMarcacion(marks, tipoContrato, options.diaConfig, hora);
   if (!info.proxima) {
     throw new Error('El colaborador ya completó las marcaciones del día.');
   }
 
-  const hora = options.horaActual ?? new Date();
-  const horaDelDia = hora.getHours() + hora.getMinutes() / 60;
+  const horaEC = new Date(hora.getTime() - 5 * 60 * 60 * 1000);
+  const horaDelDia = horaEC.getUTCHours() + horaEC.getUTCMinutes() / 60;
 
   if (info.permiteOmitirAlmuerzo && info.alternativa) {
     const forzarSalida =
