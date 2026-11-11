@@ -19,6 +19,7 @@ const { createEmpleadosModule } = await import('../../features/empleados/infrast
 const { createNominaModule } = await import('../../features/nomina/infrastructure/composition/nominaContainer.js');
 const { getBalancesReportData } = await import('../../features/gastos/application/balancesReport.js');
 const { balancePeriod } = await import('../../features/gastos/application/balanceRules.js');
+const { CalendarioService } = await import('../../features/calendario/application/services/CalendarioService.js');
 
 test('safe offboarding preserves the production copy and historical identities', async t => {
   const suffix = randomUUID();
@@ -97,6 +98,22 @@ test('safe offboarding preserves the production copy and historical identities',
       assert.equal((await request('/api/nomina/nominas?fechaInicio=2027-01-01&fechaFin=2027-01-15')).status, 200);
       assert.equal(JSON.stringify(await history()), beforeHistory);
       assert.equal(await prisma.nominaRegistro.count({ where: { empleadoId: { in: ids }, fechaInicio: new Date('2027-01-01') } }), 0);
+    });
+    await t.test('recurring calendar assignments retain past names and exclude future archived staff', async () => {
+      const archived = await prisma.empleado.findUniqueOrThrow({ where: { id: employee.id } });
+      const start = archived.fechaBaja!;
+      const previous = new Date(start.getTime() - 86400000).toISOString().slice(0, 10);
+      const next = new Date(start.getTime() + 86400000).toISOString().slice(0, 10);
+      const rutina = await prisma.rutina.create({ data: {
+        titulo: 'QA historical routine', diasSemana: JSON.stringify(Object.fromEntries([1,2,3,4,5,6,7].map(day => [day, [employee.id]]))),
+        asignaciones: { create: { empleadoId: employee.id } },
+      } });
+      const calendar = new CalendarioService();
+      const past = (await calendar.getEventosDelMes(previous.slice(0, 7))).eventos.find(e => e.id === `rutina-${rutina.id}-${previous}`);
+      assert.ok(past?.subtitulo?.includes(employee.nombre));
+      const future = (await calendar.getEventosDelMes(next.slice(0, 7))).eventos.find(e => e.id === `rutina-${rutina.id}-${next}`);
+      assert.equal(future, undefined);
+      assert.equal(await prisma.rutinaAsignacion.count({ where: { rutinaId: rutina.id, empleadoId: employee.id } }), 1);
     });
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));

@@ -29,6 +29,7 @@ export async function checkAndSendCalendarioNotifications(): Promise<void> {
           where: { activo: true },
           include: {
             asignaciones: {
+              where: { empleado: { archivedAt: null } },
               include: {
                 empleado: {
                   include: { user: true },
@@ -82,7 +83,7 @@ export async function checkAndSendCalendarioNotifications(): Promise<void> {
         const mananaDia = manana.getDate();
 
         const empleados = await prisma.empleado.findMany({
-          where: { fechaNacimiento: { not: null } },
+          where: { fechaNacimiento: { not: null }, archivedAt: null },
           select: { id: true, nombre: true, fechaNacimiento: true },
         });
 
@@ -112,7 +113,7 @@ export async function checkAndSendCalendarioNotifications(): Promise<void> {
         const hoyDia = ahora.getDate();
 
         const empleados = await prisma.empleado.findMany({
-          where: { fechaNacimiento: { not: null } },
+          where: { fechaNacimiento: { not: null }, archivedAt: null },
           select: { id: true, nombre: true, fechaNacimiento: true },
         });
 

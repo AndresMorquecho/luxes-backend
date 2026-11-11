@@ -242,7 +242,7 @@ export class CalendarioService {
     const rutinas = await (prisma as any).rutina.findMany({
       where: { activo: true },
       include: {
-        asignaciones: { include: { empleado: { select: { id: true, nombre: true, foto: true } } } },
+        asignaciones: { include: { empleado: { select: { id: true, nombre: true, foto: true, archivedAt: true, fechaBaja: true } } } },
         historial: {
           where: {
             fecha: {
@@ -285,19 +285,15 @@ export class CalendarioService {
           // Resolve employees for this specific day with formatted foto
           const assignedEmpsForDay = r.asignaciones
             .filter((a: any) => assignedEmpIdsForDay.includes(a.empleado.id))
+            .filter((a: any) => hist || !a.empleado.archivedAt || (a.empleado.fechaBaja && currentDate < a.empleado.fechaBaja))
             .map((a: any) => ({
               id: a.empleado.id,
               nombre: a.empleado.nombre,
               foto: formatFotoUrl(a.empleado.id, a.empleado.foto),
             }));
 
-          const activeEmps = assignedEmpsForDay.length > 0
-            ? assignedEmpsForDay
-            : r.asignaciones.map((a: any) => ({
-                id: a.empleado.id,
-                nombre: a.empleado.nombre,
-                foto: formatFotoUrl(a.empleado.id, a.empleado.foto),
-              }));
+          const activeEmps = assignedEmpsForDay;
+          if (!activeEmps.length && !hist) continue;
 
           const empleadosNom = activeEmps.map((e: any) => e.nombre).join(', ');
 
