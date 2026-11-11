@@ -1,3 +1,4 @@
+import { assertActiveEmployees } from '../../../../shared/services/activeAssignments.js';
 import { prisma } from '../../../../config/prismaClient.js';
 
 export class RutinasService {
@@ -116,6 +117,7 @@ export class RutinasService {
       data.empleadosIds.forEach((id) => uniqueEmpIds.add(id));
     }
 
+    await assertActiveEmployees(Array.from(uniqueEmpIds));
     const turnosJson = JSON.stringify(turnos);
 
     const rutina = await (prisma as any).rutina.create({
@@ -181,6 +183,10 @@ export class RutinasService {
       data.empleadosIds.forEach((id) => uniqueEmpIds?.add(id));
     }
 
+    if (uniqueEmpIds !== null) {
+      const previous = await prisma.rutinaAsignacion.findMany({ where: { rutinaId: id }, select: { empleadoId: true } });
+      await assertActiveEmployees(Array.from(uniqueEmpIds), previous.map(a => a.empleadoId));
+    }
     await (prisma as any).rutina.update({
       where: { id },
       data: {

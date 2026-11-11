@@ -8,6 +8,7 @@ import { EmpleadoDocumentoTipo } from '../../domain/entities/EmpleadoDocumento.j
 import { BcryptPasswordAdapter } from '../../../auth/infrastructure/adapters/security/bcryptPasswordAdapter.js';
 import { prisma } from '../../../../config/prismaClient.js';
 import { safeUnlinkFile } from '../../../../shared/utils/pathSafetyHelper.js';
+import { archiveEmployee, ArchiveInput } from '../../../../shared/services/employeeArchiveService.js';
 
 const DEFAULT_PASSWORD = '123456';
 
@@ -40,8 +41,8 @@ export class EmpleadoService {
     private readonly passwordHasher = new BcryptPasswordAdapter(),
   ) {}
 
-  listEmpleados(): Promise<Empleado[]> {
-    return this.empleadoRepository.findAll();
+  listEmpleados(incluirBajas = false): Promise<Empleado[]> {
+    return this.empleadoRepository.findAll(incluirBajas);
   }
 
   getEmpleadoById(id: string): Promise<Empleado | null> {
@@ -107,6 +108,7 @@ export class EmpleadoService {
     if (!current) {
       throw new Error('Empleado no encontrado');
     }
+    if (current.archivedAt) throw new Error('La ficha dada de baja se conserva como historial y no se puede editar');
 
     const duplicate = await this.empleadoRepository.findByCedula(data.cedula.trim());
     if (duplicate && duplicate.id !== id) {
@@ -174,35 +176,8 @@ export class EmpleadoService {
     return empleado;
   }
 
-  async deleteEmpleado(id: string): Promise<void> {
-    const current = await this.empleadoRepository.findById(id);
-    if (!current) {
-      throw new Error('Empleado no encontrado');
-    }
-
-    if (current.foto) {
-      await safeUnlinkFile(path.resolve('uploads'), current.foto);
-    }
-
-    // Eliminar también el usuario vinculado en cascada (si es posible)
-    const linkedUser = await prisma.user.findUnique({ where: { empleadoId: id } });
-    if (linkedUser) {
-      try {
-        await prisma.user.delete({ where: { id: linkedUser.id } });
-      } catch (err) {
-        // Si falla por foreign keys, fallback a inactivarlo
-        await prisma.user.update({
-          where: { id: linkedUser.id },
-          data: {
-            empleadoId: null,
-            estado: 'inactivo',
-          },
-        });
-      }
-    }
-
-    await this.documentoRepository.deleteAllForEmpleado(id);
-    await this.empleadoRepository.delete(id);
+  async deleteEmpleado(id: string, actor?: ArchiveInput['actor'], options: Pick<ArchiveInput, 'fechaBaja' | 'motivo'> = {}) {
+    return archiveEmployee({ empleadoId: id, actor, ...options });
   }
 
   listDocumentos(empleadoId: string): Promise<EmpleadoDocumento[]> {

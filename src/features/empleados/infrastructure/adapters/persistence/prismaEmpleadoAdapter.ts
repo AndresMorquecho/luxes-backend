@@ -5,6 +5,8 @@ import { Prisma } from '@prisma/client';
 
 const mapRecord = (record: {
   id: string;
+  archivedAt?: Date | null;
+  fechaBaja?: Date | null;
   nombre: string;
   cedula: string;
   fechaNacimiento?: Date | null;
@@ -28,6 +30,8 @@ const mapRecord = (record: {
 }): Empleado =>
   new Empleado({
     id: record.id,
+    archivedAt: record.archivedAt?.toISOString() ?? null,
+    fechaBaja: record.fechaBaja?.toISOString().slice(0, 10) ?? null,
     nombre: record.nombre,
     cedula: record.cedula,
     fechaNacimiento: record.fechaNacimiento ? new Date(record.fechaNacimiento).toISOString().split('T')[0] : null,
@@ -79,8 +83,9 @@ const toDbData = (data: EmpleadoInput) => {
 };
 
 export class PrismaEmpleadoAdapter extends EmpleadoRepositoryPort {
-  async findAll(): Promise<Empleado[]> {
+  async findAll(incluirBajas = false): Promise<Empleado[]> {
     const records = await prisma.empleado.findMany({
+      where: incluirBajas ? {} : { archivedAt: null },
       include: { user: { select: { rol: true } } },
       orderBy: { id: 'asc' },
     });
@@ -119,7 +124,7 @@ export class PrismaEmpleadoAdapter extends EmpleadoRepositoryPort {
   }
 
   async delete(id: string): Promise<void> {
-    await prisma.empleado.delete({ where: { id } });
+    throw new Error('Use la baja del empleado para conservar su historial');
   }
 
   async generateNextId(): Promise<string> {

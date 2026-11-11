@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { prisma } from '../../../../../config/prismaClient.js';
 import { safeUnlinkFile } from '../../../../../shared/utils/pathSafetyHelper.js';
+import { assertActiveEmployees } from '../../../../../shared/services/activeAssignments.js';
 import {
   calcSueldoBrutoQuincena,
   sueldoDiarioEnQuincena,
@@ -158,6 +159,11 @@ export class NominaController {
       }
 
       // Upsert solo los registros recibidos (sin borrar otros del período)
+      const existingOvertime = await prisma.horaExtra.findMany({
+        where: { id: { in: horasExtras.map((r: any) => String(r.id || '')) } },
+        select: { id: true, colaboradorId: true },
+      });
+      await assertActiveEmployees(horasExtras.filter((r: any) => !existingOvertime.some(e => e.id === String(r.id) && e.colaboradorId === String(r.colaboradorId))).map((r: any) => String(r.colaboradorId)));
       const saved = [];
 
       for (const r of horasExtras) {
@@ -504,6 +510,8 @@ export class NominaController {
       const diasLaborablesEventual = Math.max(0, lunSatPeriodo - feriadosLunSat);
 
       for (const emp of empleados) {
+        // Archived payroll is historical: a GET must neither generate nor recalculate it.
+        if (emp.archivedAt) continue;
         const empAsistencias = asistenciasByEmpleado.get(emp.id) || [];
         const isFijo = emp.tieneContrato !== false;
 
@@ -693,7 +701,7 @@ export class NominaController {
         if (txIndex !== undefined) {
           updatedRecords.push(transactionResults[txIndex]);
         } else {
-          updatedRecords.push(existing);
+          if (existing) updatedRecords.push(existing);
         }
       }
       records = updatedRecords;
@@ -896,6 +904,9 @@ export class NominaController {
       const empleado = await prisma.empleado.findUnique({
         where: { id: String(data.empleadoId) }
       });
+      if (empleado?.archivedAt && !oldNomina) {
+        return res.status(409).json({ success: false, error: { code: 'EMPLOYEE_ARCHIVED', message: 'El colaborador está dado de baja. Solo se pueden gestionar nóminas ya existentes.' } });
+      }
       const empleadoNombre = empleado ? empleado.nombre.trim() : 'Empleado';
       const registradoPorUserId = (req as { user?: { id?: string } }).user?.id || null;
 
@@ -1158,6 +1169,7 @@ export class NominaController {
         });
       }
 
+      await assertActiveEmployees([String(empleadoId)]);
       const updated = await prisma.vacacion.upsert({
         where: {
           empleadoId_anio: {
@@ -1780,7 +1792,7 @@ export class NominaController {
         applyHeaderStyles(4, 'FF2F5597', 'FFFFFFFF');
 
         let currentRowIndex = 5;
-        const dataRows = empleados.map((emp, index) => {
+        const dataRows = empleados.filter(emp => !emp.archivedAt || req.query.incluirBajas === 'true' || (emp.fechaBaja && fFin < emp.fechaBaja)).map((emp, index) => {
           const raw = nominasList.find(n => n.empleadoId === emp.id);
           const mapped = mapNominaRow(emp, raw, quincenaNum, fInicio, fFin);
           return [

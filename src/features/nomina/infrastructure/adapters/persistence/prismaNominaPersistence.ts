@@ -132,7 +132,7 @@ export class PrismaNominaPersistence {
 
   async listVacaciones(anio: number) {
     const anios = [anio, anio - 1];
-    const empleados = await prisma.empleado.findMany({ orderBy: { id: 'asc' } });
+    const empleados = await prisma.empleado.findMany({ where: { archivedAt: null }, orderBy: { id: 'asc' } });
 
     for (const year of anios) {
       for (const empleado of empleados) {
@@ -296,7 +296,7 @@ export class PrismaNominaPersistence {
     const fin = toDateOnly(fechaFin);
     const diffDias = Math.floor((fin.getTime() - inicio.getTime()) / 86400000) + 1;
 
-    const empleados = await prisma.empleado.findMany({ orderBy: { id: 'asc' } });
+    const empleados = await prisma.empleado.findMany({ where: { archivedAt: null }, orderBy: { id: 'asc' } });
 
     for (const empleado of empleados) {
       await prisma.nominaRegistro.upsert({

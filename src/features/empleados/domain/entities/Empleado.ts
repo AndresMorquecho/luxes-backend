@@ -1,5 +1,7 @@
 export interface EmpleadoProps {
   id: string;
+  archivedAt?: string | null;
+  fechaBaja?: string | null;
   nombre: string;
   cedula: string;
   fechaNacimiento?: string | null;
@@ -23,6 +25,8 @@ export interface EmpleadoProps {
 
 export class Empleado {
   readonly id: string;
+  readonly archivedAt: string | null;
+  readonly fechaBaja: string | null;
   readonly nombre: string;
   readonly cedula: string;
   readonly fechaNacimiento?: string | null;
@@ -45,6 +49,8 @@ export class Empleado {
 
   constructor(props: EmpleadoProps) {
     this.id = props.id;
+    this.archivedAt = props.archivedAt ?? null;
+    this.fechaBaja = props.fechaBaja ?? null;
     this.nombre = props.nombre;
     this.cedula = props.cedula;
     this.fechaNacimiento = props.fechaNacimiento ?? null;
@@ -69,6 +75,8 @@ export class Empleado {
   toJSON(): EmpleadoProps {
     return {
       id: this.id,
+      archivedAt: this.archivedAt,
+      fechaBaja: this.fechaBaja,
       nombre: this.nombre,
       cedula: this.cedula,
       fechaNacimiento: this.fechaNacimiento,

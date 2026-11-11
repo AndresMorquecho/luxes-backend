@@ -232,10 +232,11 @@ export function createAuthController(authService: AuthService): AuthController {
       try {
         const adminUser = req.user;
         const { id } = req.params;
-        await authService.deleteUser(id, adminUser);
+        const result = await authService.deleteUser(id, adminUser, { fechaBaja: req.body?.fechaBaja, motivo: req.body?.motivo });
         return res.status(200).json({
           success: true,
-          message: 'Usuario eliminado correctamente',
+          data: result,
+          message: 'Usuario dado de baja. Su historial se conserva.',
         });
       } catch (error: any) {
         console.error('[users/delete]', error);

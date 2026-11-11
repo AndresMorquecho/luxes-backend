@@ -27,7 +27,7 @@ export type EmpleadoInput = {
 };
 
 export abstract class EmpleadoRepositoryPort {
-  abstract findAll(): Promise<Empleado[]>;
+  abstract findAll(incluirBajas?: boolean): Promise<Empleado[]>;
   abstract findById(id: string): Promise<Empleado | null>;
   abstract findByCedula(cedula: string): Promise<Empleado | null>;
   abstract create(id: string, data: EmpleadoInput): Promise<Empleado>;

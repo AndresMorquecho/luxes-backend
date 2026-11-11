@@ -428,8 +428,8 @@ async function bootstrap() {
     next();
   });
 
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'luxes-backend' });
+  app.get(['/health', '/api/health'], (_req, res) => {
+    res.json({ status: 'ok', service: 'luxes-backend', features: { safeEmployeeArchive: 1 } });
   });
 
   // Archivos de proyecto (diseño / evidencias): público, sin JWT — <img> no envía Authorization

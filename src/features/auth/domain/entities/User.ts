@@ -9,6 +9,7 @@ export class User {
   rol: string;
   roleId: string | null;
   estado: string;
+  archivedAt: string | null;
   passwordHash: string;
   fechaCreacion: string;
   ultimoAcceso: string | null;
@@ -25,6 +26,7 @@ export class User {
     rol,
     roleId = null,
     estado,
+    archivedAt = null,
     passwordHash,
     fechaCreacion,
     ultimoAcceso = null,
@@ -40,6 +42,7 @@ export class User {
     rol: string;
     roleId?: string | null;
     estado: string;
+    archivedAt?: string | null;
     passwordHash: string;
     fechaCreacion: string;
     ultimoAcceso?: string | null;
@@ -55,6 +58,7 @@ export class User {
     this.rol = rol;
     this.roleId = roleId;
     this.estado = estado;
+    this.archivedAt = archivedAt;
     this.passwordHash = passwordHash;
     this.fechaCreacion = fechaCreacion;
     this.ultimoAcceso = ultimoAcceso;
@@ -65,7 +69,7 @@ export class User {
   }
 
   isActive(): boolean {
-    return this.estado === 'activo';
+    return this.estado === 'activo' && !this.archivedAt;
   }
 
   toPublic() {
@@ -77,6 +81,7 @@ export class User {
       rol: this.rol,
       roleId: this.roleId,
       estado: this.estado,
+      archivedAt: this.archivedAt,
       fechaCreacion: this.fechaCreacion,
       ultimoAcceso: this.ultimoAcceso,
       permissions: this.permissions || [],

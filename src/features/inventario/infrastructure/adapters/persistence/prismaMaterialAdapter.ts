@@ -1,3 +1,4 @@
+import { assertActiveEmployees, assertActiveUsers } from '../../../../../shared/services/activeAssignments.js';
 import { PrismaClient } from '@prisma/client';
 import type {
   MaterialRepositoryPort,
@@ -153,6 +154,7 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   }
 
   async create(data: Omit<MaterialData, 'id' | 'fechaCreacion'>): Promise<MaterialData> {
+    if ((data as any).aCargoId) await assertActiveEmployees([String((data as any).aCargoId)]);
     const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
@@ -180,6 +182,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   }
 
   async update(id: string, data: Partial<Omit<MaterialData, 'id' | 'fechaCreacion'>>): Promise<MaterialData> {
+    if ((data as any).aCargoId) {
+      const current = await this.prisma.material.findUnique({ where: { id }, select: { aCargoId: true } });
+      await assertActiveEmployees([String((data as any).aCargoId)], current?.aCargoId ? [current.aCargoId] : []);
+    }
     const { unidadMedida, costoPromedioPonderado, ultimaFechaCompra, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
@@ -386,6 +392,7 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   }
 
   async createPrestamo(data: Omit<PrestamoData, 'id' | 'fechaSalida'>): Promise<PrestamoData> {
+    await assertActiveUsers([data.responsableId]);
     const row = await this.prisma.prestamo.create({
       data: {
         cantidad: data.cantidad,

@@ -16,6 +16,7 @@ model User {
   roleId              String?       @map("role_id")
   role                Role?         @relation(fields: [roleId], references: [id], onDelete: SetNull)
   estado              String        @default("activo")
+  archivedAt          DateTime?     @map("archived_at")
   passwordHash        String        @map("password_hash")
   fechaCreacion       DateTime      @default(now()) @map("fecha_creacion")
   ultimoAcceso        DateTime?     @map("ultimo_acceso")
@@ -378,6 +379,8 @@ model TareaAsignacion {
 model Empleado {
   id           String             @id
   nombre       String
+  archivedAt   DateTime?          @map("archived_at")
+  fechaBaja    DateTime?          @map("fecha_baja") @db.Date
   cedula       String             @unique
   fechaNacimiento DateTime?       @map("fecha_nacimiento") @db.Date
   telefono     String             @default("")

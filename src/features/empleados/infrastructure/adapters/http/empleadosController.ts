@@ -61,9 +61,9 @@ const formatFotoUrl = (empId: string, foto?: string | null): string | null => {
 
 export function createEmpleadosController(empleadoService: EmpleadoService): EmpleadosController {
   return {
-    async list(_req, res) {
+    async list(req, res) {
       try {
-        const empleados = await empleadoService.listEmpleados();
+        const empleados = await empleadoService.listEmpleados(req.query.incluirBajas === 'true');
         const sanitized = empleados.map((e) => {
           const json = e.toJSON();
           return {
@@ -234,10 +234,11 @@ export function createEmpleadosController(empleadoService: EmpleadoService): Emp
 
     async remove(req, res) {
       try {
-        await empleadoService.deleteEmpleado(paramId(req));
+        const result = await empleadoService.deleteEmpleado(paramId(req), (req as any).user, { fechaBaja: req.body?.fechaBaja, motivo: req.body?.motivo });
         return res.status(200).json({
           success: true,
-          data: { id: paramId(req) },
+          data: { id: paramId(req), ...result },
+          message: 'Colaborador dado de baja. Su historial se conserva.',
         });
       } catch (error) {
         const prismaCode = error && typeof error === 'object' && 'code' in error

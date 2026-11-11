@@ -82,6 +82,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
+      archivedAt: dbUser.archivedAt?.toISOString() ?? null,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
@@ -111,6 +112,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
+      archivedAt: dbUser.archivedAt?.toISOString() ?? null,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
@@ -137,6 +139,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
+      archivedAt: dbUser.archivedAt?.toISOString() ?? null,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
@@ -172,6 +175,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
+      archivedAt: dbUser.archivedAt?.toISOString() ?? null,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
@@ -199,6 +203,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         rol: resolveUserRol(dbUser),
         roleId: dbUser.roleId,
         estado: dbUser.estado,
+      archivedAt: dbUser.archivedAt?.toISOString() ?? null,
         passwordHash: dbUser.passwordHash,
         fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
         ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
@@ -236,6 +241,7 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
+      archivedAt: dbUser.archivedAt?.toISOString() ?? null,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
@@ -247,9 +253,6 @@ export class PrismaUserAdapter extends UserRepositoryPort {
   }
 
   async delete(id: string): Promise<boolean> {
-    const deleted = await prisma.user.delete({
-      where: { id },
-    });
-    return !!deleted;
+    throw new Error('Use la baja del usuario para conservar su historial');
   }
 }

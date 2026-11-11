@@ -98,6 +98,7 @@ export class CalendarioService {
     const empleados = await prisma.empleado.findMany({
       where: {
         fechaNacimiento: { not: null },
+        archivedAt: null,
       },
       select: {
         id: true,

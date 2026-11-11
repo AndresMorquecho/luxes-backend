@@ -6,6 +6,7 @@ import { TokenServicePort } from '../../domain/ports/TokenServicePort.js';
 import { RoleRepositoryPort } from '../../domain/ports/RoleRepositoryPort.js';
 import { AuditLogRepositoryPort } from '../../domain/ports/AuditLogRepositoryPort.js';
 import { prisma } from '../../../../config/prismaClient.js';
+import { archiveEmployee, ArchiveInput } from '../../../../shared/services/employeeArchiveService.js';
 
 interface AuthServiceDependencies {
   userRepository: UserRepositoryPort;
@@ -166,6 +167,7 @@ export class AuthService {
   async updateUser(id: string, data: any, adminUser?: any) {
     const user = await this.userRepository.findById(id);
     if (!user) throw new Error('Usuario no encontrado');
+    if (user.archivedAt) throw new Error('La cuenta dada de baja se conserva como historial y no se puede editar');
 
     if (user.username.toLowerCase() === 'asistencia') {
       throw new Error('El usuario de asistencia no se puede editar, únicamente cambiar su contraseña.');
@@ -252,6 +254,7 @@ export class AuthService {
   async toggleUserStatus(id: string, adminUser?: any) {
     const user = await this.userRepository.findById(id);
     if (!user) throw new Error('Usuario no encontrado');
+    if (user.archivedAt) throw new Error('La cuenta está dada de baja; no se puede reactivar desde este botón');
 
     if (user.username.toLowerCase() === 'asistencia') {
       throw new Error('El usuario de asistencia no se puede desactivar.');
@@ -297,39 +300,8 @@ export class AuthService {
     return updated.toPublic();
   }
 
-  async deleteUser(id: string, adminUser?: any) {
-    const user = await this.userRepository.findById(id);
-    if (!user) throw new Error('Usuario no encontrado');
-
-    if (user.username.toLowerCase() === 'asistencia') {
-      throw new Error('El usuario de asistencia no se puede eliminar.');
-    }
-
-    const result = await this.userRepository.delete(id);
-
-    // Sync deletion with Empleado
-    if (user.empleadoId) {
-      try {
-        await prisma.empleadoDocumento.deleteMany({ where: { empleadoId: user.empleadoId } });
-        await prisma.empleado.delete({ where: { id: user.empleadoId } });
-      } catch (err) {
-        console.error('Error cascade deleting empleado from user:', err);
-      }
-    }
-
-    // Registrar en auditoría
-    if (this.auditLogRepository) {
-      await this.auditLogRepository.create({
-        userId: adminUser?.id,
-        usuarioNom: adminUser?.nombre,
-        accion: 'Eliminar usuario',
-        modulo: 'Usuarios y Roles',
-        detalle: `Eliminó de forma permanente al usuario ${user.nombre} (${user.username})`,
-        severidad: 'Critico',
-      });
-    }
-
-    return result;
+  async deleteUser(id: string, adminUser?: any, options: Pick<ArchiveInput, 'fechaBaja' | 'motivo'> = {}) {
+    return archiveEmployee({ userId: id, actor: adminUser, ...options });
   }
 
   // --- MÓDULO DE GESTIÓN DE ROLES Y PERMISOS ---

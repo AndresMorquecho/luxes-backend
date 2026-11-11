@@ -1,3 +1,4 @@
+import { assertActiveUsers } from '../../../../../shared/services/activeAssignments.js';
 import { PrismaClient } from '@prisma/client';
 import webpush from 'web-push';
 import { env } from '../../../../../config/env.js';
@@ -125,6 +126,7 @@ export class PrismaTareasAdapter implements TareasRepositoryPort {
     creadoPorId: string;
     asignadoA: string[];
   }): Promise<TareaData> {
+    await assertActiveUsers(data.asignadoA);
     let parsedFechaLimite: Date | null = null;
     if (data.fechaLimite) {
       const d = new Date(data.fechaLimite);
@@ -233,8 +235,10 @@ export class PrismaTareasAdapter implements TareasRepositoryPort {
 
     // If re-assigning users, delete old and create new
     if (data.asignadoA) {
-      await this.prisma.tareaAsignacion.deleteMany({ where: { tareaId: id } });
+      const previous = await this.prisma.tareaAsignacion.findMany({ where: { tareaId: id }, select: { userId: true } });
+      await assertActiveUsers(data.asignadoA, previous.map(a => a.userId));
       updateData.asignaciones = {
+        deleteMany: {},
         create: data.asignadoA.map(userId => ({ userId })),
       };
     }

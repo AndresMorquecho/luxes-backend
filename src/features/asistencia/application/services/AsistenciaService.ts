@@ -106,7 +106,7 @@ export class AsistenciaService {
         let empsAuto: Array<{ id: string; nombre: string; tipoContrato: string }> = [];
         try {
           empsAuto = await prisma.empleado.findMany({
-            where: { autoAsistencia: true },
+            where: { autoAsistencia: true, archivedAt: null },
             select: { id: true, nombre: true, tipoContrato: true },
           });
         } catch {
@@ -314,12 +314,13 @@ export class AsistenciaService {
   }): Promise<Record<string, unknown>> {
     const empleado = await prisma.empleado.findUnique({
       where: { id: input.empleadoId },
-      select: { nombre: true, tipoContrato: true },
+      select: { nombre: true, tipoContrato: true, archivedAt: true },
     });
 
     if (!empleado) {
       throw new Error(`Empleado con ID '${input.empleadoId}' no encontrado en el sistema.`);
     }
+    if (empleado.archivedAt) throw new Error('El colaborador está dado de baja y no puede registrar asistencia');
 
     const tipoContrato = empleado.tipoContrato || 'Tiempo Completo';
 

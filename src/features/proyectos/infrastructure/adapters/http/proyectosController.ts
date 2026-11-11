@@ -1,3 +1,4 @@
+import { assertActiveEmployees } from '../../../../../shared/services/activeAssignments.js';
 import type { Request, Response } from 'express';
 import { prisma } from '../../../../../config/prismaClient.js';
 import path from 'path';
@@ -1114,6 +1115,11 @@ export class ProyectosController {
         instalacion = await prisma.proyectoInstalacion.create({
           data: { proyectoId: String(id) },
         });
+      }
+
+      if (Array.isArray(b.personalAsignado)) {
+        const previous = await prisma.proyectoInstalacionPersonal.findMany({ where: { instalacionId: instalacion.id }, select: { empleadoId: true } });
+        await assertActiveEmployees(b.personalAsignado.map((p: any) => String(p.empleadoId)), previous.map(p => p.empleadoId));
       }
 
       // Actualizar datos de instalación

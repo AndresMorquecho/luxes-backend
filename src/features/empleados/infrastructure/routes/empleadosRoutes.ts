@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import { authMiddleware } from '../../../auth/infrastructure/middleware/authMiddleware.js';
+import { requireRoles } from '../../../auth/infrastructure/middleware/roleMiddleware.js';
 import { EmpleadosController } from '../adapters/http/empleadosController.js';
 import {
   ensureEmpleadoUploadsDir,
@@ -81,7 +82,7 @@ export function createEmpleadosRoutes(controller: EmpleadosController): Router {
   router.get('/:id', authMiddleware, (req, res) => controller.getById(req, res));
   router.post('/', authMiddleware, (req, res) => controller.create(req, res));
   router.put('/:id', authMiddleware, (req, res) => controller.update(req, res));
-  router.delete('/:id', authMiddleware, (req, res) => controller.remove(req, res));
+  router.delete('/:id', authMiddleware, requireRoles(['admin', 'Administrador']), (req, res) => controller.remove(req, res));
 
   return router;
 }
